@@ -21,7 +21,8 @@
       "permissions": [
         "android.permission.CAMERA"
       ],
-      "package": "com.vanytas.beyondtime"
+      "package": "com.vanytas.beyondtime",
+      "usesCleartextTraffic": true
     },
     "plugins": [
       [

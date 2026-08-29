@@ -178,9 +178,6 @@ export default function FaceCaptureScreen() {
       const response = await fetch(`${API_URL}/api/verify`, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
       });
 
       if (!response.ok) {
