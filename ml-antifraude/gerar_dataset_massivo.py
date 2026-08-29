@@ -103,17 +103,31 @@ def generate_dataset():
             for pr in para:
                 data.append((f"{p} {b} {pr}?", "SONDAGEM_FINANCEIRA"))
 
-    # Remove duplicates and shuffle
+    # Remove duplicates
     unique_data = list(set(data))
-    random.shuffle(unique_data)
+    
+    # --- 11. INJEÇÃO DE OFUSCAÇÃO (Treinando a IA para o pior cenário) ---
+    ofuscated_data = []
+    for frase, label in unique_data:
+        # Pega ~30% das frases e injeta ofuscações pesadas para a IA aprender o padrão
+        if random.random() < 0.3:
+            frase_ofuscada = frase
+            # Injeta Leet Speak
+            frase_ofuscada = frase_ofuscada.replace('a', '4').replace('e', '3').replace('i', '1').replace('o', '0').replace('s', '5')
+            # Injeta pontuações (p.i.x)
+            frase_ofuscada = frase_ofuscada.replace('pix', 'p.i.x').replace('whatsapp', 'w-h-a-t-s').replace('dinheiro', 'd1nh3ir0')
+            ofuscated_data.append((frase_ofuscada, label))
+            
+    final_data = unique_data + ofuscated_data
+    random.shuffle(final_data)
     
     # Save to CSV
     with open('dataset.csv', 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['texto', 'label'])
-        writer.writerows(unique_data)
+        writer.writerows(final_data)
 
-    print(f"Dataset massivo gerado com {len(unique_data)} frases únicas!")
+    print(f"Dataset massivo gerado com {len(final_data)} frases (incluindo ofuscadas)!")
 
 if __name__ == "__main__":
     generate_dataset()

@@ -19,3 +19,4 @@ public class BeyondTimeApplication {
         return "BeyondTime API (Monolito Modular) está online e pronta!";
     }
 }
+

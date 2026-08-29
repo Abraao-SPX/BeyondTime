@@ -31,3 +31,4 @@ EXPOSE 8080
 
 # Comando que liga o servidor Spring Boot
 CMD ["java", "-jar", "app.jar"]
+

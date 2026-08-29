@@ -3,9 +3,23 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 import joblib
+import re
+
+def limpar_texto(texto):
+    t = str(texto).lower()
+    mapa_leet = {'0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '@': 'a'}
+    for k, v in mapa_leet.items():
+        t = t.replace(k, v)
+    t = re.sub(r'[.\-_\/\|*!]', '', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
 
 print("1. Carregando o dataset multiclasse...")
 df = pd.read_csv('dataset.csv')
+
+# Limpa todas as frases do dataset antes de treinar
+df['texto'] = df['texto'].apply(limpar_texto)
+
 X = df['texto']
 y = df['label']
 

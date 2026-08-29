@@ -18,3 +18,4 @@ EXPOSE 8000
 
 # O comando exato que liga o servidor da API (0.0.0.0 garante que aceite conexões externas ao container)
 CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+
