@@ -68,4 +68,29 @@ Você verá a IA respondendo:
 `{"texto_analisado":"Hoje eu fui ao banco resolver um problema do meu limite.","intencao":"NORMAL","certeza_percentual":39.2}`
 
 ---
-Pronto! Com isso você tem o núcleo de Machine Learning pronto, 100% isolado, documentado e testável via código, pronto para plugar no resto do projeto quando ele for criado!
+
+## 4. Como rodar a IA no Docker? (A Melhor Abordagem)
+
+Executar a inteligência no **Docker** é a forma mais profissional e recomendada, porque isola completamente o Python. O seu computador (ou o Java) nem precisa ter Python instalado! 
+
+### Passo A: Construir (Build) a Imagem
+Na pasta `ml-antifraude`, rode o seguinte comando no terminal. Ele vai ler o arquivo `Dockerfile`, baixar o Python e as dependências e empacotar tudo numa "caixa" fechada chamada `beyondtime-ia`:
+
+```bash
+docker build -t beyondtime-ia .
+```
+
+### Passo B: Ligar o Container
+Agora basta ligar essa "caixa", conectando a porta 8000 do container com a porta 8000 do seu computador:
+
+```bash
+docker run -d -p 8000:8000 --name anjo-da-guarda beyondtime-ia
+```
+
+Pronto! A IA está rodando de forma 100% isolada e silenciosa em background. Os testes do **Passo 3** funcionarão perfeitamente. 
+
+*(Quando quiser desligar, basta rodar `docker stop anjo-da-guarda`)*
+
+---
+Pronto! Com isso você tem o núcleo de Machine Learning pronto, 100% isolado, documentado, empacotado em Docker e testável via código, pronto para plugar no resto do projeto quando ele for criado!
+
