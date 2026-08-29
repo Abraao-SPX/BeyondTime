@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "BeyondTime",
+    "slug": "beyondtime",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "package": "com.vanytas.beyondtime"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26,
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34
+          }
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6f1e91f8-6be6-4b86-b9df-fd777e05d293"
+      }
+    }
+  }
+}
