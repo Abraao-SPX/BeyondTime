@@ -1,0 +1,87 @@
+texto,label
+"Bom dia, tudo bem com você?",NORMAL
+"Adorei sua foto do perfil!",NORMAL
+"Como foi o seu final de semana?",NORMAL
+"Você gosta de ouvir MPB?",NORMAL
+"Hoje finalmente aprendi a usar o Pix",NORMAL
+"Meu filho me ensinou a fazer pix.",NORMAL
+"Hoje fui ao banco resolver meu pix.",NORMAL
+"Comprei um presente pra minha neta hoje.",NORMAL
+"Vou viajar para a praia na semana que vem.",NORMAL
+"Estou lendo um livro muito bom.",NORMAL
+"você consegue me emprestar um dinheiro?",PEDIDO_DINHEIRO
+"preciso de uma ajuda financeira",PEDIDO_DINHEIRO
+"consegue fazer um pix para mim?",PEDIDO_DINHEIRO
+"pode me mandar um pix?",PEDIDO_DINHEIRO
+"você consegue me ajudar com esse pagamento?",PEDIDO_DINHEIRO
+"estou precisando de dinheiro urgentemente",PEDIDO_DINHEIRO
+"depois eu te devolvo",PEDIDO_DINHEIRO
+"amanhã eu te pago",PEDIDO_DINHEIRO
+"faz essa transferência para mim",PEDIDO_DINHEIRO
+"aconteceu uma emergência",EMERGENCIA_FINANCEIRA
+"estou no hospital",EMERGENCIA_FINANCEIRA
+"preciso fazer uma cirurgia",EMERGENCIA_FINANCEIRA
+"minha mãe está doente",EMERGENCIA_FINANCEIRA
+"meu filho está internado",EMERGENCIA_FINANCEIRA
+"sofri um acidente",EMERGENCIA_FINANCEIRA
+"perdi minha carteira",EMERGENCIA_FINANCEIRA
+"meu cartão foi bloqueado",EMERGENCIA_FINANCEIRA
+"não consigo acessar meu banco",EMERGENCIA_FINANCEIRA
+"preciso pagar o hospital hoje",EMERGENCIA_FINANCEIRA
+"nunca senti isso por ninguém",INTIMIDADE_ACELERADA
+"acho que encontrei o amor da minha vida",INTIMIDADE_ACELERADA
+"quero passar minha vida com você",INTIMIDADE_ACELERADA
+"confio totalmente em você",INTIMIDADE_ACELERADA
+"você é a única pessoa que tenho",INTIMIDADE_ACELERADA
+"quero me casar com você",INTIMIDADE_ACELERADA
+"somos almas gêmeas",INTIMIDADE_ACELERADA
+"não consigo parar de pensar em você",INTIMIDADE_ACELERADA
+"vamos conversar no whatsapp",MIGRACAO_PLATAFORMA
+"me passa seu whatsapp",MIGRACAO_PLATAFORMA
+"aqui é ruim para conversar",MIGRACAO_PLATAFORMA
+"vamos para o telegram",MIGRACAO_PLATAFORMA
+"me chama nesse número",MIGRACAO_PLATAFORMA
+"não gosto de conversar por aqui",MIGRACAO_PLATAFORMA
+"vamos continuar fora do aplicativo",MIGRACAO_PLATAFORMA
+"minha câmera não funciona",EVASAO_ENCONTRO
+"não consigo fazer chamada de vídeo",EVASAO_ENCONTRO
+"estou viajando",EVASAO_ENCONTRO
+"estou trabalhando no exterior",EVASAO_ENCONTRO
+"quando voltar nós nos encontramos",EVASAO_ENCONTRO
+"meu trabalho não permite videochamada",EVASAO_ENCONTRO
+"precisei cancelar nossa viagem",EVASAO_ENCONTRO
+"não consigo encontrar você agora",EVASAO_ENCONTRO
+"mandei um presente para você",ENCOMENDA_TAXA
+"enviei uma encomenda",ENCOMENDA_TAXA
+"a encomenda ficou presa na alfândega",ENCOMENDA_TAXA
+"precisa pagar uma taxa para liberar",ENCOMENDA_TAXA
+"mandei dinheiro dentro da caixa",ENCOMENDA_TAXA
+"precisa pagar a transportadora",ENCOMENDA_TAXA
+"minha mala ficou retida",ENCOMENDA_TAXA
+"preciso pagar uma taxa da receita",ENCOMENDA_TAXA
+"mandei joias para você",ENCOMENDA_TAXA
+"enviei um anel para você",ENCOMENDA_TAXA
+"eu posso te ensinar a investir",INVESTIMENTO_SUSPEITO
+"tenho uma oportunidade de investimento",INVESTIMENTO_SUSPEITO
+"o retorno é garantido",INVESTIMENTO_SUSPEITO
+"você pode ganhar muito dinheiro",INVESTIMENTO_SUSPEITO
+"invisto em criptomoedas",INVESTIMENTO_SUSPEITO
+"vou te mostrar uma plataforma",INVESTIMENTO_SUSPEITO
+"coloca só um valor pequeno primeiro",INVESTIMENTO_SUSPEITO
+"depois você consegue sacar",INVESTIMENTO_SUSPEITO
+"me passa sua senha",PEDIDO_CREDENCIAL
+"qual é a senha do banco?",PEDIDO_CREDENCIAL
+"me manda o código que chegou por sms",PEDIDO_CREDENCIAL
+"me passa o código de verificação",PEDIDO_CREDENCIAL
+"qual é o número do seu cartão?",PEDIDO_CREDENCIAL
+"me manda foto do cartão",PEDIDO_CREDENCIAL
+"qual é seu código de segurança?",PEDIDO_CREDENCIAL
+"me passa o token",PEDIDO_CREDENCIAL
+"qual banco você usa?",SONDAGEM_FINANCEIRA
+"você recebe aposentadoria?",SONDAGEM_FINANCEIRA
+"quanto você ganha?",SONDAGEM_FINANCEIRA
+"você tem dinheiro guardado?",SONDAGEM_FINANCEIRA
+"tem limite no cartão?",SONDAGEM_FINANCEIRA
+"você tem investimentos?",SONDAGEM_FINANCEIRA
+"quanto você recebe por mês?",SONDAGEM_FINANCEIRA
+"você tem pix?",SONDAGEM_FINANCEIRA
