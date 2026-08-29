@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. Inteligência Artificial Anti-Fraude
+  # ==========================================
+  anjo-da-guarda:
+    build:
+      context: ./ml-antifraude
+      dockerfile: Dockerfile
+    container_name: beyondtime-ia
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # ==========================================
+  # 2. Backend Principal (Java Spring Boot)
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: beyondtime-backend
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    # Isso diz ao Docker para subir a IA primeiro, pois o Java vai precisar dela
+    depends_on:
+      - anjo-da-guarda
