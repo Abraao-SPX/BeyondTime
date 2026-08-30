@@ -11,8 +11,8 @@ const MASK_HEIGHT = MASK_WIDTH * 1.35;
 const MASK_X = width / 2;
 const MASK_Y = height / 2.5;
 
-// IP do backend Docker na rede local
-const API_URL = 'http://192.168.1.44:8000';
+// URL HTTPS da API via túnel seguro (funciona no Wi-Fi, 4G e 5G)
+const API_URL = 'https://modern-cooks-grin.loca.lt';
 
 type VerifyResponse = {
   status: string;
@@ -178,6 +178,9 @@ export default function FaceCaptureScreen() {
       const response = await fetch(`${API_URL}/api/verify`, {
         method: 'POST',
         body: formData,
+        headers: {
+          'Bypass-Tunnel-Reminder': 'true',
+        },
       });
 
       if (!response.ok) {
