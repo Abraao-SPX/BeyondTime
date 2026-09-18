@@ -1,3 +1,58 @@
-
-# Pasta de estudos e documentação pessoal do desenvolvedor
+# ==========================================
+# 1. Estudos e Documentação Pessoal
+# ==========================================
 aprendizado/
+
+# ==========================================
+# 2. Node.js / React Native / Expo (Mobile)
+# ==========================================
+**/node_modules/
+**/.expo/
+**/dist/
+**/web-build/
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# ==========================================
+# 3. Python / Machine Learning (IA)
+# ==========================================
+**/__pycache__/
+*.py[cod]
+*$py.class
+**/venv/
+**/.venv/
+env/
+.pytest_cache/
+
+# ==========================================
+# 4. Java / Spring Boot (Backend)
+# ==========================================
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+.mvn/wrapper/maven-wrapper.jar
+
+# ==========================================
+# 5. IDEs, Editores e Sistema Operacional
+# ==========================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.log
+.env
+.env.local
+.env.*.local
