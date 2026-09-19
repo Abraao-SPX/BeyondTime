@@ -21,14 +21,14 @@
       "permissions": [
         "android.permission.CAMERA"
       ],
-      "package": "com.vanytas.beyondtime",
-      "usesCleartextTraffic": true
+      "package": "com.vanytas.beyondtime"
     },
     "plugins": [
       [
         "expo-build-properties",
         {
           "android": {
+            "usesCleartextTraffic": true,
             "minSdkVersion": 26,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34
