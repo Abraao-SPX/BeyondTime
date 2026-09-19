@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, Text, View, Dimensions, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, Dimensions, ActivityIndicator, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Svg, { Defs, Rect, Mask, Ellipse } from 'react-native-svg';
 
@@ -11,8 +11,14 @@ const MASK_HEIGHT = MASK_WIDTH * 1.35;
 const MASK_X = width / 2;
 const MASK_Y = height / 2.5;
 
-// URL da API de Reconhecimento Facial (VPS Oracle Cloud)
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://132.226.242.158:8000';
+// Servidores disponíveis
+export const PRESET_ENDPOINTS = [
+  { label: '🚀 Cloudflare HTTPS (Recomendado)', url: 'https://coated-meals-retained-ward.trycloudflare.com' },
+  { label: '🌐 VPS Oracle Porta 80', url: 'http://132.226.242.158' },
+  { label: '🔌 VPS Oracle Porta 8000', url: 'http://132.226.242.158:8000' },
+];
+
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || PRESET_ENDPOINTS[0].url;
 
 type VerifyResponse = {
   status: string;
@@ -37,6 +43,12 @@ const CHALLENGES = [
 export default function FaceCaptureScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+
+  // Endpoint do servidor e modal de configurações
+  const [serverUrl, setServerUrl] = useState<string>(DEFAULT_API_URL);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testingEndpoint, setTestingEndpoint] = useState<boolean>(false);
 
   // Estados do fluxo
   const [stage, setStage] = useState<'step1_intro' | 'step1_counting' | 'step2_intro' | 'step2_active' | 'analyzing' | 'result'>('step1_intro');
@@ -158,6 +170,8 @@ export default function FaceCaptureScreen() {
     setStage('analyzing');
     setErrorMessage(null);
 
+    const targetUrl = serverUrl.trim().replace(/\/$/, '');
+
     try {
       const formData = new FormData();
 
@@ -175,7 +189,7 @@ export default function FaceCaptureScreen() {
 
       formData.append('same_person_expected', 'true');
 
-      const response = await fetch(`${API_URL}/api/verify`, {
+      const response = await fetch(`${targetUrl}/api/verify`, {
         method: 'POST',
         body: formData,
         headers: {
@@ -184,7 +198,7 @@ export default function FaceCaptureScreen() {
       });
 
       if (!response.ok) {
-        throw new Error(`Servidor respondeu com código ${response.status}`);
+        throw new Error(`Servidor respondeu com código HTTP ${response.status}`);
       }
 
       const data: VerifyResponse = await response.json();
@@ -192,8 +206,38 @@ export default function FaceCaptureScreen() {
       setStage('result');
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || 'Falha de comunicação com o servidor de IA.');
+      setErrorMessage(
+        `${err.message || 'Falha de comunicação com o servidor de IA.'}\n(Servidor: ${targetUrl})\n\n💡 Dica: Toque no ícone ⚙️ no topo para alternar entre Cloudflare HTTPS e IP da VPS.`
+      );
       setStage('result');
+    }
+  };
+
+  const testServerConnection = async (targetUrl?: string) => {
+    const url = (targetUrl || serverUrl).trim().replace(/\/$/, '');
+    setTestingEndpoint(true);
+    setTestResult('Testando conexão com ' + url + '...');
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${url}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Bypass-Tunnel-Reminder': 'true',
+        },
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        setTestResult(`🟢 Conectado com Sucesso!\n(HTTP ${res.status}: ${JSON.stringify(data)})`);
+      } else {
+        setTestResult(`🔴 Servidor respondeu com código HTTP ${res.status}`);
+      }
+    } catch (err: any) {
+      setTestResult(`🔴 Falha: ${err.message || 'Sem resposta (timeout ou bloqueio de rede)'}`);
+    } finally {
+      setTestingEndpoint(false);
     }
   };
 
@@ -390,6 +434,90 @@ export default function FaceCaptureScreen() {
           </View>
         )}
       </View>
+
+      {/* Botão Flutuante de Configurações do Servidor */}
+      <TouchableOpacity
+        style={styles.settingsBtnFloating}
+        onPress={() => {
+          setTestResult(null);
+          setShowSettings(true);
+        }}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.settingsBtnText}>⚙️</Text>
+      </TouchableOpacity>
+
+      {/* Modal de Configuração do Servidor */}
+      <Modal
+        visible={showSettings}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowSettings(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>⚙️ Configurar Servidor da IA</Text>
+            <Text style={styles.modalSubtitle}>
+              Selecione o endpoint ou digite a URL da VPS:
+            </Text>
+
+            <TextInput
+              style={styles.inputUrl}
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              placeholder="https://..."
+              placeholderTextColor="#777"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <Text style={styles.presetHeading}>Opções Rápidas:</Text>
+            {PRESET_ENDPOINTS.map((preset, idx) => {
+              const isSelected = serverUrl === preset.url;
+              return (
+                <TouchableOpacity
+                  key={idx}
+                  style={[styles.presetCard, isSelected && styles.presetCardActive]}
+                  onPress={() => {
+                    setServerUrl(preset.url);
+                    testServerConnection(preset.url);
+                  }}
+                >
+                  <Text style={[styles.presetName, isSelected && styles.presetNameActive]}>
+                    {preset.label}
+                  </Text>
+                  <Text style={styles.presetAddress}>{preset.url}</Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              style={styles.testConnectionBtn}
+              onPress={() => testServerConnection()}
+              disabled={testingEndpoint}
+            >
+              {testingEndpoint ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.testConnectionText}>🧪 Testar Conexão Agora</Text>
+              )}
+            </TouchableOpacity>
+
+            {testResult && (
+              <View style={styles.testResultCard}>
+                <Text style={styles.testResultFeedback}>{testResult}</Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.closeModalBtn}
+              onPress={() => setShowSettings(false)}
+            >
+              <Text style={styles.closeModalText}>Salvar e Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -557,6 +685,132 @@ const styles = StyleSheet.create({
   btnRestartText: {
     color: '#fff',
     fontSize: 15,
+    fontWeight: 'bold',
+  },
+  settingsBtnFloating: {
+    position: 'absolute',
+    top: height * 0.05,
+    right: 20,
+    backgroundColor: 'rgba(20,20,20,0.85)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    zIndex: 9999,
+  },
+  settingsBtnText: {
+    fontSize: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#1C1C1E',
+    width: '100%',
+    maxHeight: '90%',
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1.5,
+    borderColor: '#333',
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    color: '#AAA',
+    fontSize: 13,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  inputUrl: {
+    backgroundColor: '#2C2C2E',
+    color: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#444',
+    marginBottom: 16,
+  },
+  presetHeading: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  presetCard: {
+    backgroundColor: '#262628',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#38383A',
+  },
+  presetCardActive: {
+    borderColor: '#00E676',
+    backgroundColor: 'rgba(0, 230, 118, 0.1)',
+  },
+  presetName: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  presetNameActive: {
+    color: '#00E676',
+  },
+  presetAddress: {
+    color: '#888',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  testConnectionBtn: {
+    backgroundColor: '#1E88E5',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  testConnectionText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  testResultCard: {
+    backgroundColor: '#111',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  testResultFeedback: {
+    color: '#FFF',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  closeModalBtn: {
+    backgroundColor: '#333',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  closeModalText: {
+    color: '#FFF',
+    fontSize: 14,
     fontWeight: 'bold',
   },
 });
