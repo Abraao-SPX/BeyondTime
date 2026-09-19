@@ -1,6 +1,22 @@
 services:
   # ==========================================
-  # 1. Inteligência Artificial Anti-Fraude
+  # 1. Reconhecimento Facial & Liveness (IA)
+  # ==========================================
+  face-api:
+    build:
+      context: ./face-api
+      dockerfile: Dockerfile
+    container_name: beyondtime-face-api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - FACE_MATCH_THRESHOLD=0.60
+      - LIVENESS_THRESHOLD=0.80
+      - SAVE_TEST_IMAGES=false
+
+  # ==========================================
+  # 2. Inteligência Artificial Anti-Fraude (NLP)
   # ==========================================
   anjo-da-guarda:
     build:
@@ -8,11 +24,11 @@ services:
       dockerfile: Dockerfile
     container_name: beyondtime-ia
     ports:
-      - "8000:8000"
+      - "8001:8000"
     restart: unless-stopped
 
   # ==========================================
-  # 2. Backend Principal (Java Spring Boot)
+  # 3. Backend Principal (Java Spring Boot)
   # ==========================================
   backend:
     build:
@@ -22,7 +38,6 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
-    # Isso diz ao Docker para subir a IA primeiro, pois o Java vai precisar dela
     depends_on:
       - anjo-da-guarda
-
+      - face-api

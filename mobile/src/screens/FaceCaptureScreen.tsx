@@ -11,8 +11,8 @@ const MASK_HEIGHT = MASK_WIDTH * 1.35;
 const MASK_X = width / 2;
 const MASK_Y = height / 2.5;
 
-// URL HTTPS da API via túnel seguro (funciona no Wi-Fi, 4G e 5G)
-const API_URL = 'https://modern-cooks-grin.loca.lt';
+// URL da API de Reconhecimento Facial (VPS Oracle Cloud)
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://132.226.242.158:8000';
 
 type VerifyResponse = {
   status: string;
