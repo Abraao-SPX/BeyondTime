@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  liveness-api:
+    build: .
+    container_name: liveness_verification_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
