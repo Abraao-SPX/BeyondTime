@@ -180,7 +180,7 @@ export default function App() {
     const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     setLoadingUsers(true);
     try {
-      const res = await axios.get(`${cleanUrl}/users`, { timeout: 6000 });
+      const res = await axios.get(`${cleanUrl}/users`, { timeout: 10000 });
       if (res.data?.users) {
         setRegisteredUsers(res.data.users);
       }
@@ -221,7 +221,7 @@ export default function App() {
     const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
       const res = await axios.get(`${cleanUrl}/health`, {
-        timeout: 8000,
+        timeout: 12000,
         headers: { 'Bypass-Tunnel-Reminder': 'true' },
       });
       if (res.data?.status === 'ok') {
@@ -269,9 +269,9 @@ export default function App() {
       setStatusMessage('Sincronizando com o servidor...');
       speakInstruction('Aproxime o celular do rosto e olhe para a tela.', voiceAssistance);
 
-      // 1. Obtém desafio dinâmico da API com retry automático
+      // 1. Obtém desafio dinâmico da API com retry automático e timeout tolerante (12s)
       const res = await executeWithRetry(
-        () => axios.get(`${cleanUrl}/challenge`, { timeout: 5000 }),
+        () => axios.get(`${cleanUrl}/challenge`, { timeout: 12000 }),
         3,
         1000,
         (att, tot) => setStatusMessage(`Reconectando ao servidor (${att}/${tot})...`)
