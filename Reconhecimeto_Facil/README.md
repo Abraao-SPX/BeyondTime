@@ -146,7 +146,7 @@ A comparação facial usa o modelo **SFace** com distância de cosseno:
 ## 📡 Documentação dos Endpoints REST
 
 ### 1. `GET /health`
-Verifica a saúde do serviço e o modelo em execução.
+Verifica a saúde do serviço, modelos carregados e versão em execução.
 ```bash
 curl -X GET http://localhost:8000/health
 ```
@@ -155,15 +155,18 @@ curl -X GET http://localhost:8000/health
 {
   "status": "ok",
   "service": "Reconhecimento Fácil - Biometrics API",
-  "model": "YuNet-SFace",
-  "version": "1.1.0"
+  "model": "YuNet-SFace + MiniFASNet-V2",
+  "anti_spoofing": "MiniFASNetV2",
+  "yunet": true,
+  "sface": true,
+  "version": "1.3.0"
 }
 ```
 
 ---
 
 ### 2. `GET /challenge`
-Gera a ordem aleatória das cores e o token de sessão para a Prova de Vida.
+Gera a ordem aleatória das cores e o token de sessão para a Prova de Vida. O `session_token` deve ser reenviado em `/verify` ou `/register` para binding criptográfico do desafio (TTL: 2 minutos, uso único).
 ```bash
 curl -X GET http://localhost:8000/challenge
 ```
@@ -172,27 +175,59 @@ curl -X GET http://localhost:8000/challenge
 {
   "session_token": "a8B9kL2xQp0vZt1R",
   "colors": ["VERMELHO", "VERDE", "AZUL"],
-  "flash_duration_ms": 750
+  "flash_duration_ms": 500
 }
 ```
 
 ---
 
-### 3. `POST /verify`
-Valida o vídeo da prova de vida e compara biometricamente contra a foto de cadastro.
+### 3. `POST /register`
+Cadastra a biometria facial de um novo usuário diretamente ao vivo via vídeo gravado da câmera, sem necessidade de foto da galeria.
 
 **Parâmetros (Multipart/form-data):**
-* `video`: Arquivo de vídeo gravado durante o flash (`.mp4`).
-* `profile_photo`: Foto de perfil / documento de referência (`.jpg` ou `.png`).
-* `expected_colors`: String com as cores do desafio separadas por vírgula (ex: `"VERMELHO,VERDE,AZUL"`).
-* `user_id`: Identificador único do usuário no seu sistema.
+* `video` *(obrigatório)*: Arquivo de vídeo gravado durante o flash (`.mp4`).
+* `name` *(obrigatório)*: Nome completo do usuário.
+* `expected_colors` *(opcional)*: Cores do desafio para validação de prova de vida.
+* `session_token` *(opcional)*: Token retornado por `/challenge` para binding do desafio.
+* `user_id` *(opcional)*: ID customizado; se omitido, é gerado automaticamente.
+
+```bash
+curl -X POST http://localhost:8000/register \
+  -F "video=@register_video.mp4" \
+  -F "name=Abraão da Silva" \
+  -F "expected_colors=VERMELHO,VERDE,AZUL" \
+  -F "session_token=a8B9kL2xQp0vZt1R"
+```
+
+**Resposta de Sucesso:**
+```json
+{
+  "success": true,
+  "user_id": "user_1695000000_abc123",
+  "name": "Abraão da Silva",
+  "photo_url": "/faces/user_1695000000_abc123_anchor.jpg",
+  "samples_count": 1,
+  "message": "Biometria facial de Abraão da Silva cadastrada com sucesso!"
+}
+```
+
+---
+
+### 4. `POST /verify`
+Verificação biométrica ao vivo contra o banco de dados (1:N ou 1:1) ou foto de perfil enviada.
+
+**Parâmetros (Multipart/form-data):**
+* `video` *(obrigatório)*: Arquivo de vídeo gravado durante o flash (`.mp4`).
+* `expected_colors` *(obrigatório)*: Cores do desafio separadas por vírgula.
+* `session_token` *(opcional)*: Token de `/challenge` para binding criptográfico.
+* `profile_photo` *(opcional)*: Foto de referência (modo legado; dispensável se o banco já possui usuários).
+* `user_id` *(opcional)*: Para comparação 1:1 contra um usuário específico.
 
 ```bash
 curl -X POST http://localhost:8000/verify \
   -F "video=@challenge_video.mp4" \
-  -F "profile_photo=@minha_foto.jpg" \
   -F "expected_colors=VERMELHO,VERDE,AZUL" \
-  -F "user_id=usuario_123"
+  -F "session_token=a8B9kL2xQp0vZt1R"
 ```
 
 **Resposta de Sucesso:**
@@ -202,17 +237,62 @@ curl -X POST http://localhost:8000/verify \
   "is_live": true,
   "distance": 0.2707,
   "threshold": 0.35,
+  "samples_count": 3,
+  "adaptive_updated": true,
   "jwt_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "status": "Identidade confirmada com sucesso!"
+  "matched_user": {"id": "user_123", "name": "Abraão", "samples_count": 3},
+  "status": "Olá Abraão! Login biométrico aprovado!"
 }
 ```
 
 ---
 
-### 4. `GET /verify/token/validate`
+### 5. `GET /verify/token/validate`
 Permite ao seu backend principal validar se o Token JWT emitido é autêntico e não foi forjado.
 ```bash
 curl -X GET "http://localhost:8000/verify/token/validate?token=eyJhbGciOi..."
+```
+
+---
+
+### 6. `GET /users`
+Lista todos os usuários cadastrados com contagem de amostras biométricas aprendidas.
+```bash
+curl -X GET http://localhost:8000/users
+```
+
+---
+
+### 7. `GET /users/{user_id}/history`
+Retorna o histórico de amostras biométricas aprendidas nos logins de um usuário específico.
+```bash
+curl -X GET http://localhost:8000/users/user_123/history
+```
+
+---
+
+### 8. `DELETE /users/{user_id}`
+Remove um usuário, suas fotos biométricas e todo o histórico de amostras.
+```bash
+curl -X DELETE http://localhost:8000/users/user_123
+```
+
+---
+
+### 9. `POST /detect_face`
+Inferência rápida (<30ms) que verifica se há um rosto humano enquadrado e centralizado na câmera. Usado pelo app mobile para pré-enquadramento antes da gravação.
+```bash
+curl -X POST http://localhost:8000/detect_face \
+  -H "Content-Type: application/json" \
+  -d '{"image_base64": "base64_encoded_image..."}'
+```
+
+---
+
+### 10. `GET /audit/logs`
+Retorna os registros de auditoria antifraude (agora persistidos em SQLite).
+```bash
+curl -X GET "http://localhost:8000/audit/logs?limit=50"
 ```
 
 ---
@@ -256,20 +336,24 @@ Future<void> verificarBiometria(String videoPath, String fotoPath, String cores,
 O repositório já inclui suítes completas de testes unitários e de estresse dentro de `backend/`:
 
 ```bash
-# Executa suíte de visão computacional e anti-spoofing
-python3 test_liveness.py
+# Executa todas as suítes com pytest (recomendado)
+cd backend && pytest -v
 
-# Executa suíte de estresse, criptografia JWT e rate limiting
-python3 test_stress.py
+# Ou individualmente:
+python3 test_liveness.py        # Visão computacional e anti-spoofing
+python3 test_stress.py          # Estresse, criptografia JWT e rate limiting
+python3 test_adaptive_learning.py  # Biometria adaptativa com aprendizado contínuo
 ```
 
 Resultados cobertos:
 * ✅ Rejeição imediata de vídeos sem rosto.
 * ✅ Seleção Laplaciana de nitidez sob desfoque severo.
 * ✅ Aprovação de reflexo espectral real e bloqueio de spoofing cinza/estático.
+* ✅ MiniFASNet V2 bloqueio de telas de PC e fotos impressas.
 * ✅ Assinatura digital HMAC-SHA256 e bloqueio de tokens adulterados com HTTP 401.
-* ✅ Rate Limiting protegendo contra força bruta com HTTP 429 após 5 requisições rápidas.
+* ✅ Rate Limiting com limpeza automática de IPs (HTTP 429 após 5 requisições rápidas).
 * ✅ Tolerância a formatos PNG, WEBP, JPG e arquivos corrompidos.
+* ✅ Cadastro sem comparação prévia e aprendizado adaptativo contínuo.
 
 ---
 

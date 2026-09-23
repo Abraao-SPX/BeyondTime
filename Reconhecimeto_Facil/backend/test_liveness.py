@@ -52,7 +52,7 @@ def gerar_video_sintetico_com_cores(caminho_arquivo: str, cores: list[str], simu
 
     out.release()
 
-def testar_rejeicao_sem_rosto():
+def test_rejeicao_sem_rosto():
     print("\n🧪 [1/3] Testando rejeição imediata quando nenhum rosto é detectado...")
     temp_dir = tempfile.mkdtemp()
     video_sem_rosto = os.path.join(temp_dir, "sem_rosto.mp4")
@@ -70,7 +70,7 @@ def testar_rejeicao_sem_rosto():
             os.remove(video_sem_rosto)
         os.rmdir(temp_dir)
 
-def testar_selecao_melhor_frame_laplaciano():
+def test_selecao_melhor_frame_laplaciano():
     print("\n🧪 [2/3] Testando seleção inteligente do melhor frame com filtro Laplaciano...")
     temp_dir = tempfile.mkdtemp()
     video_path = os.path.join(temp_dir, "teste_nitidez.mp4")
@@ -109,7 +109,7 @@ def testar_selecao_melhor_frame_laplaciano():
             os.remove(video_path)
         os.rmdir(temp_dir)
 
-def testar_algoritmo_delta_rgb():
+def test_algoritmo_delta_rgb():
     print("\n🧪 [3/3] Testando algoritmo Delta RGB com ROI dinâmica...")
     temp_dir = tempfile.mkdtemp()
     video_valido = os.path.join(temp_dir, "teste_valido.mp4")
@@ -135,7 +135,7 @@ def testar_algoritmo_delta_rgb():
                 os.remove(f)
         os.rmdir(temp_dir)
 
-def testar_minifasnet_bloqueio_tela_e_foto():
+def test_minifasnet_bloqueio_tela_e_foto():
     print("\n🧪 [4/4] Testando MiniFASNet V2 contra foto impressa e tela de monitor...")
     from main import avaliar_liveness_minifasnet, net_minifasnet
     if net_minifasnet is None:
@@ -167,10 +167,10 @@ def testar_minifasnet_bloqueio_tela_e_foto():
                 print("  -> Autenticação de pessoa humana real pelo MiniFASNet: PASSOU ✅")
 
 if __name__ == "__main__":
-    testar_rejeicao_sem_rosto()
-    testar_selecao_melhor_frame_laplaciano()
-    testar_algoritmo_delta_rgb()
-    testar_minifasnet_bloqueio_tela_e_foto()
+    test_rejeicao_sem_rosto()
+    test_selecao_melhor_frame_laplaciano()
+    test_algoritmo_delta_rgb()
+    test_minifasnet_bloqueio_tela_e_foto()
     print("\n🎉 Todos os testes unitários foram concluídos com 100% de sucesso!")
 
 

@@ -17,16 +17,19 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+APP_VERSION = "1.3.0"
+
 app = FastAPI(
     title="Reconhecimento Fácil - Microsserviço de Biometria & Prova de Vida",
     description="Microsserviço independente anti-spoofing com flash espectral de cores, YuNet, SFace, JWT e Rate Limiting",
-    version="1.2.0"
+    version=APP_VERSION
 )
 
 # Habilita CORS para permitir chamadas diretas do React Native no celular
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,10 +43,17 @@ CORES_DISPONIVEIS = ["VERMELHO", "AZUL", "VERDE"]
 VERIFY_ATTEMPTS: dict[str, list[float]] = {}
 MAX_ATTEMPTS_PER_MINUTE = 5
 RATE_LIMIT_WINDOW_SECONDS = 60
+PENDING_CHALLENGES: dict[str, tuple[list[str], float]] = {}  # token -> (colors, created_timestamp)
+CHALLENGE_TTL_SECONDS = 120  # Desafios expiram em 2 minutos
 
 def aplicar_rate_limit(client_ip: str):
     """Bloqueia tentativas consecutivas automatizadas por força bruta."""
     now = time.time()
+    # Limpeza periódica de IPs obsoletos (a cada chamada, custo amortizado O(1))
+    if len(VERIFY_ATTEMPTS) > 1000:
+        stale_ips = [ip for ip, ts in VERIFY_ATTEMPTS.items() if not ts or now - ts[-1] > RATE_LIMIT_WINDOW_SECONDS]
+        for ip in stale_ips:
+            VERIFY_ATTEMPTS.pop(ip, None)
     timestamps = VERIFY_ATTEMPTS.get(client_ip, [])
     # Filtra apenas tentativas dentro da janela recente
     timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW_SECONDS]
@@ -58,7 +68,15 @@ def aplicar_rate_limit(client_ip: str):
 # ==============================================================================
 # SEGURANÇA: EMISSÃO DE TOKEN JWT ASSINADO (HS256)
 # ==============================================================================
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "reconhecimento_facil_secret_key_2026")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not JWT_SECRET_KEY:
+    import warnings
+    warnings.warn(
+        "SEGURANÇA: JWT_SECRET_KEY não definida! Usando chave efêmera. "
+        "Defina a variável de ambiente JWT_SECRET_KEY em produção.",
+        stacklevel=1
+    )
+    JWT_SECRET_KEY = base64.urlsafe_b64encode(os.urandom(32)).decode()
 
 def base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode('utf-8').rstrip('=')
@@ -126,6 +144,27 @@ def registrar_auditoria(entry: dict):
     AUDIT_LOGS.append(entry)
     if len(AUDIT_LOGS) > MAX_AUDIT_LOGS:
         AUDIT_LOGS.pop(0)
+    # Persistência em SQLite para sobreviver a reinícios
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO audit_logs (timestamp, client_ip, user_id, action, verified, is_live, reason, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            entry.get("timestamp"),
+            entry.get("client_ip"),
+            entry.get("user_id"),
+            entry.get("action"),
+            str(entry.get("verified", "")),
+            str(entry.get("is_live", "")),
+            entry.get("reason", entry.get("fraud_detected", "")),
+            json.dumps({k: v for k, v in entry.items() if k not in ("timestamp", "client_ip", "user_id", "action", "verified", "is_live", "reason")})
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"WARN: Falha ao persistir log de auditoria no SQLite: {e}")
 
 @app.get("/")
 def root():
@@ -149,7 +188,7 @@ def health_check():
         "anti_spoofing": "MiniFASNetV2" if minifasnet_ok else "disabled",
         "yunet": yunet_ok,
         "sface": sface_ok,
-        "version": "1.3.0"
+        "version": APP_VERSION
     }
 
 @app.get("/challenge")
@@ -160,10 +199,16 @@ def get_challenge():
     """
     cores_sorteadas = random.sample(CORES_DISPONIVEIS, 3)
     token = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    # Limpa desafios expirados
+    now = time.time()
+    expired = [t for t, (_, ts) in PENDING_CHALLENGES.items() if now - ts > CHALLENGE_TTL_SECONDS]
+    for t in expired:
+        del PENDING_CHALLENGES[t]
+    PENDING_CHALLENGES[token] = (cores_sorteadas, now)
     return {
         "session_token": token,
         "colors": cores_sorteadas,
-        "flash_duration_ms": 750
+        "flash_duration_ms": 500
     }
 
 @app.get("/verify/token/validate")
@@ -240,6 +285,21 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            client_ip TEXT,
+            user_id TEXT,
+            action TEXT,
+            verified TEXT,
+            is_live TEXT,
+            reason TEXT,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.commit()
     conn.close()
 
@@ -1021,7 +1081,8 @@ async def register_biometrics(
     video: UploadFile = File(...),
     name: str = Form(...),
     user_id: Optional[str] = Form(None),
-    expected_colors: Optional[str] = Form(None)
+    expected_colors: Optional[str] = Form(None),
+    session_token: Optional[str] = Form(None)
 ):
     """
     Cadastra a biometria facial de um novo usuário DIRETAMENTE AO VIVO via vídeo gravado da câmera.
@@ -1039,6 +1100,31 @@ async def register_biometrics(
 
     uid = user_id.strip() if user_id and user_id.strip() else f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
 
+    # Validação do session_token e cores para prova de vida
+    cores = None
+    if session_token and session_token.strip():
+        challenge_data = PENDING_CHALLENGES.pop(session_token.strip(), None)
+        if challenge_data is None:
+            return {
+                "success": False,
+                "verified": False,
+                "is_live": False,
+                "reason": "Token de sessão inválido ou expirado. Solicite um novo desafio.",
+                "status": "Token de sessão inválido."
+            }
+        challenge_colors, challenge_ts = challenge_data
+        if time.time() - challenge_ts > CHALLENGE_TTL_SECONDS:
+            return {
+                "success": False,
+                "verified": False,
+                "is_live": False,
+                "reason": "Desafio expirado. Solicite um novo desafio.",
+                "status": "Desafio expirado."
+            }
+        cores = challenge_colors  # Usa as cores oficiais vinculadas ao challenge
+    elif expected_colors and expected_colors.strip():
+        cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
+
     temp_dir = tempfile.mkdtemp()
     video_path = os.path.join(temp_dir, "register_video.mp4")
 
@@ -1047,8 +1133,7 @@ async def register_biometrics(
             shutil.copyfileobj(video.file, f)
 
         face_roi = None
-        if expected_colors and expected_colors.strip():
-            cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
+        if cores:
             is_live, liveness_msg, face_roi = validar_reflexo_delta_rgb(video_path, cores)
             if not is_live:
                 return {
@@ -1162,6 +1247,9 @@ def get_face_photo(filename: str):
     """Serve a foto facial salva no banco de dados biométrico."""
     safe_name = os.path.basename(filename)
     file_path = os.path.join(STORAGE_FACES_DIR, safe_name)
+    resolved = os.path.realpath(file_path)
+    if not resolved.startswith(os.path.realpath(STORAGE_FACES_DIR)):
+        raise HTTPException(status_code=403, detail="Acesso negado.")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Foto biométrica não encontrada.")
     return FileResponse(file_path, media_type="image/jpeg")
@@ -1195,7 +1283,8 @@ async def verify_identity(
     video: UploadFile = File(...),
     expected_colors: str = Form(...), # Ex: "VERMELHO,AZUL,VERDE"
     profile_photo: Optional[UploadFile] = File(None),
-    user_id: Optional[str] = Form(None)
+    user_id: Optional[str] = Form(None),
+    session_token: Optional[str] = Form(None)
 ):
     """
     Verificação biométrica ao vivo contra o banco de dados (1:N ou 1:1) ou foto de perfil.
@@ -1205,6 +1294,26 @@ async def verify_identity(
     aplicar_rate_limit(client_ip)
 
     cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
+    # Validação do session_token (se fornecido)
+    if session_token and session_token.strip():
+        challenge_data = PENDING_CHALLENGES.pop(session_token.strip(), None)
+        if challenge_data is None:
+            return {
+                "verified": False,
+                "is_live": False,
+                "reason": "Token de sessão inválido ou expirado. Solicite um novo desafio.",
+                "status": "Token de sessão inválido."
+            }
+        challenge_colors, challenge_ts = challenge_data
+        if time.time() - challenge_ts > CHALLENGE_TTL_SECONDS:
+            return {
+                "verified": False,
+                "is_live": False,
+                "reason": "Desafio expirado. Solicite um novo desafio.",
+                "status": "Desafio expirado."
+            }
+        cores = challenge_colors  # Usa as cores oficiais do challenge
+
     temp_dir = tempfile.mkdtemp()
 
     video_path = os.path.join(temp_dir, "challenge_video.mp4")

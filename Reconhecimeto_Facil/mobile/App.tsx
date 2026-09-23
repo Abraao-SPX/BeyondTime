@@ -13,7 +13,7 @@ import {
   ScrollView,
   Switch,
 } from 'react-native';
-import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Brightness from 'expo-brightness';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
@@ -137,7 +137,6 @@ export default function App() {
   const [screenState, setScreenState] = useState<ScreenState>('START');
   const [actionMode, setActionMode] = useState<ActionMode>('VERIFY');
   const [permission, requestPermission] = useCameraPermissions();
-  const [micPermission, requestMicPermission] = useMicrophonePermissions();
 
   const [registerName, setRegisterName] = useState('');
   const [backgroundColor, setBackgroundColor] = useState('#000000');
@@ -163,7 +162,7 @@ export default function App() {
   const [isSequenceRunning, setIsSequenceRunning] = useState<boolean>(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [faceAligned, setFaceAligned] = useState<boolean>(false);
-  const [isProbingFace, setIsProbingFace] = useState<boolean>(false);
+  const isProbingFaceRef = useRef<boolean>(false);
 
   const cameraRef = useRef<CameraView>(null);
 
@@ -172,10 +171,7 @@ export default function App() {
     if (!permission?.granted) {
       requestPermission();
     }
-    if (!micPermission?.granted) {
-      requestMicPermission();
-    }
-  }, [permission, micPermission]);
+  }, [permission]);
 
   // Carrega lista de usuários da VPS ao iniciar
   useEffect(() => {
@@ -282,7 +278,7 @@ export default function App() {
         1000,
         (att, tot) => setStatusMessage(`Reconectando ao servidor (${att}/${tot})...`)
       );
-      const { colors, flash_duration_ms } = res.data;
+      const { colors, flash_duration_ms, session_token } = res.data;
 
       // 2. Eleva brilho da tela ao máximo para reflexo na pele
       const { status } = await Brightness.requestPermissionsAsync();
@@ -296,7 +292,7 @@ export default function App() {
       triggerHapticFeedback('impact');
 
       // 3. Inicia gravação de vídeo pela câmera frontal
-      const recordPromise = cameraRef.current?.recordAsync({ maxDuration: 4 });
+      const recordPromise = cameraRef.current?.recordAsync({ maxDuration: 3 });
 
       // Frame inicial neutro escuro (300ms)
       setBackgroundColor('#000000');
@@ -306,7 +302,7 @@ export default function App() {
       for (const color of colors) {
         setBackgroundColor(COLOR_MAP[color] || '#FFFFFF');
         triggerHapticFeedback('impact');
-        await new Promise((r) => setTimeout(r, flash_duration_ms ? Math.min(flash_duration_ms, 500) : 500));
+        await new Promise((r) => setTimeout(r, flash_duration_ms || 500));
       }
 
       // 5. Finaliza gravação e restaura brilho
@@ -329,11 +325,11 @@ export default function App() {
       if (actionMode === 'REGISTER') {
         setStatusMessage('Cadastrando biometria facial na nuvem (YuNet + SFace)...');
         speakInstruction('Salvando seus traços biométricos no servidor. Aguarde um instante.', voiceAssistance);
-        await sendRegistration(videoData.uri, registerName, colors);
+        await sendRegistration(videoData.uri, registerName, colors, session_token);
       } else {
         setStatusMessage('Reconhecendo traços faciais na nuvem (YuNet + SFace)...');
         speakInstruction('Analisando sua biometria facial. Só um momento.', voiceAssistance);
-        await sendVerification(videoData.uri, colors);
+        await sendVerification(videoData.uri, colors, session_token);
       }
       setIsSequenceRunning(false);
       setCountdown(null);
@@ -392,9 +388,9 @@ export default function App() {
     }
     let isCancelled = false;
     const probeTimer = setInterval(async () => {
-      if (isCancelled || isProbingFace || !cameraRef.current) return;
+      if (isCancelled || isProbingFaceRef.current || !cameraRef.current) return;
       try {
-        setIsProbingFace(true);
+        isProbingFaceRef.current = true;
         const photo = await (cameraRef.current as any).takePictureAsync?.({
           quality: 0.15,
           skipProcessing: true,
@@ -419,7 +415,7 @@ export default function App() {
       } catch {
         // Fallback gracioso: o botão manual ESTOU PRONTO continua ativo e utilizável
       } finally {
-        if (!isCancelled) setIsProbingFace(false);
+        if (!isCancelled) isProbingFaceRef.current = false;
       }
     }, 1200);
 
@@ -427,25 +423,29 @@ export default function App() {
       isCancelled = true;
       clearInterval(probeTimer);
     };
-  }, [screenState, isSequenceRunning, countdown, isProbingFace, apiUrl]);
+  }, [screenState, isSequenceRunning, countdown, apiUrl]);
 
   // Envia vídeo para /register (Cadastro ao vivo)
-  const sendRegistration = async (videoUri: string, userName: string, colors: string[]) => {
+  const sendRegistration = async (videoUri: string, userName: string, colors: string[], sessionToken?: string) => {
     const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
-      const formData = new FormData();
-      formData.append('name', userName.trim());
-      formData.append('expected_colors', colors.join(','));
-      formData.append('video', {
-        uri: videoUri,
-        name: 'register_video.mp4',
-        type: 'video/mp4',
-      } as any);
-
       setStatusMessage('Enviando vídeo para o servidor...');
 
       const data = await executeWithRetry(
-        () => postMultipartWithFetch(`${cleanUrl}/register`, formData, 90000),
+        () => {
+          const fd = new FormData();
+          fd.append('name', userName.trim());
+          fd.append('expected_colors', colors.join(','));
+          if (sessionToken) {
+            fd.append('session_token', sessionToken);
+          }
+          fd.append('video', {
+            uri: videoUri,
+            name: 'register_video.mp4',
+            type: 'video/mp4',
+          } as any);
+          return postMultipartWithFetch(`${cleanUrl}/register`, fd, 90000);
+        },
         2,
         2000,
         (att, tot) => setStatusMessage(`Reenviando vídeo para o servidor (${att}/${tot})...`)
@@ -480,21 +480,25 @@ export default function App() {
   };
 
   // Envia vídeo para /verify (Reconhecimento ao vivo)
-  const sendVerification = async (videoUri: string, colors: string[]) => {
+  const sendVerification = async (videoUri: string, colors: string[], sessionToken?: string) => {
     const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
-      const formData = new FormData();
-      formData.append('expected_colors', colors.join(','));
-      formData.append('video', {
-        uri: videoUri,
-        name: 'challenge_video.mp4',
-        type: 'video/mp4',
-      } as any);
-
       setStatusMessage('Enviando vídeo para reconhecimento...');
 
       const data = await executeWithRetry(
-        () => postMultipartWithFetch(`${cleanUrl}/verify`, formData, 90000),
+        () => {
+          const fd = new FormData();
+          fd.append('expected_colors', colors.join(','));
+          if (sessionToken) {
+            fd.append('session_token', sessionToken);
+          }
+          fd.append('video', {
+            uri: videoUri,
+            name: 'challenge_video.mp4',
+            type: 'video/mp4',
+          } as any);
+          return postMultipartWithFetch(`${cleanUrl}/verify`, fd, 90000);
+        },
         2,
         2000,
         (att, tot) => setStatusMessage(`Reenviando vídeo para o servidor (${att}/${tot})...`)
