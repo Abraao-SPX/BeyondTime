@@ -159,6 +159,12 @@ export default function App() {
   const [showServerConfig, setShowServerConfig] = useState<boolean>(false);
   const [isTestingServer, setIsTestingServer] = useState<boolean>(false);
 
+  // Controle de Enquadramento e Início Consciente do Liveness
+  const [isSequenceRunning, setIsSequenceRunning] = useState<boolean>(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [faceAligned, setFaceAligned] = useState<boolean>(false);
+  const [isProbingFace, setIsProbingFace] = useState<boolean>(false);
+
   const cameraRef = useRef<CameraView>(null);
 
   // Solicita permissões ao inicializar
@@ -329,8 +335,12 @@ export default function App() {
         speakInstruction('Analisando sua biometria facial. Só um momento.', voiceAssistance);
         await sendVerification(videoData.uri, colors);
       }
+      setIsSequenceRunning(false);
+      setCountdown(null);
     } catch (error: any) {
       console.error(error);
+      setIsSequenceRunning(false);
+      setCountdown(null);
       setBackgroundColor('#000000');
       const errTxt = error.message || 'Falha ao conectar com o servidor.';
       setErrorMessage(errTxt);
@@ -340,16 +350,84 @@ export default function App() {
     }
   };
 
-  // Dispara automaticamente ao entrar na tela de Liveness
+  // Dispara a contagem regressiva e inicia a prova de vida de forma consciente
+  const handleStartReadyCountdown = () => {
+    if (isSequenceRunning || countdown !== null) return;
+    triggerHapticFeedback('impact');
+    setCountdown(3);
+    speakInstruction('Três...', voiceAssistance);
+
+    let count = 3;
+    const timer = setInterval(() => {
+      count -= 1;
+      if (count > 0) {
+        setCountdown(count);
+        triggerHapticFeedback('impact');
+        if (count === 2) speakInstruction('Dois...', voiceAssistance);
+        if (count === 1) speakInstruction('Um...', voiceAssistance);
+      } else {
+        clearInterval(timer);
+        setCountdown(null);
+        setIsSequenceRunning(true);
+        runLivenessSequence();
+      }
+    }, 900);
+  };
+
+  // Ao entrar na tela de Liveness, reseta estados e aguarda o enquadramento do usuário
   useEffect(() => {
     if (screenState === 'LIVENESS') {
-      setStatusMessage('Posicione o rosto no círculo...');
-      const timer = setTimeout(() => {
-        runLivenessSequence();
-      }, 1500);
-      return () => clearTimeout(timer);
+      setIsSequenceRunning(false);
+      setCountdown(null);
+      setFaceAligned(false);
+      setStatusMessage('Enquadre seu rosto no círculo');
+      speakInstruction('Posicione o seu rosto no centro da tela e olhe para a câmera.', voiceAssistance);
     }
   }, [screenState]);
+
+  // Tentativa de detecção automática periódica enquanto o usuário se posiciona
+  useEffect(() => {
+    if (screenState !== 'LIVENESS' || isSequenceRunning || countdown !== null) {
+      return;
+    }
+    let isCancelled = false;
+    const probeTimer = setInterval(async () => {
+      if (isCancelled || isProbingFace || !cameraRef.current) return;
+      try {
+        setIsProbingFace(true);
+        const photo = await (cameraRef.current as any).takePictureAsync?.({
+          quality: 0.15,
+          skipProcessing: true,
+          base64: true,
+        });
+        if (photo?.base64 && !isCancelled) {
+          const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
+          const res = await axios.post(
+            `${cleanUrl}/detect_face`,
+            { image_base64: photo.base64 },
+            { timeout: 2500 }
+          );
+          if (res.data?.detected && res.data?.centered && !isCancelled) {
+            setFaceAligned(true);
+            setStatusMessage('Rosto Detectado! ✅');
+            clearInterval(probeTimer);
+            handleStartReadyCountdown();
+          } else if (res.data?.message && !isCancelled) {
+            setStatusMessage(res.data.message);
+          }
+        }
+      } catch {
+        // Fallback gracioso: o botão manual ESTOU PRONTO continua ativo e utilizável
+      } finally {
+        if (!isCancelled) setIsProbingFace(false);
+      }
+    }, 1200);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(probeTimer);
+    };
+  }, [screenState, isSequenceRunning, countdown, isProbingFace, apiUrl]);
 
   // Envia vídeo para /register (Cadastro ao vivo)
   const sendRegistration = async (videoUri: string, userName: string, colors: string[]) => {
@@ -691,12 +769,32 @@ export default function App() {
   // RENDERIZAÇÃO: TELA 2 - CÂMERA & PROVA DE VIDA
   // ==========================================
   if (screenState === 'LIVENESS') {
+    const borderColor = isSequenceRunning
+      ? '#FFFFFF'
+      : countdown !== null || faceAligned
+      ? '#10B981'
+      : '#38BDF8';
+
     return (
       <SafeAreaView style={[styles.livenessContainer, { backgroundColor }]}>
         <StatusBar style="light" />
-        <Text style={styles.livenessStatusText}>{statusMessage}</Text>
 
-        <View style={styles.ovalMask}>
+        {/* Cabeçalho de Status e Orientação */}
+        <View style={styles.livenessHeader}>
+          <Text style={styles.livenessStatusText}>
+            {countdown !== null
+              ? `Iniciando em ${countdown}...`
+              : statusMessage}
+          </Text>
+          {!isSequenceRunning && countdown === null && (
+            <Text style={styles.livenessSubtitle}>
+              Ajuste a distância até o seu rosto preencher o círculo
+            </Text>
+          )}
+        </View>
+
+        {/* Moldura Oval da Câmera com feedback visual */}
+        <View style={[styles.ovalMask, { borderColor }]}>
           <CameraView
             ref={cameraRef}
             style={styles.cameraView}
@@ -704,6 +802,7 @@ export default function App() {
             mode="video"
             mute={true}
           />
+          {/* Flash colorido ativo durante o teste */}
           {backgroundColor !== '#000000' && (
             <View
               style={[
@@ -713,13 +812,56 @@ export default function App() {
               pointerEvents="none"
             />
           )}
+
+          {/* Contagem regressiva sobreposta no centro do círculo */}
+          {countdown !== null && (
+            <View style={styles.countdownOverlay} pointerEvents="none">
+              <Text style={styles.countdownNumber}>{countdown}</Text>
+              <Text style={styles.countdownTip}>Olhe para a tela</Text>
+            </View>
+          )}
+
+          {/* Retículo guia de enquadramento quando aguardando */}
+          {!isSequenceRunning && countdown === null && (
+            <View style={styles.reticleOverlay} pointerEvents="none">
+              <View style={[styles.reticleLineH, { backgroundColor: borderColor }]} />
+              <View style={[styles.reticleLineV, { backgroundColor: borderColor }]} />
+            </View>
+          )}
         </View>
 
-        <Text style={styles.livenessTip}>
-          {actionMode === 'REGISTER'
-            ? 'Olhe para a moldura para cadastrar seu rosto'
-            : 'Mantenha o rosto parado na moldura'}
-        </Text>
+        {/* Ações Inferiores: Botão Iniciar e Cancelar (ocultos durante o flash) */}
+        {!isSequenceRunning && countdown === null ? (
+          <View style={styles.livenessActions}>
+            <TouchableOpacity
+              style={styles.startLivenessButton}
+              onPress={handleStartReadyCountdown}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.startLivenessButtonIcon}>👁️</Text>
+              <Text style={styles.startLivenessButtonText}>
+                ESTOU PRONTO (INICIAR)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cancelLivenessButton}
+              onPress={() => {
+                setScreenState('START');
+                triggerHapticFeedback('impact');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cancelLivenessButtonText}>✕ Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.livenessTip}>
+            {actionMode === 'REGISTER'
+              ? 'Mantenha o rosto na moldura gravando...'
+              : 'Mantenha o rosto parado na moldura...'}
+          </Text>
+        )}
       </SafeAreaView>
     );
   }
@@ -1178,15 +1320,24 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 30,
+    paddingVertical: 24,
+  },
+  livenessHeader: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginTop: 10,
   },
   livenessStatusText: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#FFFFFF',
     textAlign: 'center',
-    paddingHorizontal: 20,
-    marginTop: 20,
+  },
+  livenessSubtitle: {
+    fontSize: 14,
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 6,
   },
   ovalMask: {
     width: width * 0.74,
@@ -1194,11 +1345,93 @@ const styles = StyleSheet.create({
     borderRadius: (width * 0.74) / 2,
     overflow: 'hidden',
     borderWidth: 4,
-    borderColor: '#FFFFFF',
+    borderColor: '#38BDF8',
     backgroundColor: '#000000',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   cameraView: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+  },
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  countdownNumber: {
+    fontSize: 84,
+    fontWeight: '900',
+    color: '#10B981',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  countdownTip: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    marginTop: 8,
+    letterSpacing: 0.5,
+  },
+  reticleOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.45,
+  },
+  reticleLineH: {
+    width: 36,
+    height: 2,
+    borderRadius: 1,
+    position: 'absolute',
+  },
+  reticleLineV: {
+    width: 2,
+    height: 36,
+    borderRadius: 1,
+    position: 'absolute',
+  },
+  livenessActions: {
+    width: '100%',
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  startLivenessButton: {
+    backgroundColor: '#10B981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    width: '100%',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  startLivenessButtonIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  startLivenessButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  cancelLivenessButton: {
+    paddingVertical: 12,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  cancelLivenessButtonText: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
   },
   livenessTip: {
     color: '#E2E8F0',

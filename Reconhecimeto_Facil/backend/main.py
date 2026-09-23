@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI(
     title="Reconhecimento Fácil - Microsserviço de Biometria & Prova de Vida",
@@ -503,6 +504,103 @@ def extrair_embedding_e_recorte(frame: np.ndarray) -> tuple[Optional[np.ndarray]
     """Detecta face com YuNet e extrai vetor embedding SFace (128D) e recorte facial alinhado."""
     feat, aligned, _, _ = extrair_face_completa(frame)
     return feat, aligned
+
+class DetectFacePayload(BaseModel):
+    image_base64: Optional[str] = None
+    image: Optional[str] = None
+
+@app.post("/detect_face")
+async def detect_face_presence(
+    request: Request,
+    payload: Optional[DetectFacePayload] = None,
+    photo: Optional[UploadFile] = File(None)
+):
+    """
+    Verifica rapidamente (< 30ms) se há um rosto humano enquadrado e centralizado na câmera.
+    Permite que o aplicativo móvel aguarde o usuário posicionar o rosto antes de disparar
+    a sequência de flashes e gravação biométrica.
+    """
+    img = None
+    try:
+        if photo is not None:
+            contents = await photo.read()
+            nparr = np.frombuffer(contents, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        elif payload and (payload.image_base64 or payload.image):
+            b64 = payload.image_base64 or payload.image
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        else:
+            try:
+                raw_json = await request.json()
+                b64 = raw_json.get("image_base64") or raw_json.get("image")
+                if b64:
+                    if "," in b64:
+                        b64 = b64.split(",", 1)[1]
+                    img_bytes = base64.b64decode(b64)
+                    nparr = np.frombuffer(img_bytes, np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception:
+                pass
+
+        if img is None:
+            return {"detected": False, "centered": False, "message": "Nenhuma imagem válida recebida"}
+
+        face_data = None
+        frame_final = img
+        for rot in [None, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180]:
+            cand = cv2.rotate(img, rot) if rot is not None else img
+            f_cand = detectar_face_yunet(cand)
+            if f_cand is not None:
+                face_data = f_cand
+                frame_final = cand
+                break
+
+        if face_data is None:
+            return {
+                "detected": False,
+                "centered": False,
+                "message": "Nenhum rosto identificado no círculo. Aproxime-se da câmera."
+            }
+
+        x, y, w, h = face_data[:4]
+        img_h, img_w = frame_final.shape[:2]
+
+        cx = x + w / 2.0
+        cy = y + h / 2.0
+        norm_cx = cx / max(1.0, float(img_w))
+        norm_cy = cy / max(1.0, float(img_h))
+        ratio_w = w / max(1.0, float(img_w))
+        ratio_h = h / max(1.0, float(img_h))
+
+        if ratio_w < 0.12 or ratio_h < 0.12:
+            return {
+                "detected": True,
+                "centered": False,
+                "message": "Aproxime um pouco mais o celular do rosto.",
+                "confidence": round(float(face_data[-1]), 3)
+            }
+
+        is_centered = (0.20 <= norm_cx <= 0.80) and (0.15 <= norm_cy <= 0.85)
+        if not is_centered:
+            return {
+                "detected": True,
+                "centered": False,
+                "message": "Centralize seu rosto no círculo.",
+                "confidence": round(float(face_data[-1]), 3)
+            }
+
+        return {
+            "detected": True,
+            "centered": True,
+            "message": "Rosto enquadrado perfeitamente!",
+            "confidence": round(float(face_data[-1]), 3)
+        }
+    except Exception as e:
+        return {"detected": False, "centered": False, "error": str(e), "message": "Erro ao analisar imagem"}
 
 class MiniFASNetCropper:
     """Implementação oficial do gerador de patches para MiniFASNet (Minivision AI)."""
