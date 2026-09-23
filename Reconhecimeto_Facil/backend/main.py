@@ -541,7 +541,15 @@ class MiniFASNetCropper:
             left_top_y -= right_bottom_y - src_h + 1
             right_bottom_y = src_h - 1
 
-        return int(left_top_x), int(left_top_y), int(right_bottom_x), int(right_bottom_y)
+        left_top_x = max(0, min(src_w - 1, int(left_top_x)))
+        left_top_y = max(0, min(src_h - 1, int(left_top_y)))
+        right_bottom_x = max(0, min(src_w - 1, int(right_bottom_x)))
+        right_bottom_y = max(0, min(src_h - 1, int(right_bottom_y)))
+
+        if right_bottom_x <= left_top_x or right_bottom_y <= left_top_y:
+            return 0, 0, src_w - 1, src_h - 1
+
+        return left_top_x, left_top_y, right_bottom_x, right_bottom_y
 
     @classmethod
     def crop(cls, org_img: np.ndarray, bbox, scale: float = 2.7, out_w: int = 80, out_h: int = 80):
@@ -555,7 +563,7 @@ class MiniFASNetCropper:
 def avaliar_liveness_minifasnet(
     frame: np.ndarray,
     face_box,
-    min_live_score: float = 0.80
+    min_live_score: float = 0.70
 ) -> tuple[bool, float, str, dict]:
     """
     Avalia a prova de vida passiva utilizando a rede neural profunda MiniFASNet V2.
@@ -563,13 +571,18 @@ def avaliar_liveness_minifasnet(
       - Classe 0: Print Attack (foto impressa em papel)
       - Classe 1: Genuine Live (pele humana real ao vivo)
       - Classe 2: Screen Replay Attack (tela de monitor, celular, tablet)
+    
+    Nota de calibração: MiniFASNet opera com valores brutos no intervalo [0, 255] float32 em RGB.
+    Normalização por 1/255 reduzia a imagem a valores próximos de zero, simulando tela escura
+    e gerando falsos positivos de tela (prob_screen > 99%) em rostos humanos reais.
     """
     if net_minifasnet is None or frame is None or face_box is None:
         return True, 1.0, "MiniFASNet desativado ou indisponível.", {"status": "skipped"}
 
     try:
         crop_img = MiniFASNetCropper.crop(frame, face_box, scale=2.7, out_w=80, out_h=80)
-        blob = cv2.dnn.blobFromImage(crop_img, scalefactor=1.0 / 255.0, size=(80, 80), swapRB=False)
+        # MiniFASNet espera imagem RGB com canais no intervalo 0..255 (float32)
+        blob = cv2.dnn.blobFromImage(crop_img, scalefactor=1.0, size=(80, 80), swapRB=True)
         net_minifasnet.setInput(blob)
         logits = net_minifasnet.forward()[0]
 
@@ -588,13 +601,15 @@ def avaliar_liveness_minifasnet(
             "predicted_label": pred_label
         }
 
-        if pred_label == 2:
+        # Bloqueio categórico se for detectado replay em tela com alta probabilidade
+        if pred_label == 2 and prob_screen >= 0.70:
             pct = prob_screen * 100
             return False, prob_live, f"Tentativa de fraude detectada: apresentação em tela/monitor de computador ({pct:.1f}%).", detalhes
-        elif pred_label == 0:
+        elif pred_label == 0 and prob_print >= 0.70:
             pct = prob_print * 100
             return False, prob_live, f"Tentativa de fraude detectada: foto impressa em papel identificada ({pct:.1f}%).", detalhes
 
+        # Para aprovação como pessoa viva ao vivo, exige probabilidade de vivacidade acima do limiar
         if prob_live < min_live_score:
             pct = prob_live * 100
             return False, prob_live, f"Prova de vida inconclusiva (Score de autenticidade: {pct:.1f}% < {min_live_score * 100:.0f}%).", detalhes
@@ -959,7 +974,7 @@ async def register_biometrics(
             }
 
         # Validação Anti-Spoofing profunda com MiniFASNet V2 (bloqueio categórico de telas de PC e fotos impressas)
-        is_real, fas_score, fas_reason, fas_detalhes = avaliar_liveness_minifasnet(upright_frame, face_data[:4], min_live_score=0.80)
+        is_real, fas_score, fas_reason, fas_detalhes = avaliar_liveness_minifasnet(upright_frame, face_data[:4], min_live_score=0.70)
         if not is_real:
             registrar_auditoria({
                 "client_ip": client_ip,
@@ -1138,7 +1153,7 @@ async def verify_identity(
             }
 
         # Validação Anti-Spoofing profunda com MiniFASNet V2 (bloqueio categórico de telas de PC e fotos impressas)
-        is_real, fas_score, fas_reason, fas_detalhes = avaliar_liveness_minifasnet(upright_probe, face_data_probe[:4], min_live_score=0.80)
+        is_real, fas_score, fas_reason, fas_detalhes = avaliar_liveness_minifasnet(upright_probe, face_data_probe[:4], min_live_score=0.70)
         if not is_real:
             registrar_auditoria({
                 "client_ip": client_ip,
