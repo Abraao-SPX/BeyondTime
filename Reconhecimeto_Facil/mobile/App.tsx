@@ -158,11 +158,16 @@ export default function App() {
   const [showServerConfig, setShowServerConfig] = useState<boolean>(false);
   const [isTestingServer, setIsTestingServer] = useState<boolean>(false);
 
-  // Controle de Enquadramento e Início Consciente do Liveness
+  // Controle de Enquadramento e Início Automático do Liveness
   const [isSequenceRunning, setIsSequenceRunning] = useState<boolean>(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [faceAligned, setFaceAligned] = useState<boolean>(false);
+  const [cameraMode, setCameraMode] = useState<'picture' | 'video'>('picture');
+  const [isCameraReady, setIsCameraReady] = useState<boolean>(false);
+
   const isProbingFaceRef = useRef<boolean>(false);
+  const countdownRef = useRef<number | null>(null);
+  const isSequenceRunningRef = useRef<boolean>(false);
 
   const cameraRef = useRef<CameraView>(null);
 
@@ -248,6 +253,13 @@ export default function App() {
   // Iniciar Reconhecimento Facial ao Vivo
   const handleStartVerify = () => {
     setActionMode('VERIFY');
+    setCameraMode('picture');
+    setIsCameraReady(false);
+    setFaceAligned(false);
+    setCountdown(null);
+    countdownRef.current = null;
+    setIsSequenceRunning(false);
+    isSequenceRunningRef.current = false;
     triggerHapticFeedback('impact');
     setScreenState('LIVENESS');
   };
@@ -260,6 +272,13 @@ export default function App() {
       return;
     }
     setActionMode('REGISTER');
+    setCameraMode('picture');
+    setIsCameraReady(false);
+    setFaceAligned(false);
+    setCountdown(null);
+    countdownRef.current = null;
+    setIsSequenceRunning(false);
+    isSequenceRunningRef.current = false;
     triggerHapticFeedback('impact');
     setScreenState('LIVENESS');
   };
@@ -332,11 +351,17 @@ export default function App() {
         await sendVerification(videoData.uri, colors, session_token);
       }
       setIsSequenceRunning(false);
+      isSequenceRunningRef.current = false;
       setCountdown(null);
+      countdownRef.current = null;
+      setCameraMode('picture');
     } catch (error: any) {
       console.error(error);
       setIsSequenceRunning(false);
+      isSequenceRunningRef.current = false;
       setCountdown(null);
+      countdownRef.current = null;
+      setCameraMode('picture');
       setBackgroundColor('#000000');
       const errTxt = error.message || 'Falha ao conectar com o servidor.';
       setErrorMessage(errTxt);
@@ -346,25 +371,35 @@ export default function App() {
     }
   };
 
-  // Dispara a contagem regressiva e inicia a prova de vida de forma consciente
-  const handleStartReadyCountdown = () => {
-    if (isSequenceRunning || countdown !== null) return;
+  // Dispara a contagem regressiva e inicia a prova de vida automaticamente assim que o software detecta o rosto
+  const triggerAutomaticLiveness = () => {
+    if (isSequenceRunningRef.current || countdownRef.current !== null) return;
+
+    // Altera o modo da câmera para vídeo (estabiliza durante a contagem de 3 segundos)
+    setCameraMode('video');
+    setFaceAligned(true);
+    setStatusMessage('Rosto Detectado! ✅');
     triggerHapticFeedback('impact');
+
     setCountdown(3);
-    speakInstruction('Três...', voiceAssistance);
+    countdownRef.current = 3;
+    speakInstruction('Rosto identificado! Três...', voiceAssistance);
 
     let count = 3;
     const timer = setInterval(() => {
       count -= 1;
       if (count > 0) {
         setCountdown(count);
+        countdownRef.current = count;
         triggerHapticFeedback('impact');
         if (count === 2) speakInstruction('Dois...', voiceAssistance);
-        if (count === 1) speakInstruction('Um...', voiceAssistance);
+        if (count === 1) speakInstruction('Um... Olhe para a tela.', voiceAssistance);
       } else {
         clearInterval(timer);
         setCountdown(null);
+        countdownRef.current = null;
         setIsSequenceRunning(true);
+        isSequenceRunningRef.current = true;
         runLivenessSequence();
       }
     }, 900);
@@ -374,54 +409,75 @@ export default function App() {
   useEffect(() => {
     if (screenState === 'LIVENESS') {
       setIsSequenceRunning(false);
+      isSequenceRunningRef.current = false;
       setCountdown(null);
+      countdownRef.current = null;
       setFaceAligned(false);
-      setStatusMessage('Enquadre seu rosto no círculo');
+      setCameraMode('picture');
+      setStatusMessage('Posicione o rosto no círculo...');
       speakInstruction('Posicione o seu rosto no centro da tela e olhe para a câmera.', voiceAssistance);
     }
   }, [screenState]);
 
-  // Tentativa de detecção automática periódica enquanto o usuário se posiciona
+  // Detecção facial automática contínua: monitora a câmera até identificar e centralizar o rosto
   useEffect(() => {
     if (screenState !== 'LIVENESS' || isSequenceRunning || countdown !== null) {
       return;
     }
+
     let isCancelled = false;
-    const probeTimer = setInterval(async () => {
-      if (isCancelled || isProbingFaceRef.current || !cameraRef.current) return;
-      try {
-        isProbingFaceRef.current = true;
-        const photo = await (cameraRef.current as any).takePictureAsync?.({
-          quality: 0.15,
-          skipProcessing: true,
-          base64: true,
-        });
-        if (photo?.base64 && !isCancelled) {
-          const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
-          const res = await axios.post(
-            `${cleanUrl}/detect_face`,
-            { image_base64: photo.base64 },
-            { timeout: 2500 }
-          );
-          if (res.data?.detected && res.data?.centered && !isCancelled) {
-            setFaceAligned(true);
-            setStatusMessage('Rosto Detectado! ✅');
-            clearInterval(probeTimer);
-            handleStartReadyCountdown();
-          } else if (res.data?.message && !isCancelled) {
-            setStatusMessage(res.data.message);
+    let probeTimeout: any = null;
+
+    const probeCycle = async () => {
+      if (isCancelled || isSequenceRunningRef.current || countdownRef.current !== null) return;
+
+      if (!isProbingFaceRef.current && cameraRef.current) {
+        try {
+          isProbingFaceRef.current = true;
+          const photo = await (cameraRef.current as any).takePictureAsync?.({
+            quality: 0.1,
+            skipProcessing: true,
+            base64: true,
+            shutterSound: false,
+          });
+
+          if (photo?.base64 && !isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
+            const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
+            const res = await axios.post(
+              `${cleanUrl}/detect_face`,
+              { image_base64: photo.base64 },
+              { timeout: 2000 }
+            );
+
+            if (!isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
+              if (res.data?.detected && res.data?.centered) {
+                setFaceAligned(true);
+                setStatusMessage('Rosto Detectado! ✅');
+                triggerAutomaticLiveness();
+                return; // Encerra probe: liveness automático iniciado!
+              } else if (res.data?.message) {
+                setStatusMessage(res.data.message);
+              }
+            }
           }
+        } catch {
+          // Ignora falhas pontuais e continua buscando o rosto automaticamente
+        } finally {
+          isProbingFaceRef.current = false;
         }
-      } catch {
-        // Fallback gracioso: o botão manual ESTOU PRONTO continua ativo e utilizável
-      } finally {
-        if (!isCancelled) isProbingFaceRef.current = false;
       }
-    }, 1200);
+
+      if (!isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
+        probeTimeout = setTimeout(probeCycle, 450);
+      }
+    };
+
+    // Pequeno intervalo de 350ms para inicialização da câmera antes do 1º frame
+    probeTimeout = setTimeout(probeCycle, 350);
 
     return () => {
       isCancelled = true;
-      clearInterval(probeTimer);
+      if (probeTimeout) clearTimeout(probeTimeout);
     };
   }, [screenState, isSequenceRunning, countdown, apiUrl]);
 
@@ -543,6 +599,12 @@ export default function App() {
     setRegistrationData(null);
     setErrorMessage('');
     setBackgroundColor('#000000');
+    setCountdown(null);
+    countdownRef.current = null;
+    setIsSequenceRunning(false);
+    isSequenceRunningRef.current = false;
+    setFaceAligned(false);
+    setCameraMode('picture');
     setScreenState('START');
   };
 
@@ -803,7 +865,8 @@ export default function App() {
             ref={cameraRef}
             style={styles.cameraView}
             facing="front"
-            mode="video"
+            mode={cameraMode}
+            onCameraReady={() => setIsCameraReady(true)}
             mute={true}
           />
           {/* Flash colorido ativo durante o teste */}
@@ -834,26 +897,35 @@ export default function App() {
           )}
         </View>
 
-        {/* Ações Inferiores: Botão Iniciar e Cancelar (ocultos durante o flash) */}
+        {/* Rodapé da Câmera: Detecção Facial 100% Automática e Botão Cancelar */}
         {!isSequenceRunning && countdown === null ? (
           <View style={styles.livenessActions}>
-            <TouchableOpacity
-              style={styles.startLivenessButton}
-              onPress={handleStartReadyCountdown}
-              activeOpacity={0.8}
+            <View
+              style={[
+                styles.autoDetectStatusBadge,
+                faceAligned && styles.autoDetectStatusBadgeActive,
+              ]}
             >
-              <Text style={styles.startLivenessButtonIcon}>👁️</Text>
-              <Text style={styles.startLivenessButtonText}>
-                ESTOU PRONTO (INICIAR)
+              {!faceAligned && (
+                <ActivityIndicator
+                  size="small"
+                  color="#38BDF8"
+                  style={{ marginRight: 10 }}
+                />
+              )}
+              <Text style={styles.autoDetectStatusBadgeIcon}>
+                {faceAligned ? '✅' : '🔍'}
               </Text>
-            </TouchableOpacity>
+              <Text style={styles.autoDetectStatusText}>
+                {faceAligned
+                  ? 'ROSTO IDENTIFICADO! INICIANDO...'
+                  : 'PROCURANDO SEU ROSTO...'}
+              </Text>
+            </View>
 
             <TouchableOpacity
               style={styles.cancelLivenessButton}
-              onPress={() => {
-                setScreenState('START');
-                triggerHapticFeedback('impact');
-              }}
+              onPress={resetToStart}
               activeOpacity={0.7}
             >
               <Text style={styles.cancelLivenessButtonText}>✕ Cancelar</Text>
@@ -1402,39 +1474,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignItems: 'center',
   },
-  startLivenessButton: {
-    backgroundColor: '#10B981',
+  autoDetectStatusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    backgroundColor: 'rgba(30, 41, 59, 0.85)',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     borderRadius: 16,
     width: '100%',
+    shadowColor: '#38BDF8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  autoDetectStatusBadgeActive: {
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(6, 78, 59, 0.85)',
     shadowColor: '#10B981',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 5,
   },
-  startLivenessButtonIcon: {
-    fontSize: 22,
-    marginRight: 10,
+  autoDetectStatusBadgeIcon: {
+    fontSize: 20,
+    marginRight: 8,
   },
-  startLivenessButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
+  autoDetectStatusText: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '700',
     letterSpacing: 0.5,
   },
   cancelLivenessButton: {
     paddingVertical: 12,
-    marginTop: 8,
+    marginTop: 10,
     alignItems: 'center',
   },
   cancelLivenessButtonText: {
     color: '#94A3B8',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
   },
   livenessTip: {

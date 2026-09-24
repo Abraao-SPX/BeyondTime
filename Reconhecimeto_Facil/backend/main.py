@@ -636,7 +636,7 @@ async def detect_face_presence(
         ratio_w = w / max(1.0, float(img_w))
         ratio_h = h / max(1.0, float(img_h))
 
-        if ratio_w < 0.12 or ratio_h < 0.12:
+        if ratio_w < 0.10 or ratio_h < 0.10:
             return {
                 "detected": True,
                 "centered": False,
@@ -644,7 +644,7 @@ async def detect_face_presence(
                 "confidence": round(float(face_data[-1]), 3)
             }
 
-        is_centered = (0.20 <= norm_cx <= 0.80) and (0.15 <= norm_cy <= 0.85)
+        is_centered = (0.18 <= norm_cx <= 0.82) and (0.12 <= norm_cy <= 0.88)
         if not is_centered:
             return {
                 "detected": True,
