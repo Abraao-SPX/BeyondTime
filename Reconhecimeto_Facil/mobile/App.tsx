@@ -168,6 +168,7 @@ export default function App() {
   const isProbingFaceRef = useRef<boolean>(false);
   const countdownRef = useRef<number | null>(null);
   const isSequenceRunningRef = useRef<boolean>(false);
+  const autoStartTimerRef = useRef<any>(null);
 
   const cameraRef = useRef<CameraView>(null);
 
@@ -375,10 +376,15 @@ export default function App() {
   const triggerAutomaticLiveness = () => {
     if (isSequenceRunningRef.current || countdownRef.current !== null) return;
 
+    if (autoStartTimerRef.current) {
+      clearTimeout(autoStartTimerRef.current);
+      autoStartTimerRef.current = null;
+    }
+
     // Altera o modo da câmera para vídeo (estabiliza durante a contagem de 3 segundos)
     setCameraMode('video');
     setFaceAligned(true);
-    setStatusMessage('Rosto Detectado! ✅');
+    setStatusMessage('Rosto Pronto! ✅');
     triggerHapticFeedback('impact');
 
     setCountdown(3);
@@ -405,7 +411,7 @@ export default function App() {
     }, 900);
   };
 
-  // Ao entrar na tela de Liveness, reseta estados e aguarda o enquadramento do usuário
+  // Ao entrar na tela de Liveness, reseta estados e ativa temporizador de enquadramento consciente (3.5s)
   useEffect(() => {
     if (screenState === 'LIVENESS') {
       setIsSequenceRunning(false);
@@ -416,7 +422,27 @@ export default function App() {
       setCameraMode('picture');
       setStatusMessage('Posicione o rosto no círculo...');
       speakInstruction('Posicione o seu rosto no centro da tela e olhe para a câmera.', voiceAssistance);
+
+      // Temporizador de garantia (3.5s): se a pessoa já estiver posicionada e o probe demorar, inicia automaticamente!
+      if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current);
+      autoStartTimerRef.current = setTimeout(() => {
+        if (!isSequenceRunningRef.current && countdownRef.current === null) {
+          triggerAutomaticLiveness();
+        }
+      }, 3500);
+    } else {
+      if (autoStartTimerRef.current) {
+        clearTimeout(autoStartTimerRef.current);
+        autoStartTimerRef.current = null;
+      }
     }
+
+    return () => {
+      if (autoStartTimerRef.current) {
+        clearTimeout(autoStartTimerRef.current);
+        autoStartTimerRef.current = null;
+      }
+    };
   }, [screenState]);
 
   // Detecção facial automática contínua: monitora a câmera até identificar e centralizar o rosto
@@ -435,8 +461,8 @@ export default function App() {
         try {
           isProbingFaceRef.current = true;
           const photo = await (cameraRef.current as any).takePictureAsync?.({
-            quality: 0.1,
-            skipProcessing: true,
+            quality: 0.15,
+            skipProcessing: false,
             base64: true,
             shutterSound: false,
           });
@@ -446,7 +472,7 @@ export default function App() {
             const res = await axios.post(
               `${cleanUrl}/detect_face`,
               { image_base64: photo.base64 },
-              { timeout: 2000 }
+              { timeout: 3500 }
             );
 
             if (!isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
@@ -461,7 +487,7 @@ export default function App() {
             }
           }
         } catch {
-          // Ignora falhas pontuais e continua buscando o rosto automaticamente
+          // Ignora falhas pontuais: o temporizador de segurança garantirá o início após 3.5s
         } finally {
           isProbingFaceRef.current = false;
         }
@@ -472,8 +498,8 @@ export default function App() {
       }
     };
 
-    // Pequeno intervalo de 350ms para inicialização da câmera antes do 1º frame
-    probeTimeout = setTimeout(probeCycle, 350);
+    // Inicia após breve estabilização da câmera
+    probeTimeout = setTimeout(probeCycle, 500);
 
     return () => {
       isCancelled = true;
@@ -595,6 +621,10 @@ export default function App() {
   // Reinicia para a tela inicial
   const resetToStart = () => {
     Speech.stop();
+    if (autoStartTimerRef.current) {
+      clearTimeout(autoStartTimerRef.current);
+      autoStartTimerRef.current = null;
+    }
     setVerificationData(null);
     setRegistrationData(null);
     setErrorMessage('');
@@ -859,8 +889,12 @@ export default function App() {
           )}
         </View>
 
-        {/* Moldura Oval da Câmera com feedback visual */}
-        <View style={[styles.ovalMask, { borderColor }]}>
+        {/* Moldura Oval da Câmera com feedback visual e toque interativo */}
+        <TouchableOpacity
+          activeOpacity={0.96}
+          onPress={triggerAutomaticLiveness}
+          style={[styles.ovalMask, { borderColor }]}
+        >
           <CameraView
             ref={cameraRef}
             style={styles.cameraView}
@@ -895,12 +929,14 @@ export default function App() {
               <View style={[styles.reticleLineV, { backgroundColor: borderColor }]} />
             </View>
           )}
-        </View>
+        </TouchableOpacity>
 
         {/* Rodapé da Câmera: Detecção Facial 100% Automática e Botão Cancelar */}
         {!isSequenceRunning && countdown === null ? (
           <View style={styles.livenessActions}>
-            <View
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={triggerAutomaticLiveness}
               style={[
                 styles.autoDetectStatusBadge,
                 faceAligned && styles.autoDetectStatusBadgeActive,
@@ -919,9 +955,9 @@ export default function App() {
               <Text style={styles.autoDetectStatusText}>
                 {faceAligned
                   ? 'ROSTO IDENTIFICADO! INICIANDO...'
-                  : 'PROCURANDO SEU ROSTO...'}
+                  : 'PROCURANDO SEU ROSTO... (ou toque aqui)'}
               </Text>
-            </View>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.cancelLivenessButton}
