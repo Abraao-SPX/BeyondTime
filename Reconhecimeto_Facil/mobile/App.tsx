@@ -19,13 +19,22 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 
-// Rotas oficiais da VPS Oracle:
-// 1. Primária: HTTPS com Let's Encrypt (usado no 4G/5G e na maioria dos Wi-Fis)
-// 2. Fallback: HTTP direto por IP (usado automaticamente se o roteador Wi-Fi bloquear sslip.io ou abortar DNS)
-const PRIMARY_API_URL = 'https://132.226.242.158.sslip.io';
-const FALLBACK_API_URL = 'http://132.226.242.158';
+// Rotas oficiais com failover inteligente (Wi-Fi e 4G/5G móvel):
+// 1. Cloudflare Anycast HTTPS (Oficial / Zero Falhas no Wi-Fi):
+//    - Servidores Anycast em São Paulo (GRU)
+//    - Suporta IPv4 e IPv6 nativo (evita bug de DNS AAAA no Wi-Fi doméstico)
+//    - Imune a bloqueio de DNS Rebinding e firewalls de roteadores Wi-Fi
+// 2. VPS Oracle HTTPS Let's Encrypt (sslip.io)
+// 3. VPS Oracle HTTP direto Porta 80
+// 4. VPS Oracle HTTP direto Porta 8000
+const CANDIDATE_SERVERS = [
+  'https://coated-meals-retained-ward.trycloudflare.com',
+  'https://132.226.242.158.sslip.io',
+  'http://132.226.242.158',
+  'http://132.226.242.158:8000',
+];
 
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || PRIMARY_API_URL;
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || CANDIDATE_SERVERS[0];
 
 type ScreenState = 'START' | 'LIVENESS' | 'PROCESSING' | 'SUCCESS' | 'REGISTER_SUCCESS' | 'FAILURE';
 type ActionMode = 'VERIFY' | 'REGISTER';
@@ -75,7 +84,7 @@ const triggerHapticFeedback = async (type: 'impact' | 'success' | 'error') => {
   }
 };
 
-// Cliente HTTP inteligente — tenta HTTPS e cai para IP direto se o Wi-Fi bloquear DNS/der aborted
+// Cliente HTTP inteligente com failover automático entre todas as rotas (Cloudflare + VPS Oracle)
 async function fetchApi(
   path: string,
   preferredUrl: string,
@@ -84,21 +93,22 @@ async function fetchApi(
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const urlsToTry = Array.from(new Set([
     preferredUrl.trim().replace(/\/+$/, ''),
-    PRIMARY_API_URL,
-    FALLBACK_API_URL,
+    ...CANDIDATE_SERVERS,
   ]));
 
   let lastError: any = null;
   for (const base of urlsToTry) {
     const fullUrl = `${base}${cleanPath}`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7000);
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const response = await fetch(fullUrl, {
         ...options,
         signal: controller.signal,
         headers: {
           Accept: 'application/json',
+          'Bypass-Tunnel-Reminder': 'true',
+          'cf-skip-browser-warning': 'true',
           ...(options.headers || {}),
         },
       });
@@ -118,7 +128,7 @@ async function fetchApi(
   throw lastError || new Error('Não foi possível conectar ao servidor.');
 }
 
-// Upload multipart inteligente — tenta HTTPS e cai para IP direto se o Wi-Fi falhar
+// Upload multipart inteligente com failover entre todas as rotas (Cloudflare + VPS Oracle)
 async function uploadMultipart(
   path: string,
   createFormData: () => FormData,
@@ -128,8 +138,7 @@ async function uploadMultipart(
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const urlsToTry = Array.from(new Set([
     preferredUrl.trim().replace(/\/+$/, ''),
-    PRIMARY_API_URL,
-    FALLBACK_API_URL,
+    ...CANDIDATE_SERVERS,
   ]));
 
   let lastError: any = null;
@@ -144,6 +153,10 @@ async function uploadMultipart(
         method: 'POST',
         body: formData,
         signal: controller.signal,
+        headers: {
+          'Bypass-Tunnel-Reminder': 'true',
+          'cf-skip-browser-warning': 'true',
+        },
       });
       clearTimeout(timeout);
       console.log(`[UPLOAD] Resposta HTTP ${response.status} de ${base}`);
@@ -800,13 +813,31 @@ export default function App() {
                   autoCorrect={false}
                 />
 
-                <Text style={styles.presetsLabel}>Atalho:</Text>
+                <Text style={styles.presetsLabel}>Atalhos Rápidos de Conexão:</Text>
                 <View style={styles.presetsContainer}>
                   <TouchableOpacity
-                    style={[styles.presetButton, styles.presetButtonActive]}
+                    style={[styles.presetButton, apiUrl.includes('trycloudflare.com') && styles.presetButtonActive]}
+                    onPress={() => updateWorkingUrl('https://coated-meals-retained-ward.trycloudflare.com')}
+                  >
+                    <Text style={styles.presetButtonText}>⚡ Cloudflare HTTPS (Wi-Fi e 4G Recomendado)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.presetButton, apiUrl.includes('sslip.io') && styles.presetButtonActive]}
                     onPress={() => updateWorkingUrl('https://132.226.242.158.sslip.io')}
                   >
-                    <Text style={styles.presetButtonText}>🔒 Restaurar Servidor Padrão (VPS Oracle HTTPS)</Text>
+                    <Text style={styles.presetButtonText}>🔒 VPS HTTPS Direto (sslip.io)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.presetButton, apiUrl === 'http://132.226.242.158' && styles.presetButtonActive]}
+                    onPress={() => updateWorkingUrl('http://132.226.242.158')}
+                  >
+                    <Text style={styles.presetButtonText}>🌐 VPS Porta 80</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.presetButton, apiUrl.includes(':8000') && !apiUrl.includes('192.168') && styles.presetButtonActive]}
+                    onPress={() => updateWorkingUrl('http://132.226.242.158:8000')}
+                  >
+                    <Text style={styles.presetButtonText}>🔌 VPS Porta 8000</Text>
                   </TouchableOpacity>
                 </View>
 
