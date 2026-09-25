@@ -18,19 +18,12 @@ import * as Brightness from 'expo-brightness';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
+import * as Updates from 'expo-updates';
 
-// Rotas oficiais com failover inteligente (Wi-Fi e 4G/5G móvel):
-// 1. Domínio Oficial de Produção (Cloudflare CDN Anycast - GRU/SP):
-//    - https://api.abraao-dev.tech (Totalmente imune a bloqueios de roteadores Wi-Fi / DNS Rebinding)
-//    - Suporta IPv4 e IPv6 nativo com certificado SSL válido universalmente
-// 2. Túnel Redundante Cloudflare Anycast HTTPS
-// 3. VPS Oracle HTTPS Let's Encrypt (sslip.io)
-// 4. VPS Oracle HTTP direto Porta 80
+// Servidor Oficial de Produção (VPS Oracle com SSL Let's Encrypt nativo):
+// https://api.abraao-dev.tech
 const CANDIDATE_SERVERS = [
   'https://api.abraao-dev.tech',
-  'https://coated-meals-retained-ward.trycloudflare.com',
-  'https://132.226.242.158.sslip.io',
-  'http://132.226.242.158',
 ];
 
 const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || CANDIDATE_SERVERS[0];
@@ -83,7 +76,7 @@ const triggerHapticFeedback = async (type: 'impact' | 'success' | 'error') => {
   }
 };
 
-// Cliente HTTP inteligente com failover automático entre todas as rotas (Cloudflare + VPS Oracle)
+// Cliente HTTP inteligente com tentativas e timeout estendido (Wi-Fi e 4G/5G)
 async function fetchApi(
   path: string,
   preferredUrl: string,
@@ -96,43 +89,48 @@ async function fetchApi(
   ]));
 
   let lastError: any = null;
-  for (const base of urlsToTry) {
-    const fullUrl = `${base}${cleanPath}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetch(fullUrl, {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-          'Bypass-Tunnel-Reminder': 'true',
-          'cf-skip-browser-warning': 'true',
-          ...(options.headers || {}),
-        },
-      });
-      clearTimeout(timeout);
-      if (response.ok) {
-        const data = await response.json();
-        return { data, workingUrl: base };
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    for (const base of urlsToTry) {
+      const fullUrl = `${base}${cleanPath}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(fullUrl, {
+          ...options,
+          signal: controller.signal,
+          headers: {
+            Accept: 'application/json',
+            'Bypass-Tunnel-Reminder': 'true',
+            'cf-skip-browser-warning': 'true',
+            ...(options.headers || {}),
+          },
+        });
+        clearTimeout(timeout);
+        if (response.ok) {
+          const data = await response.json();
+          return { data, workingUrl: base };
+        }
+        const text = await response.text();
+        throw new Error(`Servidor retornou código ${response.status}: ${text}`);
+      } catch (err: any) {
+        clearTimeout(timeout);
+        lastError = err;
+        console.warn(`[API] Tentativa ${attempt} em ${base} falhou: ${err.message}`);
+        if (attempt === 1) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
       }
-      const text = await response.text();
-      throw new Error(`Servidor retornou código ${response.status}: ${text}`);
-    } catch (err: any) {
-      clearTimeout(timeout);
-      lastError = err;
-      console.warn(`[API] Falha em ${base} (${err.message}). Tentando próxima rota...`);
     }
   }
   throw lastError || new Error('Não foi possível conectar ao servidor.');
 }
 
-// Upload multipart inteligente com failover entre todas as rotas (Cloudflare + VPS Oracle)
+// Upload multipart resiliente com retry automático para Wi-Fi e dados móveis
 async function uploadMultipart(
   path: string,
   createFormData: () => FormData,
   preferredUrl: string,
-  timeoutMs: number = 90000
+  timeoutMs: number = 60000
 ): Promise<{ data: any; workingUrl: string }> {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const urlsToTry = Array.from(new Set([
@@ -141,59 +139,59 @@ async function uploadMultipart(
   ]));
 
   let lastError: any = null;
-  for (const base of urlsToTry) {
-    const fullUrl = `${base}${cleanPath}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      console.log(`[UPLOAD] POST ${fullUrl}...`);
-      const formData = createFormData();
-      const isTunnel = base.includes('trycloudflare.com');
-      const uploadHeaders: Record<string, string> = {
-        Accept: 'application/json',
-      };
-      if (isTunnel) {
-        uploadHeaders['Bypass-Tunnel-Reminder'] = 'true';
-        uploadHeaders['cf-skip-browser-warning'] = 'true';
-      }
-      const response = await fetch(fullUrl, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-        headers: uploadHeaders,
-      });
-      clearTimeout(timeout);
-      console.log(`[UPLOAD] Resposta HTTP ${response.status} de ${base}`);
-      const text = await response.text();
-      let data: any = {};
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    for (const base of urlsToTry) {
+      const fullUrl = `${base}${cleanPath}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        data = JSON.parse(text);
-      } catch {
-        data = { raw: text };
-      }
-      if (response.ok) {
-        return { data, workingUrl: base };
-      } else {
-        const msg = data.detail || data.reason || `Servidor retornou código ${response.status}`;
-        throw new Error(msg);
-      }
-    } catch (err: any) {
-      clearTimeout(timeout);
-      console.warn(`[UPLOAD] Falha em ${base}: ${err.name} - ${err.message}`);
-      lastError = err;
-      // Se for erro de negócio da API (ex: face não identificada), não precisa tentar outra rota
-      if (
-        err.message &&
-        !err.message.includes('fetch') &&
-        !err.message.includes('abort') &&
-        !err.message.includes('Network') &&
-        !err.message.includes('Failed')
-      ) {
-        throw err;
+        console.log(`[UPLOAD] Tentativa ${attempt}: POST ${fullUrl}...`);
+        const formData = createFormData();
+        const response = await fetch(fullUrl, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          headers: {
+            'Bypass-Tunnel-Reminder': 'true',
+            'cf-skip-browser-warning': 'true',
+          },
+        });
+        clearTimeout(timeout);
+        console.log(`[UPLOAD] Resposta HTTP ${response.status} de ${base}`);
+        const text = await response.text();
+        let data: any = {};
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+        if (response.ok) {
+          return { data, workingUrl: base };
+        } else {
+          const msg = data.detail || data.reason || `Servidor retornou código ${response.status}`;
+          throw new Error(msg);
+        }
+      } catch (err: any) {
+        clearTimeout(timeout);
+        console.warn(`[UPLOAD] Falha tentativa ${attempt} em ${base}: ${err.name} - ${err.message}`);
+        lastError = err;
+        // Se for erro de negócio da API (ex: face não identificada), não precisa tentar novamente
+        if (
+          err.message &&
+          !err.message.includes('fetch') &&
+          !err.message.includes('abort') &&
+          !err.message.includes('Network') &&
+          !err.message.includes('Failed')
+        ) {
+          throw err;
+        }
+        if (attempt === 1) {
+          await new Promise((r) => setTimeout(r, 600));
+        }
       }
     }
   }
-  throw lastError || new Error('Falha na comunicação com o servidor após tentar todas as rotas.');
+  throw lastError || new Error('Falha na comunicação com o servidor após tentar o envio do vídeo.');
 }
 
 export default function App() {
@@ -245,6 +243,26 @@ export default function App() {
       requestPermission();
     }
   }, [permission]);
+
+  // Verificação e aplicação proativa de atualizações OTA (Over-The-Air)
+  useEffect(() => {
+    async function checkOtaUpdate() {
+      try {
+        if (!__DEV__) {
+          const update = await Updates.checkForUpdateAsync();
+          if (update.isAvailable) {
+            console.log('[UPDATES] Nova versão encontrada! Baixando...');
+            await Updates.fetchUpdateAsync();
+            console.log('[UPDATES] Reiniciando com a nova versão...');
+            await Updates.reloadAsync();
+          }
+        }
+      } catch (e) {
+        console.log('[UPDATES] Verificação OTA ignorada ou indisponível:', e);
+      }
+    }
+    checkOtaUpdate();
+  }, []);
 
   // Carrega lista de usuários da VPS ao iniciar ou quando a URL mudar
   useEffect(() => {
@@ -380,10 +398,10 @@ export default function App() {
         throw new Error('Câmera não está disponível. Volte e tente novamente.');
       }
 
-      // 4. Inicia gravação de vídeo pela câmera frontal (resolução 480p leve para upload instantâneo < 1s no Wi-Fi)
+      // 4. Inicia gravação de vídeo pela câmera frontal (resolução leve para upload instantâneo < 1s no Wi-Fi)
       console.log('[LIVENESS] Iniciando gravação de vídeo...');
       const recordPromise = cameraRef.current.recordAsync({
-        maxDuration: 4,
+        maxDuration: 5,
         maxFileSize: 5 * 1024 * 1024,
       });
 
@@ -407,6 +425,8 @@ export default function App() {
       console.log('[LIVENESS] Parando gravação...');
       cameraRef.current?.stopRecording();
       const videoData = await recordPromise;
+      // Garante tempo para o sistema operacional finalizar a escrita do MP4 (moov atom)
+      await new Promise((r) => setTimeout(r, 400));
       console.log(`[LIVENESS] Vídeo gravado: uri=${videoData?.uri || 'NULO'}`);
 
       if (status === 'granted') {
