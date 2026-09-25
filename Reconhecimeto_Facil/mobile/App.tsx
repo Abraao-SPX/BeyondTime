@@ -148,14 +148,19 @@ async function uploadMultipart(
     try {
       console.log(`[UPLOAD] POST ${fullUrl}...`);
       const formData = createFormData();
+      const isTunnel = base.includes('trycloudflare.com');
+      const uploadHeaders: Record<string, string> = {
+        Accept: 'application/json',
+      };
+      if (isTunnel) {
+        uploadHeaders['Bypass-Tunnel-Reminder'] = 'true';
+        uploadHeaders['cf-skip-browser-warning'] = 'true';
+      }
       const response = await fetch(fullUrl, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-          'cf-skip-browser-warning': 'true',
-        },
+        headers: uploadHeaders,
       });
       clearTimeout(timeout);
       console.log(`[UPLOAD] Resposta HTTP ${response.status} de ${base}`);
@@ -375,9 +380,12 @@ export default function App() {
         throw new Error('Câmera não está disponível. Volte e tente novamente.');
       }
 
-      // 4. Inicia gravação de vídeo pela câmera frontal (5s para garantir margem)
+      // 4. Inicia gravação de vídeo pela câmera frontal (resolução 480p leve para upload instantâneo < 1s no Wi-Fi)
       console.log('[LIVENESS] Iniciando gravação de vídeo...');
-      const recordPromise = cameraRef.current.recordAsync({ maxDuration: 5 });
+      const recordPromise = cameraRef.current.recordAsync({
+        maxDuration: 4,
+        maxFileSize: 5 * 1024 * 1024,
+      });
 
       // Pequeno delay para garantir que a gravação iniciou de fato
       await new Promise((r) => setTimeout(r, 200));
@@ -918,6 +926,8 @@ export default function App() {
             style={styles.cameraView}
             facing="front"
             mode="video"
+            videoQuality="480p"
+            videoBitrate={1_200_000}
             onCameraReady={() => setIsCameraReady(true)}
             mute={true}
           />
