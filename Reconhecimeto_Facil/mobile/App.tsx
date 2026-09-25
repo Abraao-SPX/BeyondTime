@@ -20,8 +20,8 @@ import * as Haptics from 'expo-haptics';
 import axios from 'axios';
 import { StatusBar } from 'expo-status-bar';
 
-// Endereço IP padrão: Let's Encrypt HTTPS direto na VPS Oracle
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://132.226.242.158.sslip.io';
+// Endereço IP padrão: Cloudflare HTTPS ultra-rápido (Anycast DNS com baixa latência no Brasil)
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://coated-meals-retained-ward.trycloudflare.com';
 
 type ScreenState = 'START' | 'LIVENESS' | 'PROCESSING' | 'SUCCESS' | 'REGISTER_SUCCESS' | 'FAILURE';
 type ActionMode = 'VERIFY' | 'REGISTER';
@@ -797,10 +797,16 @@ export default function App() {
                 <Text style={styles.presetsLabel}>Atalhos Rápidos de Conexão:</Text>
                 <View style={styles.presetsContainer}>
                   <TouchableOpacity
+                    style={[styles.presetButton, apiUrl.includes('trycloudflare.com') && styles.presetButtonActive]}
+                    onPress={() => setApiUrl('https://coated-meals-retained-ward.trycloudflare.com')}
+                  >
+                    <Text style={styles.presetButtonText}>⚡ Cloudflare HTTPS (Oficial / Zero Falhas)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('sslip.io') && styles.presetButtonActive]}
                     onPress={() => setApiUrl('https://132.226.242.158.sslip.io')}
                   >
-                    <Text style={styles.presetButtonText}>🔒 VPS HTTPS Oficial (sslip.io)</Text>
+                    <Text style={styles.presetButtonText}>🔒 VPS HTTPS Direto (sslip.io)</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.presetButton}
