@@ -2,7 +2,7 @@
   "expo": {
     "name": "Reconhecimento Fácil",
     "slug": "reconhecimento-facil",
-    "version": "1.3.6",
+    "version": "1.3.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -31,7 +31,7 @@
     ],
     "android": {
       "package": "com.abraao.reconhecimentofacil",
-      "versionCode": 10,
+      "versionCode": 9,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#0F172A",

@@ -19,10 +19,14 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
+import axios from 'axios';
 
-// Servidor Oficial de Produção (VPS Oracle com SSL Let's Encrypt nativo):
+// Servidor Cloudflare Anycast Dedicado (Zero bloqueios em qualquer Wi-Fi/4G):
+// https://officially-establishment-prices-golden.trycloudflare.com
+// Servidor Oficial com Let's Encrypt:
 // https://api.abraao-dev.tech
 const CANDIDATE_SERVERS = [
+  'https://officially-establishment-prices-golden.trycloudflare.com',
   'https://api.abraao-dev.tech',
 ];
 
@@ -125,7 +129,7 @@ async function fetchApi(
   throw lastError || new Error('Não foi possível conectar ao servidor.');
 }
 
-// Upload multipart resiliente com retry automático para Wi-Fi e dados móveis
+// Upload multipart resiliente com Axios para streaming confiável de vídeo (Wi-Fi e 4G/5G)
 async function uploadMultipart(
   path: string,
   createFormData: () => FormData,
@@ -142,48 +146,26 @@ async function uploadMultipart(
   for (let attempt = 1; attempt <= 2; attempt++) {
     for (const base of urlsToTry) {
       const fullUrl = `${base}${cleanPath}`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         console.log(`[UPLOAD] Tentativa ${attempt}: POST ${fullUrl}...`);
         const formData = createFormData();
-        const response = await fetch(fullUrl, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
+        const res = await axios.post(fullUrl, formData, {
           headers: {
+            'Content-Type': 'multipart/form-data',
             'Bypass-Tunnel-Reminder': 'true',
             'cf-skip-browser-warning': 'true',
           },
+          timeout: timeoutMs,
         });
-        clearTimeout(timeout);
-        console.log(`[UPLOAD] Resposta HTTP ${response.status} de ${base}`);
-        const text = await response.text();
-        let data: any = {};
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = { raw: text };
-        }
-        if (response.ok) {
-          return { data, workingUrl: base };
-        } else {
-          const msg = data.detail || data.reason || `Servidor retornou código ${response.status}`;
-          throw new Error(msg);
-        }
+        console.log(`[UPLOAD] Resposta HTTP ${res.status} de ${base}`);
+        return { data: res.data, workingUrl: base };
       } catch (err: any) {
-        clearTimeout(timeout);
         console.warn(`[UPLOAD] Falha tentativa ${attempt} em ${base}: ${err.name} - ${err.message}`);
         lastError = err;
-        // Se for erro de negócio da API (ex: face não identificada), não precisa tentar novamente
-        if (
-          err.message &&
-          !err.message.includes('fetch') &&
-          !err.message.includes('abort') &&
-          !err.message.includes('Network') &&
-          !err.message.includes('Failed')
-        ) {
-          throw err;
+        const respData = err.response?.data;
+        if (respData) {
+          const msg = respData.detail || respData.reason || `Servidor retornou código ${err.response.status}`;
+          throw new Error(msg);
         }
         if (attempt === 1) {
           await new Promise((r) => setTimeout(r, 600));
@@ -383,11 +365,16 @@ export default function App() {
       console.log(`[LIVENESS] Desafio recebido: cores=${colors}, token=${session_token}`);
 
       // 2. Eleva brilho da tela ao máximo para reflexo na pele
-      const { status } = await Brightness.requestPermissionsAsync();
+      // 2. Ajuste de brilho seguro (não interrompe o fluxo caso não haja permissão do sistema)
       let originalBrightness = 0.5;
-      if (status === 'granted') {
-        originalBrightness = await Brightness.getBrightnessAsync();
-        await Brightness.setBrightnessAsync(1.0);
+      try {
+        const bPerm = await Brightness.getPermissionsAsync();
+        if (bPerm.granted) {
+          originalBrightness = await Brightness.getBrightnessAsync();
+          await Brightness.setBrightnessAsync(1.0);
+        }
+      } catch (bErr) {
+        console.warn('[LIVENESS] Ajuste de brilho ignorado:', bErr);
       }
 
       setStatusMessage('Fique olhando para a tela...');
@@ -398,12 +385,9 @@ export default function App() {
         throw new Error('Câmera não está disponível. Volte e tente novamente.');
       }
 
-      // 4. Inicia gravação de vídeo pela câmera frontal (resolução leve para upload instantâneo < 1s no Wi-Fi)
+      // 4. Inicia gravação de vídeo pela câmera frontal (resolução 480p leve para upload instantâneo no Wi-Fi)
       console.log('[LIVENESS] Iniciando gravação de vídeo...');
-      const recordPromise = cameraRef.current.recordAsync({
-        maxDuration: 5,
-        maxFileSize: 5 * 1024 * 1024,
-      });
+      const recordPromise = cameraRef.current.recordAsync({ maxDuration: 5 });
 
       // Pequeno delay para garantir que a gravação iniciou de fato
       await new Promise((r) => setTimeout(r, 200));
@@ -414,6 +398,7 @@ export default function App() {
 
       // 5. Alterna as cores do desafio espectral
       for (const color of colors) {
+        setStatusMessage(`Gravando reflexo: ${color}...`);
         setBackgroundColor(COLOR_MAP[color] || '#FFFFFF');
         triggerHapticFeedback('impact');
         await new Promise((r) => setTimeout(r, flash_duration_ms || 500));
@@ -429,9 +414,9 @@ export default function App() {
       await new Promise((r) => setTimeout(r, 400));
       console.log(`[LIVENESS] Vídeo gravado: uri=${videoData?.uri || 'NULO'}`);
 
-      if (status === 'granted') {
+      try {
         await Brightness.setBrightnessAsync(originalBrightness);
-      }
+      } catch {}
 
       // 7. Valida o vídeo gravado
       setScreenState('PROCESSING');
@@ -461,10 +446,9 @@ export default function App() {
       setCountdown(null);
       countdownRef.current = null;
       setBackgroundColor('#000000');
-      // Mensagem de erro mais informativa
       let errTxt = error.message || 'Falha ao conectar com o servidor.';
-      if (errTxt.includes('Network request failed') || errTxt.includes('Network Request Failed')) {
-        errTxt = 'Falha de rede ao enviar o vídeo. Verifique sua conexão Wi-Fi/dados e tente novamente. Se o problema persistir, tente usar outra rota em ⚙️ Configurar.';
+      if (errTxt.includes('Network request failed') || errTxt.includes('Network Error') || errTxt.includes('timeout')) {
+        errTxt = 'Falha de comunicação com o servidor. Verifique a URL em ⚙️ Configurar ou tente novamente.';
       }
       setErrorMessage(errTxt);
       setScreenState('FAILURE');
@@ -561,8 +545,9 @@ export default function App() {
         if (sessionToken) {
           fd.append('session_token', sessionToken);
         }
+        const cleanUri = videoUri.startsWith('file://') ? videoUri : `file://${videoUri}`;
         fd.append('video', {
-          uri: videoUri,
+          uri: cleanUri,
           name: 'register_video.mp4',
           type: 'video/mp4',
         } as any);
@@ -619,8 +604,9 @@ export default function App() {
         if (sessionToken) {
           fd.append('session_token', sessionToken);
         }
+        const cleanUri = videoUri.startsWith('file://') ? videoUri : `file://${videoUri}`;
         fd.append('video', {
-          uri: videoUri,
+          uri: cleanUri,
           name: 'challenge_video.mp4',
           type: 'video/mp4',
         } as any);
@@ -700,7 +686,7 @@ export default function App() {
           {/* CABEÇALHO */}
           <View style={styles.header}>
             <Text style={styles.appTitle}>RECONHECIMENTO FÁCIL</Text>
-            <Text style={styles.appSubtitle}>Biometria Facial ao Vivo • v1.3.6 (Build 10)</Text>
+            <Text style={styles.appSubtitle}>Biometria Facial 100% ao Vivo na Nuvem</Text>
           </View>
 
           {/* MODO 1: RECONHECIMENTO FACIAL AO VIVO */}
@@ -850,9 +836,9 @@ export default function App() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('trycloudflare.com') && styles.presetButtonActive]}
-                    onPress={() => updateWorkingUrl('https://coated-meals-retained-ward.trycloudflare.com')}
+                    onPress={() => updateWorkingUrl('https://officially-establishment-prices-golden.trycloudflare.com')}
                   >
-                    <Text style={styles.presetButtonText}>🛡️ Túnel Cloudflare</Text>
+                    <Text style={styles.presetButtonText}>🛡️ Túnel Cloudflare (Wi-Fi e 4G Garantidos)</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('sslip.io') && styles.presetButtonActive]}
@@ -956,7 +942,7 @@ export default function App() {
             <View
               style={[
                 StyleSheet.absoluteFillObject,
-                { backgroundColor, opacity: 0.38 },
+                { backgroundColor, opacity: 0.85 },
               ]}
               pointerEvents="none"
             />
