@@ -19,19 +19,13 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 
-// Lista de rotas candidatas com failover automático:
-// 1. Cloudflare Tunnel HTTPS Oficial (Anycast DNS SP, sem bloqueio de cleartext, zero bloqueio de operadora)
-// 2. VPS HTTPS Let's Encrypt (sslip.io)
-// 3. VPS Porta 80 direto por IP (Nginx)
-// 4. VPS Porta 8000 direto (Uvicorn)
-const CANDIDATE_SERVERS = [
-  'https://coated-meals-retained-ward.trycloudflare.com',
-  'https://132.226.242.158.sslip.io',
-  'http://132.226.242.158',
-  'http://132.226.242.158:8000',
-];
+// Rotas oficiais da VPS Oracle:
+// 1. Primária: HTTPS com Let's Encrypt (usado no 4G/5G e na maioria dos Wi-Fis)
+// 2. Fallback: HTTP direto por IP (usado automaticamente se o roteador Wi-Fi bloquear sslip.io ou abortar DNS)
+const PRIMARY_API_URL = 'https://132.226.242.158.sslip.io';
+const FALLBACK_API_URL = 'http://132.226.242.158';
 
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || CANDIDATE_SERVERS[0];
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || PRIMARY_API_URL;
 
 type ScreenState = 'START' | 'LIVENESS' | 'PROCESSING' | 'SUCCESS' | 'REGISTER_SUCCESS' | 'FAILURE';
 type ActionMode = 'VERIFY' | 'REGISTER';
@@ -81,30 +75,30 @@ const triggerHapticFeedback = async (type: 'impact' | 'success' | 'error') => {
   }
 };
 
-// Cliente HTTP com Fallback Automático entre todas as rotas da VPS e Cloudflare
-async function fetchApiWithFallback(
+// Cliente HTTP inteligente — tenta HTTPS e cai para IP direto se o Wi-Fi bloquear DNS/der aborted
+async function fetchApi(
   path: string,
   preferredUrl: string,
   options: RequestInit = {}
 ): Promise<{ data: any; workingUrl: string }> {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const urlsToTry = Array.from(
-    new Set([preferredUrl.trim().replace(/\/+$/, ''), ...CANDIDATE_SERVERS])
-  );
+  const urlsToTry = Array.from(new Set([
+    preferredUrl.trim().replace(/\/+$/, ''),
+    PRIMARY_API_URL,
+    FALLBACK_API_URL,
+  ]));
 
   let lastError: any = null;
   for (const base of urlsToTry) {
     const fullUrl = `${base}${cleanPath}`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 7000);
     try {
       const response = await fetch(fullUrl, {
         ...options,
         signal: controller.signal,
         headers: {
           Accept: 'application/json',
-          'Bypass-Tunnel-Reminder': 'true',
-          'cf-skip-browser-warning': 'true',
           ...(options.headers || {}),
         },
       });
@@ -113,25 +107,30 @@ async function fetchApiWithFallback(
         const data = await response.json();
         return { data, workingUrl: base };
       }
+      const text = await response.text();
+      throw new Error(`Servidor retornou código ${response.status}: ${text}`);
     } catch (err: any) {
       clearTimeout(timeout);
       lastError = err;
+      console.warn(`[API] Falha em ${base} (${err.message}). Tentando próxima rota...`);
     }
   }
-  throw lastError || new Error('Não foi possível conectar ao servidor em nenhuma das rotas disponíveis.');
+  throw lastError || new Error('Não foi possível conectar ao servidor.');
 }
 
-// Upload multipart resiliente com Fallback Automático de rotas (gera novo FormData por tentativa para evitar stream corrompido)
-async function uploadMultipartWithFallback(
+// Upload multipart inteligente — tenta HTTPS e cai para IP direto se o Wi-Fi falhar
+async function uploadMultipart(
   path: string,
   createFormData: () => FormData,
   preferredUrl: string,
   timeoutMs: number = 90000
 ): Promise<{ data: any; workingUrl: string }> {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const urlsToTry = Array.from(
-    new Set([preferredUrl.trim().replace(/\/+$/, ''), ...CANDIDATE_SERVERS])
-  );
+  const urlsToTry = Array.from(new Set([
+    preferredUrl.trim().replace(/\/+$/, ''),
+    PRIMARY_API_URL,
+    FALLBACK_API_URL,
+  ]));
 
   let lastError: any = null;
   for (const base of urlsToTry) {
@@ -139,18 +138,15 @@ async function uploadMultipartWithFallback(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      console.log(`[UPLOAD] POST ${fullUrl}...`);
       const formData = createFormData();
       const response = await fetch(fullUrl, {
         method: 'POST',
         body: formData,
-        headers: {
-          Accept: 'application/json',
-          'Bypass-Tunnel-Reminder': 'true',
-          'cf-skip-browser-warning': 'true',
-        },
         signal: controller.signal,
       });
       clearTimeout(timeout);
+      console.log(`[UPLOAD] Resposta HTTP ${response.status} de ${base}`);
       const text = await response.text();
       let data: any = {};
       try {
@@ -166,8 +162,9 @@ async function uploadMultipartWithFallback(
       }
     } catch (err: any) {
       clearTimeout(timeout);
+      console.warn(`[UPLOAD] Falha em ${base}: ${err.name} - ${err.message}`);
       lastError = err;
-      // Se o backend respondeu com erro de negócio (ex: liveness não passou), não tenta outra rota
+      // Se for erro de negócio da API (ex: face não identificada), não precisa tentar outra rota
       if (
         err.message &&
         !err.message.includes('fetch') &&
@@ -240,7 +237,7 @@ export default function App() {
   const fetchRegisteredUsers = async () => {
     setLoadingUsers(true);
     try {
-      const { data, workingUrl } = await fetchApiWithFallback('/users', activeWorkingUrlRef.current);
+      const { data, workingUrl } = await fetchApi('/users', activeWorkingUrlRef.current);
       if (data?.users) {
         setRegisteredUsers(data.users);
       }
@@ -265,7 +262,7 @@ export default function App() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await fetchApiWithFallback(`/users/${userId}`, activeWorkingUrlRef.current, { method: 'DELETE' });
+              await fetchApi(`/users/${userId}`, activeWorkingUrlRef.current, { method: 'DELETE' });
               triggerHapticFeedback('impact');
               fetchRegisteredUsers();
             } catch (err: any) {
@@ -281,7 +278,7 @@ export default function App() {
   const handleTestConnection = async () => {
     setIsTestingServer(true);
     try {
-      const { data, workingUrl } = await fetchApiWithFallback('/health', apiUrl);
+      const { data, workingUrl } = await fetchApi('/health', apiUrl);
       if (data?.status === 'ok') {
         if (workingUrl !== activeWorkingUrlRef.current) {
           updateWorkingUrl(workingUrl);
@@ -342,11 +339,13 @@ export default function App() {
       speakInstruction('Aproxime o celular do rosto e olhe para a tela.', voiceAssistance);
 
       // 1. Obtém desafio dinâmico da API com fallback automático de rotas
-      const { data: challengeData, workingUrl } = await fetchApiWithFallback('/challenge', activeWorkingUrlRef.current);
+      console.log('[LIVENESS] Obtendo desafio do servidor...');
+      const { data: challengeData, workingUrl } = await fetchApi('/challenge', activeWorkingUrlRef.current);
       if (workingUrl !== activeWorkingUrlRef.current) {
         updateWorkingUrl(workingUrl);
       }
       const { colors, flash_duration_ms, session_token } = challengeData;
+      console.log(`[LIVENESS] Desafio recebido: cores=${colors}, token=${session_token}`);
 
       // 2. Eleva brilho da tela ao máximo para reflexo na pele
       const { status } = await Brightness.requestPermissionsAsync();
@@ -359,37 +358,49 @@ export default function App() {
       setStatusMessage('Fique olhando para a tela...');
       triggerHapticFeedback('impact');
 
-      // 3. Inicia gravação de vídeo pela câmera frontal
-      const recordPromise = cameraRef.current?.recordAsync({ maxDuration: 3 });
+      // 3. Verifica se a câmera está pronta antes de gravar
+      if (!cameraRef.current) {
+        throw new Error('Câmera não está disponível. Volte e tente novamente.');
+      }
+
+      // 4. Inicia gravação de vídeo pela câmera frontal (5s para garantir margem)
+      console.log('[LIVENESS] Iniciando gravação de vídeo...');
+      const recordPromise = cameraRef.current.recordAsync({ maxDuration: 5 });
+
+      // Pequeno delay para garantir que a gravação iniciou de fato
+      await new Promise((r) => setTimeout(r, 200));
 
       // Frame inicial neutro escuro (300ms)
       setBackgroundColor('#000000');
       await new Promise((r) => setTimeout(r, 300));
 
-      // 4. Alterna as cores do desafio espectral
+      // 5. Alterna as cores do desafio espectral
       for (const color of colors) {
         setBackgroundColor(COLOR_MAP[color] || '#FFFFFF');
         triggerHapticFeedback('impact');
         await new Promise((r) => setTimeout(r, flash_duration_ms || 500));
       }
 
-      // 5. Finaliza gravação e restaura brilho
+      // 6. Finaliza gravação e restaura brilho
       setBackgroundColor('#000000');
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 400));
+      console.log('[LIVENESS] Parando gravação...');
       cameraRef.current?.stopRecording();
       const videoData = await recordPromise;
+      console.log(`[LIVENESS] Vídeo gravado: uri=${videoData?.uri || 'NULO'}`);
 
       if (status === 'granted') {
         await Brightness.setBrightnessAsync(originalBrightness);
       }
 
-      // 6. Processa o vídeo de acordo com a ação (Verificar ou Cadastrar)
+      // 7. Valida o vídeo gravado
       setScreenState('PROCESSING');
 
       if (!videoData?.uri) {
-        throw new Error('Não foi possível capturar o vídeo da câmera.');
+        throw new Error('A câmera não conseguiu gravar o vídeo. Verifique as permissões da câmera e tente novamente.');
       }
 
+      // 8. Processa o vídeo de acordo com a ação (Verificar ou Cadastrar)
       if (actionMode === 'REGISTER') {
         setStatusMessage('Cadastrando biometria facial na nuvem (YuNet + SFace)...');
         speakInstruction('Salvando seus traços biométricos no servidor. Aguarde um instante.', voiceAssistance);
@@ -404,13 +415,17 @@ export default function App() {
       setCountdown(null);
       countdownRef.current = null;
     } catch (error: any) {
-      console.error(error);
+      console.error('[LIVENESS] Erro:', error.name, error.message);
       setIsSequenceRunning(false);
       isSequenceRunningRef.current = false;
       setCountdown(null);
       countdownRef.current = null;
       setBackgroundColor('#000000');
-      const errTxt = error.message || 'Falha ao conectar com o servidor.';
+      // Mensagem de erro mais informativa
+      let errTxt = error.message || 'Falha ao conectar com o servidor.';
+      if (errTxt.includes('Network request failed') || errTxt.includes('Network Request Failed')) {
+        errTxt = 'Falha de rede ao enviar o vídeo. Verifique sua conexão Wi-Fi/dados e tente novamente. Se o problema persistir, tente usar outra rota em ⚙️ Configurar.';
+      }
       setErrorMessage(errTxt);
       setScreenState('FAILURE');
       triggerHapticFeedback('error');
@@ -498,6 +513,7 @@ export default function App() {
   ) => {
     try {
       setStatusMessage('Enviando vídeo para o servidor...');
+      console.log(`[REGISTER] Preparando upload: videoUri=${videoUri}, user=${userName}`);
       const createFd = () => {
         const fd = new FormData();
         fd.append('name', userName.trim());
@@ -514,7 +530,7 @@ export default function App() {
       };
 
       const targetUrl = verifiedUrl || activeWorkingUrlRef.current;
-      const { data, workingUrl } = await uploadMultipartWithFallback('/register', createFd, targetUrl);
+      const { data, workingUrl } = await uploadMultipart('/register', createFd, targetUrl);
       if (workingUrl !== activeWorkingUrlRef.current) {
         updateWorkingUrl(workingUrl);
       }
@@ -556,6 +572,7 @@ export default function App() {
   ) => {
     try {
       setStatusMessage('Enviando vídeo para reconhecimento...');
+      console.log(`[VERIFY] Preparando upload: videoUri=${videoUri}`);
       const createFd = () => {
         const fd = new FormData();
         fd.append('expected_colors', colors.join(','));
@@ -571,7 +588,7 @@ export default function App() {
       };
 
       const targetUrl = verifiedUrl || activeWorkingUrlRef.current;
-      const { data, workingUrl } = await uploadMultipartWithFallback('/verify', createFd, targetUrl);
+      const { data, workingUrl } = await uploadMultipart('/verify', createFd, targetUrl);
       if (workingUrl !== activeWorkingUrlRef.current) {
         updateWorkingUrl(workingUrl);
       }
@@ -783,37 +800,13 @@ export default function App() {
                   autoCorrect={false}
                 />
 
-                <Text style={styles.presetsLabel}>Atalhos Rápidos de Conexão:</Text>
+                <Text style={styles.presetsLabel}>Atalho:</Text>
                 <View style={styles.presetsContainer}>
                   <TouchableOpacity
-                    style={[styles.presetButton, apiUrl.includes('trycloudflare.com') && styles.presetButtonActive]}
-                    onPress={() => updateWorkingUrl('https://coated-meals-retained-ward.trycloudflare.com')}
-                  >
-                    <Text style={styles.presetButtonText}>⚡ Cloudflare HTTPS (Oficial / Zero Falhas)</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.presetButton, apiUrl.includes('sslip.io') && styles.presetButtonActive]}
+                    style={[styles.presetButton, styles.presetButtonActive]}
                     onPress={() => updateWorkingUrl('https://132.226.242.158.sslip.io')}
                   >
-                    <Text style={styles.presetButtonText}>🔒 VPS HTTPS Direto (sslip.io)</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.presetButton}
-                    onPress={() => updateWorkingUrl('http://132.226.242.158')}
-                  >
-                    <Text style={styles.presetButtonText}>🌐 VPS Porta 80</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.presetButton}
-                    onPress={() => updateWorkingUrl('http://132.226.242.158:8000')}
-                  >
-                    <Text style={styles.presetButtonText}>🔌 VPS Porta 8000</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.presetButton}
-                    onPress={() => updateWorkingUrl('http://192.168.1.44:8000')}
-                  >
-                    <Text style={styles.presetButtonText}>💻 Wi-Fi Local (192.168.1.44)</Text>
+                    <Text style={styles.presetButtonText}>🔒 Restaurar Servidor Padrão (VPS Oracle HTTPS)</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -926,20 +919,9 @@ export default function App() {
           )}
         </TouchableOpacity>
 
-        {/* Rodapé da Câmera: Botão de Início Imediato e Indicador Automático */}
+        {/* Rodapé da Câmera: Indicador Automático e Cancelar */}
         {!isSequenceRunning && countdown === null ? (
           <View style={styles.livenessActions}>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={triggerAutomaticLiveness}
-              style={styles.startLivenessButton}
-            >
-              <Text style={styles.startLivenessButtonIcon}>⚡</Text>
-              <Text style={styles.startLivenessButtonText}>
-                ESTOU PRONTO (INICIAR)
-              </Text>
-            </TouchableOpacity>
-
             <View style={styles.autoTimerBadge}>
               <ActivityIndicator
                 size="small"

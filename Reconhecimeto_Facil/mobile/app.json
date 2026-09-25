@@ -42,6 +42,10 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",
+        "android.permission.WRITE_SETTINGS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
         "android.permission.WRITE_SETTINGS"
       ]
     },
@@ -55,6 +59,12 @@
         "projectId": "a3ac5a95-b43a-4923-8cb2-74a459932ef0"
       }
     },
-    "owner": "abraao1098"
+    "owner": "abraao1098",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a3ac5a95-b43a-4923-8cb2-74a459932ef0"
+    }
   }
 }
