@@ -17,11 +17,21 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Brightness from 'expo-brightness';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
-import axios from 'axios';
 import { StatusBar } from 'expo-status-bar';
 
-// Endereço IP padrão: Cloudflare HTTPS ultra-rápido (Anycast DNS com baixa latência no Brasil)
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://coated-meals-retained-ward.trycloudflare.com';
+// Lista de rotas candidatas com failover automático:
+// 1. VPS Porta 80 direto por IP (sem DNS, sem TLS overhead, zero bloqueios de operadora no Brasil)
+// 2. VPS HTTPS Let's Encrypt (sslip.io)
+// 3. Cloudflare Tunnel HTTPS Oficial
+// 4. VPS Porta 8000 direto (Uvicorn)
+const CANDIDATE_SERVERS = [
+  'http://132.226.242.158',
+  'https://132.226.242.158.sslip.io',
+  'https://coated-meals-retained-ward.trycloudflare.com',
+  'http://132.226.242.158:8000',
+];
+
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || CANDIDATE_SERVERS[0];
 
 type ScreenState = 'START' | 'LIVENESS' | 'PROCESSING' | 'SUCCESS' | 'REGISTER_SUCCESS' | 'FAILURE';
 type ActionMode = 'VERIFY' | 'REGISTER';
@@ -71,66 +81,101 @@ const triggerHapticFeedback = async (type: 'impact' | 'success' | 'error') => {
   }
 };
 
-// Resiliência de rede com Retry e Backoff Exponencial
-async function executeWithRetry<T>(
-  action: () => Promise<T>,
-  maxRetries: number = 3,
-  baseDelayMs: number = 1000,
-  onRetry?: (tentativa: number, total: number) => void
-): Promise<T> {
-  let attempt = 0;
-  while (attempt < maxRetries) {
+// Cliente HTTP com Fallback Automático entre todas as rotas da VPS e Cloudflare
+async function fetchApiWithFallback(
+  path: string,
+  preferredUrl: string,
+  options: RequestInit = {}
+): Promise<{ data: any; workingUrl: string }> {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const urlsToTry = Array.from(
+    new Set([preferredUrl.trim().replace(/\/+$/, ''), ...CANDIDATE_SERVERS])
+  );
+
+  let lastError: any = null;
+  for (const base of urlsToTry) {
+    const fullUrl = `${base}${cleanPath}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
     try {
-      return await action();
-    } catch (error: any) {
-      attempt++;
-      if (attempt >= maxRetries) {
-        throw error;
+      const response = await fetch(fullUrl, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          'Bypass-Tunnel-Reminder': 'true',
+          ...(options.headers || {}),
+        },
+      });
+      clearTimeout(timeout);
+      if (response.ok) {
+        const data = await response.json();
+        return { data, workingUrl: base };
       }
-      if (onRetry) {
-        onRetry(attempt, maxRetries);
-      }
-      const delay = baseDelayMs * Math.pow(2, attempt - 1);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+    } catch (err: any) {
+      clearTimeout(timeout);
+      lastError = err;
     }
   }
-  throw new Error('Falha na comunicação após múltiplas tentativas.');
+  throw lastError || new Error('Não foi possível conectar ao servidor em nenhuma das rotas disponíveis.');
 }
 
-// Upload multipart confiável usando fetch nativo do React Native (sem conflito de boundary do OkHttp)
-async function postMultipartWithFetch(
-  url: string,
+// Upload multipart resiliente com Fallback Automático de rotas
+async function uploadMultipartWithFallback(
+  path: string,
   formData: FormData,
+  preferredUrl: string,
   timeoutMs: number = 90000
-): Promise<any> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Accept': 'application/json',
-        // Não defina Content-Type manualmente: o React Native e o OkHttp inserem
-        // 'multipart/form-data; boundary=...' automaticamente.
-      },
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data: any = {};
+): Promise<{ data: any; workingUrl: string }> {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const urlsToTry = Array.from(
+    new Set([preferredUrl.trim().replace(/\/+$/, ''), ...CANDIDATE_SERVERS])
+  );
+
+  let lastError: any = null;
+  for (const base of urlsToTry) {
+    const fullUrl = `${base}${cleanPath}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      data = JSON.parse(text);
-    } catch {
-      data = { raw: text };
+      const response = await fetch(fullUrl, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const text = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { raw: text };
+      }
+      if (response.ok) {
+        return { data, workingUrl: base };
+      } else {
+        const msg = data.detail || data.reason || `Servidor retornou código ${response.status}`;
+        throw new Error(msg);
+      }
+    } catch (err: any) {
+      clearTimeout(timeout);
+      lastError = err;
+      // Se o backend respondeu com erro de negócio (ex: liveness não passou), não tenta outra rota
+      if (
+        err.message &&
+        !err.message.includes('fetch') &&
+        !err.message.includes('abort') &&
+        !err.message.includes('Network') &&
+        !err.message.includes('Failed')
+      ) {
+        throw err;
+      }
     }
-    if (!response.ok) {
-      const msg = data.detail || data.reason || `Servidor retornou código ${response.status}`;
-      throw new Error(msg);
-    }
-    return data;
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastError || new Error('Falha na comunicação com o servidor após tentar todas as rotas.');
 }
 
 export default function App() {
@@ -162,10 +207,8 @@ export default function App() {
   const [isSequenceRunning, setIsSequenceRunning] = useState<boolean>(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [faceAligned, setFaceAligned] = useState<boolean>(false);
-  const [cameraMode, setCameraMode] = useState<'picture' | 'video'>('picture');
   const [isCameraReady, setIsCameraReady] = useState<boolean>(false);
 
-  const isProbingFaceRef = useRef<boolean>(false);
   const countdownRef = useRef<number | null>(null);
   const isSequenceRunningRef = useRef<boolean>(false);
   const autoStartTimerRef = useRef<any>(null);
@@ -179,18 +222,20 @@ export default function App() {
     }
   }, [permission]);
 
-  // Carrega lista de usuários da VPS ao iniciar
+  // Carrega lista de usuários da VPS ao iniciar ou quando a URL mudar
   useEffect(() => {
     fetchRegisteredUsers();
   }, [apiUrl]);
 
   const fetchRegisteredUsers = async () => {
-    const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     setLoadingUsers(true);
     try {
-      const res = await axios.get(`${cleanUrl}/users`, { timeout: 10000 });
-      if (res.data?.users) {
-        setRegisteredUsers(res.data.users);
+      const { data, workingUrl } = await fetchApiWithFallback('/users', apiUrl);
+      if (data?.users) {
+        setRegisteredUsers(data.users);
+      }
+      if (workingUrl !== apiUrl) {
+        setApiUrl(workingUrl);
       }
     } catch {
       // Falha silenciosa de sincronização inicial
@@ -209,9 +254,8 @@ export default function App() {
           text: 'Excluir',
           style: 'destructive',
           onPress: async () => {
-            const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
             try {
-              await axios.delete(`${cleanUrl}/users/${userId}`);
+              await fetchApiWithFallback(`/users/${userId}`, apiUrl, { method: 'DELETE' });
               triggerHapticFeedback('impact');
               fetchRegisteredUsers();
             } catch (err: any) {
@@ -223,19 +267,18 @@ export default function App() {
     );
   };
 
-  // Testa conectividade com o backend
+  // Testa conectividade com o backend testando as rotas em fallback
   const handleTestConnection = async () => {
     setIsTestingServer(true);
-    const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
-      const res = await axios.get(`${cleanUrl}/health`, {
-        timeout: 12000,
-        headers: { 'Bypass-Tunnel-Reminder': 'true' },
-      });
-      if (res.data?.status === 'ok') {
+      const { data, workingUrl } = await fetchApiWithFallback('/health', apiUrl);
+      if (data?.status === 'ok') {
+        if (workingUrl !== apiUrl) {
+          setApiUrl(workingUrl);
+        }
         Alert.alert(
           'Servidor Conectado! ✅',
-          `Servidor biométrico ativo na nuvem.\nModelo: ${res.data.model || 'YuNet-SFace'}\nVersão: ${res.data.version || '1.2.0'}`
+          `Conectado com sucesso!\nRota ativa: ${workingUrl}\nModelo: ${data.model || 'YuNet-SFace'}\nVersão: ${data.version || '1.3.0'}`
         );
         fetchRegisteredUsers();
       } else {
@@ -244,7 +287,7 @@ export default function App() {
     } catch (err: any) {
       Alert.alert(
         'Falha na Conexão ❌',
-        `Não foi possível conectar a:\n${cleanUrl}\n\nDetalhes: ${err.message || 'Sem resposta do servidor'}`
+        `Não foi possível conectar em nenhuma rota.\n\nDetalhes: ${err.message || 'Sem resposta do servidor'}`
       );
     } finally {
       setIsTestingServer(false);
@@ -254,7 +297,6 @@ export default function App() {
   // Iniciar Reconhecimento Facial ao Vivo
   const handleStartVerify = () => {
     setActionMode('VERIFY');
-    setCameraMode('picture');
     setIsCameraReady(false);
     setFaceAligned(false);
     setCountdown(null);
@@ -273,7 +315,6 @@ export default function App() {
       return;
     }
     setActionMode('REGISTER');
-    setCameraMode('picture');
     setIsCameraReady(false);
     setFaceAligned(false);
     setCountdown(null);
@@ -286,19 +327,16 @@ export default function App() {
 
   // Sequência de Prova de Vida e Gravação da Câmera
   const runLivenessSequence = async () => {
-    const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
       setStatusMessage('Sincronizando com o servidor...');
       speakInstruction('Aproxime o celular do rosto e olhe para a tela.', voiceAssistance);
 
-      // 1. Obtém desafio dinâmico da API com retry automático e timeout tolerante (12s)
-      const res = await executeWithRetry(
-        () => axios.get(`${cleanUrl}/challenge`, { timeout: 12000 }),
-        3,
-        1000,
-        (att, tot) => setStatusMessage(`Reconectando ao servidor (${att}/${tot})...`)
-      );
-      const { colors, flash_duration_ms, session_token } = res.data;
+      // 1. Obtém desafio dinâmico da API com fallback automático de rotas
+      const { data: challengeData, workingUrl } = await fetchApiWithFallback('/challenge', apiUrl);
+      if (workingUrl !== apiUrl) {
+        setApiUrl(workingUrl);
+      }
+      const { colors, flash_duration_ms, session_token } = challengeData;
 
       // 2. Eleva brilho da tela ao máximo para reflexo na pele
       const { status } = await Brightness.requestPermissionsAsync();
@@ -355,14 +393,12 @@ export default function App() {
       isSequenceRunningRef.current = false;
       setCountdown(null);
       countdownRef.current = null;
-      setCameraMode('picture');
     } catch (error: any) {
       console.error(error);
       setIsSequenceRunning(false);
       isSequenceRunningRef.current = false;
       setCountdown(null);
       countdownRef.current = null;
-      setCameraMode('picture');
       setBackgroundColor('#000000');
       const errTxt = error.message || 'Falha ao conectar com o servidor.';
       setErrorMessage(errTxt);
@@ -372,7 +408,7 @@ export default function App() {
     }
   };
 
-  // Dispara a contagem regressiva e inicia a prova de vida automaticamente assim que o software detecta o rosto
+  // Dispara a contagem regressiva e inicia a prova de vida automaticamente
   const triggerAutomaticLiveness = () => {
     if (isSequenceRunningRef.current || countdownRef.current !== null) return;
 
@@ -381,8 +417,6 @@ export default function App() {
       autoStartTimerRef.current = null;
     }
 
-    // Altera o modo da câmera para vídeo (estabiliza durante a contagem de 3 segundos)
-    setCameraMode('video');
     setFaceAligned(true);
     setStatusMessage('Rosto Pronto! ✅');
     triggerHapticFeedback('impact');
@@ -411,7 +445,7 @@ export default function App() {
     }, 900);
   };
 
-  // Ao entrar na tela de Liveness, reseta estados e ativa temporizador de enquadramento consciente (3.5s)
+  // Ao entrar na tela de Liveness, aguarda o enquadramento consciente e inicia automaticamente após 2.2s
   useEffect(() => {
     if (screenState === 'LIVENESS') {
       setIsSequenceRunning(false);
@@ -419,17 +453,16 @@ export default function App() {
       setCountdown(null);
       countdownRef.current = null;
       setFaceAligned(false);
-      setCameraMode('picture');
       setStatusMessage('Posicione o rosto no círculo...');
       speakInstruction('Posicione o seu rosto no centro da tela e olhe para a câmera.', voiceAssistance);
 
-      // Temporizador de garantia (3.5s): se a pessoa já estiver posicionada e o probe demorar, inicia automaticamente!
+      // Início automático e suave: dá 2.2 segundos para a pessoa se posicionar
       if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current);
       autoStartTimerRef.current = setTimeout(() => {
         if (!isSequenceRunningRef.current && countdownRef.current === null) {
           triggerAutomaticLiveness();
         }
-      }, 3500);
+      }, 2200);
     } else {
       if (autoStartTimerRef.current) {
         clearTimeout(autoStartTimerRef.current);
@@ -445,93 +478,26 @@ export default function App() {
     };
   }, [screenState]);
 
-  // Detecção facial automática contínua: monitora a câmera até identificar e centralizar o rosto
-  useEffect(() => {
-    if (screenState !== 'LIVENESS' || isSequenceRunning || countdown !== null) {
-      return;
-    }
-
-    let isCancelled = false;
-    let probeTimeout: any = null;
-
-    const probeCycle = async () => {
-      if (isCancelled || isSequenceRunningRef.current || countdownRef.current !== null) return;
-
-      if (!isProbingFaceRef.current && cameraRef.current) {
-        try {
-          isProbingFaceRef.current = true;
-          const photo = await (cameraRef.current as any).takePictureAsync?.({
-            quality: 0.15,
-            skipProcessing: false,
-            base64: true,
-            shutterSound: false,
-          });
-
-          if (photo?.base64 && !isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
-            const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
-            const res = await axios.post(
-              `${cleanUrl}/detect_face`,
-              { image_base64: photo.base64 },
-              { timeout: 3500 }
-            );
-
-            if (!isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
-              if (res.data?.detected && res.data?.centered) {
-                setFaceAligned(true);
-                setStatusMessage('Rosto Detectado! ✅');
-                triggerAutomaticLiveness();
-                return; // Encerra probe: liveness automático iniciado!
-              } else if (res.data?.message) {
-                setStatusMessage(res.data.message);
-              }
-            }
-          }
-        } catch {
-          // Ignora falhas pontuais: o temporizador de segurança garantirá o início após 3.5s
-        } finally {
-          isProbingFaceRef.current = false;
-        }
-      }
-
-      if (!isCancelled && countdownRef.current === null && !isSequenceRunningRef.current) {
-        probeTimeout = setTimeout(probeCycle, 450);
-      }
-    };
-
-    // Inicia após breve estabilização da câmera
-    probeTimeout = setTimeout(probeCycle, 500);
-
-    return () => {
-      isCancelled = true;
-      if (probeTimeout) clearTimeout(probeTimeout);
-    };
-  }, [screenState, isSequenceRunning, countdown, apiUrl]);
-
-  // Envia vídeo para /register (Cadastro ao vivo)
+  // Envia vídeo para /register (Cadastro ao vivo com Fallback Automático)
   const sendRegistration = async (videoUri: string, userName: string, colors: string[], sessionToken?: string) => {
-    const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
       setStatusMessage('Enviando vídeo para o servidor...');
+      const fd = new FormData();
+      fd.append('name', userName.trim());
+      fd.append('expected_colors', colors.join(','));
+      if (sessionToken) {
+        fd.append('session_token', sessionToken);
+      }
+      fd.append('video', {
+        uri: videoUri,
+        name: 'register_video.mp4',
+        type: 'video/mp4',
+      } as any);
 
-      const data = await executeWithRetry(
-        () => {
-          const fd = new FormData();
-          fd.append('name', userName.trim());
-          fd.append('expected_colors', colors.join(','));
-          if (sessionToken) {
-            fd.append('session_token', sessionToken);
-          }
-          fd.append('video', {
-            uri: videoUri,
-            name: 'register_video.mp4',
-            type: 'video/mp4',
-          } as any);
-          return postMultipartWithFetch(`${cleanUrl}/register`, fd, 90000);
-        },
-        2,
-        2000,
-        (att, tot) => setStatusMessage(`Reenviando vídeo para o servidor (${att}/${tot})...`)
-      );
+      const { data, workingUrl } = await uploadMultipartWithFallback('/register', fd, apiUrl);
+      if (workingUrl !== apiUrl) {
+        setApiUrl(workingUrl);
+      }
 
       if (data.success) {
         setRegistrationData(data);
@@ -561,30 +527,25 @@ export default function App() {
     }
   };
 
-  // Envia vídeo para /verify (Reconhecimento ao vivo)
+  // Envia vídeo para /verify (Reconhecimento ao vivo com Fallback Automático)
   const sendVerification = async (videoUri: string, colors: string[], sessionToken?: string) => {
-    const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
     try {
       setStatusMessage('Enviando vídeo para reconhecimento...');
+      const fd = new FormData();
+      fd.append('expected_colors', colors.join(','));
+      if (sessionToken) {
+        fd.append('session_token', sessionToken);
+      }
+      fd.append('video', {
+        uri: videoUri,
+        name: 'challenge_video.mp4',
+        type: 'video/mp4',
+      } as any);
 
-      const data = await executeWithRetry(
-        () => {
-          const fd = new FormData();
-          fd.append('expected_colors', colors.join(','));
-          if (sessionToken) {
-            fd.append('session_token', sessionToken);
-          }
-          fd.append('video', {
-            uri: videoUri,
-            name: 'challenge_video.mp4',
-            type: 'video/mp4',
-          } as any);
-          return postMultipartWithFetch(`${cleanUrl}/verify`, fd, 90000);
-        },
-        2,
-        2000,
-        (att, tot) => setStatusMessage(`Reenviando vídeo para o servidor (${att}/${tot})...`)
-      );
+      const { data, workingUrl } = await uploadMultipartWithFallback('/verify', fd, apiUrl);
+      if (workingUrl !== apiUrl) {
+        setApiUrl(workingUrl);
+      }
 
       setVerificationData(data);
 
@@ -634,7 +595,6 @@ export default function App() {
     setIsSequenceRunning(false);
     isSequenceRunningRef.current = false;
     setFaceAligned(false);
-    setCameraMode('picture');
     setScreenState('START');
   };
 
@@ -905,7 +865,7 @@ export default function App() {
             ref={cameraRef}
             style={styles.cameraView}
             facing="front"
-            mode={cameraMode}
+            mode="video"
             onCameraReady={() => setIsCameraReady(true)}
             mute={true}
           />
@@ -937,33 +897,30 @@ export default function App() {
           )}
         </TouchableOpacity>
 
-        {/* Rodapé da Câmera: Detecção Facial 100% Automática e Botão Cancelar */}
+        {/* Rodapé da Câmera: Botão de Início Imediato e Indicador Automático */}
         {!isSequenceRunning && countdown === null ? (
           <View style={styles.livenessActions}>
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={0.85}
               onPress={triggerAutomaticLiveness}
-              style={[
-                styles.autoDetectStatusBadge,
-                faceAligned && styles.autoDetectStatusBadgeActive,
-              ]}
+              style={styles.startLivenessButton}
             >
-              {!faceAligned && (
-                <ActivityIndicator
-                  size="small"
-                  color="#38BDF8"
-                  style={{ marginRight: 10 }}
-                />
-              )}
-              <Text style={styles.autoDetectStatusBadgeIcon}>
-                {faceAligned ? '✅' : '🔍'}
-              </Text>
-              <Text style={styles.autoDetectStatusText}>
-                {faceAligned
-                  ? 'ROSTO IDENTIFICADO! INICIANDO...'
-                  : 'PROCURANDO SEU ROSTO... (ou toque aqui)'}
+              <Text style={styles.startLivenessButtonIcon}>⚡</Text>
+              <Text style={styles.startLivenessButtonText}>
+                ESTOU PRONTO (INICIAR)
               </Text>
             </TouchableOpacity>
+
+            <View style={styles.autoTimerBadge}>
+              <ActivityIndicator
+                size="small"
+                color="#38BDF8"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.autoTimerBadgeText}>
+                Início automático em instantes...
+              </Text>
+            </View>
 
             <TouchableOpacity
               style={styles.cancelLivenessButton}
@@ -1516,41 +1473,50 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignItems: 'center',
   },
-  autoDetectStatusBadge: {
+  startLivenessButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(30, 41, 59, 0.85)',
-    borderWidth: 1.5,
-    borderColor: '#38BDF8',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    backgroundColor: '#0284C7',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     borderRadius: 16,
     width: '100%',
-    shadowColor: '#38BDF8',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  autoDetectStatusBadgeActive: {
-    borderColor: '#10B981',
-    backgroundColor: 'rgba(6, 78, 59, 0.85)',
-    shadowColor: '#10B981',
+  startLivenessButtonIcon: {
+    fontSize: 22,
+    marginRight: 10,
+    color: '#FFFFFF',
   },
-  autoDetectStatusBadgeIcon: {
-    fontSize: 20,
-    marginRight: 8,
-  },
-  autoDetectStatusText: {
-    color: '#F8FAFC',
-    fontSize: 15,
-    fontWeight: '700',
+  startLivenessButtonText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  autoTimerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(30, 41, 59, 0.75)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  autoTimerBadgeText: {
+    color: '#94A3B8',
+    fontSize: 13,
+    fontWeight: '500',
   },
   cancelLivenessButton: {
     paddingVertical: 12,
-    marginTop: 10,
+    marginTop: 8,
     alignItems: 'center',
   },
   cancelLivenessButtonText: {
