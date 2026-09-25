@@ -21,12 +21,9 @@ import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
 import axios from 'axios';
 
-// Servidor Cloudflare Anycast Dedicado (Zero bloqueios em qualquer Wi-Fi/4G):
-// https://officially-establishment-prices-golden.trycloudflare.com
-// Servidor Oficial com Let's Encrypt:
+// Servidor Oficial de Produção (VPS Oracle com SSL Let's Encrypt nativo):
 // https://api.abraao-dev.tech
 const CANDIDATE_SERVERS = [
-  'https://officially-establishment-prices-golden.trycloudflare.com',
   'https://api.abraao-dev.tech',
 ];
 
@@ -96,13 +93,12 @@ async function fetchApi(
   for (let attempt = 1; attempt <= 2; attempt++) {
     for (const base of urlsToTry) {
       const fullUrl = `${base}${cleanPath}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
       try {
-        const method = (options.method || 'GET').toLowerCase();
-        const res = await axios({
-          url: fullUrl,
-          method,
-          data: options.body,
-          timeout: 25000,
+        const response = await fetch(fullUrl, {
+          ...options,
+          signal: controller.signal,
           headers: {
             Accept: 'application/json',
             'Bypass-Tunnel-Reminder': 'true',
@@ -110,8 +106,15 @@ async function fetchApi(
             ...(options.headers || {}),
           },
         });
-        return { data: res.data, workingUrl: base };
+        clearTimeout(timeout);
+        if (response.ok) {
+          const data = await response.json();
+          return { data, workingUrl: base };
+        }
+        const text = await response.text();
+        throw new Error(`Servidor retornou código ${response.status}: ${text}`);
       } catch (err: any) {
+        clearTimeout(timeout);
         lastError = err;
         console.warn(`[API] Tentativa ${attempt} em ${base} falhou: ${err.message}`);
         if (attempt === 1) {
@@ -212,7 +215,6 @@ export default function App() {
   const autoStartTimerRef = useRef<any>(null);
 
   const cameraRef = useRef<CameraView>(null);
-  const challengePromiseRef = useRef<Promise<{ data: any; workingUrl: string }> | null>(null);
 
   // Solicita permissões ao inicializar
   useEffect(() => {
@@ -323,9 +325,6 @@ export default function App() {
     setIsSequenceRunning(false);
     isSequenceRunningRef.current = false;
     triggerHapticFeedback('impact');
-    // Pré-carrega o desafio imediatamente em background durante o enquadramento e contagem
-    console.log('[PREFETCH] Disparando busca antecipada do desafio...');
-    challengePromiseRef.current = fetchApi('/challenge', activeWorkingUrlRef.current);
     setScreenState('LIVENESS');
   };
 
@@ -344,9 +343,6 @@ export default function App() {
     setIsSequenceRunning(false);
     isSequenceRunningRef.current = false;
     triggerHapticFeedback('impact');
-    // Pré-carrega o desafio imediatamente em background durante o enquadramento e contagem
-    console.log('[PREFETCH] Disparando busca antecipada do desafio...');
-    challengePromiseRef.current = fetchApi('/challenge', activeWorkingUrlRef.current);
     setScreenState('LIVENESS');
   };
 
@@ -356,28 +352,14 @@ export default function App() {
       setStatusMessage('Sincronizando com o servidor...');
       speakInstruction('Aproxime o celular do rosto e olhe para a tela.', voiceAssistance);
 
-      // 1. Obtém desafio dinâmico da API (usa resultado pré-carregado ou busca com retry)
-      let challengeResult: { data: any; workingUrl: string };
-      if (challengePromiseRef.current) {
-        try {
-          console.log('[LIVENESS] Consumindo desafio pré-carregado...');
-          challengeResult = await challengePromiseRef.current;
-        } catch {
-          console.log('[LIVENESS] Pré-carregamento falhou, tentando novamente...');
-          challengeResult = await fetchApi('/challenge', activeWorkingUrlRef.current);
-        }
-      } else {
-        console.log('[LIVENESS] Obtendo desafio do servidor...');
-        challengeResult = await fetchApi('/challenge', activeWorkingUrlRef.current);
-      }
-      challengePromiseRef.current = null;
-
-      const { data: challengeData, workingUrl } = challengeResult;
+      // 1. Obtém desafio dinâmico da API com fallback automático de rotas
+      console.log('[LIVENESS] Obtendo desafio do servidor...');
+      const { data: challengeData, workingUrl } = await fetchApi('/challenge', activeWorkingUrlRef.current);
       if (workingUrl !== activeWorkingUrlRef.current) {
         updateWorkingUrl(workingUrl);
       }
       const { colors, flash_duration_ms, session_token } = challengeData;
-      console.log(`[LIVENESS] Desafio pronto: cores=${colors}, token=${session_token}`);
+      console.log(`[LIVENESS] Desafio recebido: cores=${colors}, token=${session_token}`);
 
       // 2. Eleva brilho da tela ao máximo para reflexo na pele
       // 2. Ajuste de brilho seguro (não interrompe o fluxo caso não haja permissão do sistema)
@@ -851,9 +833,9 @@ export default function App() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('trycloudflare.com') && styles.presetButtonActive]}
-                    onPress={() => updateWorkingUrl('https://officially-establishment-prices-golden.trycloudflare.com')}
+                    onPress={() => updateWorkingUrl('https://coated-meals-retained-ward.trycloudflare.com')}
                   >
-                    <Text style={styles.presetButtonText}>🛡️ Túnel Cloudflare (Wi-Fi e 4G Garantidos)</Text>
+                    <Text style={styles.presetButtonText}>🛡️ Túnel Cloudflare</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('sslip.io') && styles.presetButtonActive]}
