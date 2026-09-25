@@ -20,18 +20,17 @@ import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 
 // Rotas oficiais com failover inteligente (Wi-Fi e 4G/5G móvel):
-// 1. Cloudflare Anycast HTTPS (Oficial / Zero Falhas no Wi-Fi):
-//    - Servidores Anycast em São Paulo (GRU)
-//    - Suporta IPv4 e IPv6 nativo (evita bug de DNS AAAA no Wi-Fi doméstico)
-//    - Imune a bloqueio de DNS Rebinding e firewalls de roteadores Wi-Fi
-// 2. VPS Oracle HTTPS Let's Encrypt (sslip.io)
-// 3. VPS Oracle HTTP direto Porta 80
-// 4. VPS Oracle HTTP direto Porta 8000
+// 1. Domínio Oficial de Produção (Cloudflare CDN Anycast - GRU/SP):
+//    - https://api.abraao-dev.tech (Totalmente imune a bloqueios de roteadores Wi-Fi / DNS Rebinding)
+//    - Suporta IPv4 e IPv6 nativo com certificado SSL válido universalmente
+// 2. Túnel Redundante Cloudflare Anycast HTTPS
+// 3. VPS Oracle HTTPS Let's Encrypt (sslip.io)
+// 4. VPS Oracle HTTP direto Porta 80
 const CANDIDATE_SERVERS = [
+  'https://api.abraao-dev.tech',
   'https://coated-meals-retained-ward.trycloudflare.com',
   'https://132.226.242.158.sslip.io',
   'http://132.226.242.158',
-  'http://132.226.242.158:8000',
 ];
 
 const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || CANDIDATE_SERVERS[0];
@@ -807,7 +806,7 @@ export default function App() {
                   style={styles.serverInput}
                   value={apiUrl}
                   onChangeText={updateWorkingUrl}
-                  placeholder="https://132.226.242.158.sslip.io"
+                  placeholder="https://api.abraao-dev.tech"
                   placeholderTextColor="#64748B"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -816,28 +815,28 @@ export default function App() {
                 <Text style={styles.presetsLabel}>Atalhos Rápidos de Conexão:</Text>
                 <View style={styles.presetsContainer}>
                   <TouchableOpacity
+                    style={[styles.presetButton, apiUrl.includes('abraao-dev.tech') && styles.presetButtonActive]}
+                    onPress={() => updateWorkingUrl('https://api.abraao-dev.tech')}
+                  >
+                    <Text style={styles.presetButtonText}>⚡ Domínio Oficial (api.abraao-dev.tech - Wi-Fi/4G)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('trycloudflare.com') && styles.presetButtonActive]}
                     onPress={() => updateWorkingUrl('https://coated-meals-retained-ward.trycloudflare.com')}
                   >
-                    <Text style={styles.presetButtonText}>⚡ Cloudflare HTTPS (Wi-Fi e 4G Recomendado)</Text>
+                    <Text style={styles.presetButtonText}>🛡️ Túnel Cloudflare</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.presetButton, apiUrl.includes('sslip.io') && styles.presetButtonActive]}
                     onPress={() => updateWorkingUrl('https://132.226.242.158.sslip.io')}
                   >
-                    <Text style={styles.presetButtonText}>🔒 VPS HTTPS Direto (sslip.io)</Text>
+                    <Text style={styles.presetButtonText}>🔒 VPS Direto HTTPS (sslip.io)</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.presetButton, apiUrl === 'http://132.226.242.158' && styles.presetButtonActive]}
                     onPress={() => updateWorkingUrl('http://132.226.242.158')}
                   >
-                    <Text style={styles.presetButtonText}>🌐 VPS Porta 80</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.presetButton, apiUrl.includes(':8000') && !apiUrl.includes('192.168') && styles.presetButtonActive]}
-                    onPress={() => updateWorkingUrl('http://132.226.242.158:8000')}
-                  >
-                    <Text style={styles.presetButtonText}>🔌 VPS Porta 8000</Text>
+                    <Text style={styles.presetButtonText}>🌐 VPS Porta 80 (HTTP)</Text>
                   </TouchableOpacity>
                 </View>
 
