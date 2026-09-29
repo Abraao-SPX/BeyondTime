@@ -934,16 +934,6 @@ export default function App() {
             onCameraReady={() => setIsCameraReady(true)}
             mute={true}
           />
-          {/* Flash colorido ativo durante o teste */}
-          {backgroundColor !== '#000000' && (
-            <View
-              style={[
-                StyleSheet.absoluteFillObject,
-                { backgroundColor, opacity: 0.85 },
-              ]}
-              pointerEvents="none"
-            />
-          )}
 
           {/* Contagem regressiva sobreposta no centro do círculo */}
           {countdown !== null && (
