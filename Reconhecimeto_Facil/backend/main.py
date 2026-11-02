@@ -1,0 +1,1518 @@
+import os
+import shutil
+import tempfile
+import random
+import string
+import time
+import json
+import hmac
+import hashlib
+import base64
+import sqlite3
+import cv2
+import numpy as np
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Query
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+APP_VERSION = "1.3.0"
+
+app = FastAPI(
+    title="Reconhecimento Fácil - Microsserviço de Biometria & Prova de Vida",
+    description="Microsserviço independente anti-spoofing com flash espectral de cores, YuNet, SFace, JWT e Rate Limiting",
+    version=APP_VERSION
+)
+
+# Habilita CORS para permitir chamadas diretas do React Native no celular
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+CORES_DISPONIVEIS = ["VERMELHO", "AZUL", "VERDE"]
+
+# ==============================================================================
+# SEGURANÇA: RATE LIMITING CONTRA FORÇA BRUTA (SLIDING WINDOW)
+# ==============================================================================
+VERIFY_ATTEMPTS: dict[str, list[float]] = {}
+MAX_ATTEMPTS_PER_MINUTE = 5
+RATE_LIMIT_WINDOW_SECONDS = 60
+PENDING_CHALLENGES: dict[str, tuple[list[str], float]] = {}  # token -> (colors, created_timestamp)
+CHALLENGE_TTL_SECONDS = 120  # Desafios expiram em 2 minutos
+
+def aplicar_rate_limit(client_ip: str):
+    """Bloqueia tentativas consecutivas automatizadas por força bruta."""
+    now = time.time()
+    # Limpeza periódica de IPs obsoletos (a cada chamada, custo amortizado O(1))
+    if len(VERIFY_ATTEMPTS) > 1000:
+        stale_ips = [ip for ip, ts in VERIFY_ATTEMPTS.items() if not ts or now - ts[-1] > RATE_LIMIT_WINDOW_SECONDS]
+        for ip in stale_ips:
+            VERIFY_ATTEMPTS.pop(ip, None)
+    timestamps = VERIFY_ATTEMPTS.get(client_ip, [])
+    # Filtra apenas tentativas dentro da janela recente
+    timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW_SECONDS]
+    if len(timestamps) >= MAX_ATTEMPTS_PER_MINUTE:
+        raise HTTPException(
+            status_code=429,
+            detail="Muitas tentativas consecutivas de verificação. Por favor, aguarde 1 minuto para tentar novamente."
+        )
+    timestamps.append(now)
+    VERIFY_ATTEMPTS[client_ip] = timestamps
+
+# ==============================================================================
+# SEGURANÇA: EMISSÃO DE TOKEN JWT ASSINADO (HS256)
+# ==============================================================================
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not JWT_SECRET_KEY:
+    import warnings
+    warnings.warn(
+        "SEGURANÇA: JWT_SECRET_KEY não definida! Usando chave efêmera. "
+        "Defina a variável de ambiente JWT_SECRET_KEY em produção.",
+        stacklevel=1
+    )
+    JWT_SECRET_KEY = base64.urlsafe_b64encode(os.urandom(32)).decode()
+
+def base64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode('utf-8').rstrip('=')
+
+def base64url_decode(data_str: str) -> bytes:
+    rem = len(data_str) % 4
+    if rem > 0:
+        data_str += '=' * (4 - rem)
+    return base64.urlsafe_b64decode(data_str)
+
+def gerar_jwt_biometria(user_id: str, distance: float, threshold: float) -> str:
+    """Gera um Token JWT assinado HMAC-SHA256 para atestar a aprovação biométrica ao backend cliente."""
+    header = {"alg": "HS256", "typ": "JWT"}
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "verified": True,
+        "biometrics_model": "YuNet-SFace",
+        "distance": round(distance, 4),
+        "threshold": threshold,
+        "iat": now,
+        "exp": now + (24 * 3600), # Válido por 24 horas
+        "iss": "reconhecimento-facil-service"
+    }
+    header_bytes = json.dumps(header, separators=(',', ':')).encode('utf-8')
+    payload_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+
+    h_b64 = base64url_encode(header_bytes)
+    p_b64 = base64url_encode(payload_bytes)
+    message = f"{h_b64}.{p_b64}".encode('utf-8')
+
+    signature = hmac.new(JWT_SECRET_KEY.encode('utf-8'), message, hashlib.sha256).digest()
+    sig_b64 = base64url_encode(signature)
+
+    return f"{h_b64}.{p_b64}.{sig_b64}"
+
+def validar_jwt_biometria(token: str) -> dict:
+    """Valida e decodifica o Token JWT gerado pelo serviço biométrico."""
+    parts = token.split('.')
+    if len(parts) != 3:
+        raise HTTPException(status_code=400, detail="Formato de token JWT inválido.")
+
+    h_b64, p_b64, sig_b64 = parts
+    message = f"{h_b64}.{p_b64}".encode('utf-8')
+    expected_sig = hmac.new(JWT_SECRET_KEY.encode('utf-8'), message, hashlib.sha256).digest()
+
+    if not hmac.compare_digest(base64url_encode(expected_sig), sig_b64):
+        raise HTTPException(status_code=401, detail="Assinatura de token biométrico inválida.")
+
+    payload = json.loads(base64url_decode(p_b64).decode('utf-8'))
+    if payload.get("exp", 0) < time.time():
+        raise HTTPException(status_code=401, detail="Token biométrico expirado.")
+
+    return payload
+
+# ==============================================================================
+# AUDITORIA ANTIFRAUDE: REGISTRO DE TENTATIVAS EM MEMÓRIA
+# ==============================================================================
+AUDIT_LOGS: list[dict] = []
+MAX_AUDIT_LOGS = 200
+
+def registrar_auditoria(entry: dict):
+    """Armazena logs de auditoria para inspeção de tentativas de fraude."""
+    entry["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    AUDIT_LOGS.append(entry)
+    if len(AUDIT_LOGS) > MAX_AUDIT_LOGS:
+        AUDIT_LOGS.pop(0)
+    # Persistência em SQLite para sobreviver a reinícios
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO audit_logs (timestamp, client_ip, user_id, action, verified, is_live, reason, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            entry.get("timestamp"),
+            entry.get("client_ip"),
+            entry.get("user_id"),
+            entry.get("action"),
+            str(entry.get("verified", "")),
+            str(entry.get("is_live", "")),
+            entry.get("reason", entry.get("fraud_detected", "")),
+            json.dumps({k: v for k, v in entry.items() if k not in ("timestamp", "client_ip", "user_id", "action", "verified", "is_live", "reason")})
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"WARN: Falha ao persistir log de auditoria no SQLite: {e}")
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "Reconhecimento Fácil - Biometrics API",
+        "model": "YuNet-SFace",
+        "docs_url": "/docs",
+        "health_url": "/health"
+    }
+
+@app.get("/health")
+def health_check():
+    yunet_ok = detector_yunet is not None
+    sface_ok = recognizer_sface is not None
+    minifasnet_ok = net_minifasnet is not None
+    return {
+        "status": "ok",
+        "service": "Reconhecimento Fácil - Biometrics API",
+        "model": "YuNet-SFace + MiniFASNet-V2",
+        "anti_spoofing": "MiniFASNetV2" if minifasnet_ok else "disabled",
+        "yunet": yunet_ok,
+        "sface": sface_ok,
+        "version": APP_VERSION
+    }
+
+@app.get("/challenge")
+def get_challenge():
+    """
+    Sorteia uma ordem aleatória de cores para o aplicativo exibir na tela
+    e gera um token de sessão para validação.
+    """
+    cores_sorteadas = random.sample(CORES_DISPONIVEIS, 3)
+    token = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    # Limpa desafios expirados
+    now = time.time()
+    expired = [t for t, (_, ts) in PENDING_CHALLENGES.items() if now - ts > CHALLENGE_TTL_SECONDS]
+    for t in expired:
+        del PENDING_CHALLENGES[t]
+    PENDING_CHALLENGES[token] = (cores_sorteadas, now)
+    return {
+        "session_token": token,
+        "colors": cores_sorteadas,
+        "flash_duration_ms": 500
+    }
+
+@app.get("/verify/token/validate")
+def validate_token_endpoint(token: str = Query(..., description="Token JWT biométrico")):
+    """Permite a sistemas externos (Spring Boot, Node.js, Python, etc.) validar o token emitido."""
+    payload = validar_jwt_biometria(token)
+    return {"valid": True, "claims": payload}
+
+@app.get("/audit/logs")
+def get_audit_logs(limit: int = Query(50, ge=1, le=200)):
+    """Retorna os registros de auditoria mais recentes para análise antifraude."""
+    return {"total": len(AUDIT_LOGS), "logs": AUDIT_LOGS[-limit:]}
+
+# Inicializa detector Haar Cascade nativo do OpenCV para detecção de face no baseline (fallback seguro)
+face_cascade = None
+try:
+    if hasattr(cv2, "data") and hasattr(cv2, "CascadeClassifier"):
+        FACE_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        face_cascade = cv2.CascadeClassifier(FACE_CASCADE_PATH)
+except Exception:
+    face_cascade = None
+
+# ==============================================================================
+# BIOMETRIA FACIAL ADAPTATIVA (YUNET + SFACE) - RECONHECIMENTO FÁCIL
+# ==============================================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEBUG_DIR = os.path.join(BASE_DIR, "debug")
+os.makedirs(DEBUG_DIR, exist_ok=True)
+
+STORAGE_DIR = os.path.join(BASE_DIR, "storage")
+STORAGE_FACES_DIR = os.path.join(STORAGE_DIR, "faces")
+DB_PATH = os.path.join(STORAGE_DIR, "biometria.db")
+os.makedirs(STORAGE_FACES_DIR, exist_ok=True)
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            primary_embedding TEXT NOT NULL,
+            centroid_embedding TEXT NOT NULL,
+            samples_count INTEGER DEFAULT 1,
+            photo_filename TEXT NOT NULL,
+            latest_photo_filename TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            embedding TEXT
+        )
+    """)
+    # Migração transparente se a tabela users já existir com formato legado
+    cursor.execute("PRAGMA table_info(users)")
+    cols = [c[1] for c in cursor.fetchall()]
+    if "embedding" in cols and "primary_embedding" not in cols:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN primary_embedding TEXT")
+            cursor.execute("ALTER TABLE users ADD COLUMN centroid_embedding TEXT")
+            cursor.execute("ALTER TABLE users ADD COLUMN samples_count INTEGER DEFAULT 1")
+            cursor.execute("ALTER TABLE users ADD COLUMN latest_photo_filename TEXT")
+            cursor.execute("ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            cursor.execute("UPDATE users SET primary_embedding = embedding, centroid_embedding = embedding, latest_photo_filename = photo_filename WHERE primary_embedding IS NULL")
+        except Exception:
+            pass
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS biometric_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            embedding TEXT NOT NULL,
+            sample_type TEXT NOT NULL,
+            distance_to_anchor REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            client_ip TEXT,
+            user_id TEXT,
+            action TEXT,
+            verified TEXT,
+            is_live TEXT,
+            reason TEXT,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def normalizar_embedding(emb: np.ndarray) -> np.ndarray:
+    """Normaliza o vetor embedding para norma unitária (L2 = 1.0)."""
+    emb_f = emb.astype(np.float32)
+    norm = np.linalg.norm(emb_f)
+    if norm > 1e-6:
+        return emb_f / norm
+    return emb_f
+
+def db_salvar_usuario_inicial(user_id: str, name: str, embedding: np.ndarray, photo_filename: str):
+    """
+    Cadastra o usuário inicial sem comparação com outros rostos.
+    Guarda o vetor biométrico como a Âncora Primária e Centroide inicial (samples_count = 1).
+    Registra também a primeira amostra no histórico biometric_samples.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    emb_norm = normalizar_embedding(embedding)
+    emb_json = json.dumps(emb_norm.tolist())
+
+    cursor.execute("PRAGMA table_info(users)")
+    cols = [c[1] for c in cursor.fetchall()]
+
+    if "embedding" in cols:
+        cursor.execute("""
+            INSERT OR REPLACE INTO users (
+                id, name, primary_embedding, centroid_embedding, samples_count,
+                photo_filename, latest_photo_filename, created_at, updated_at, embedding
+            ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+        """, (user_id, name, emb_json, emb_json, photo_filename, photo_filename, emb_json))
+    else:
+        cursor.execute("""
+            INSERT OR REPLACE INTO users (
+                id, name, primary_embedding, centroid_embedding, samples_count,
+                photo_filename, latest_photo_filename, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, (user_id, name, emb_json, emb_json, photo_filename, photo_filename))
+
+    cursor.execute("""
+        INSERT INTO biometric_samples (user_id, embedding, sample_type, distance_to_anchor, created_at)
+        VALUES (?, ?, 'registration', 0.0, CURRENT_TIMESTAMP)
+    """, (user_id, emb_json))
+
+    conn.commit()
+    conn.close()
+
+def db_adicionar_amostra_login(user_id: str, new_embedding: np.ndarray, latest_photo_filename: str, distance_to_anchor: float) -> int:
+    """
+    Aprendizado contínuo: atualiza o perfil biométrico do usuário após cada login aprovado.
+    Calcula o novo centroide ponderado normalizado L2 e persiste no histórico.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT centroid_embedding, samples_count FROM users WHERE id = ?", (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return 1
+
+    old_centroid = np.array(json.loads(row[0]), dtype=np.float32)
+    old_count = int(row[1]) if row[1] else 1
+
+    new_emb_norm = normalizar_embedding(new_embedding)
+    new_count = old_count + 1
+
+    # Atualização ponderada cumulativa: Centroid_novo = (Centroid_antigo * N + novo_vetor) / (N + 1)
+    updated_centroid = (old_centroid * float(old_count) + new_emb_norm) / float(new_count)
+    updated_centroid = normalizar_embedding(updated_centroid)
+
+    emb_json = json.dumps(new_emb_norm.tolist())
+    centroid_json = json.dumps(updated_centroid.tolist())
+
+    cursor.execute("""
+        INSERT INTO biometric_samples (user_id, embedding, sample_type, distance_to_anchor, created_at)
+        VALUES (?, ?, 'login_adaptation', ?, CURRENT_TIMESTAMP)
+    """, (user_id, emb_json, round(distance_to_anchor, 4)))
+
+    cursor.execute("PRAGMA table_info(users)")
+    cols = [c[1] for c in cursor.fetchall()]
+
+    if "embedding" in cols:
+        cursor.execute("""
+            UPDATE users
+            SET centroid_embedding = ?,
+                embedding = ?,
+                samples_count = ?,
+                latest_photo_filename = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (centroid_json, centroid_json, new_count, latest_photo_filename, user_id))
+    else:
+        cursor.execute("""
+            UPDATE users
+            SET centroid_embedding = ?,
+                samples_count = ?,
+                latest_photo_filename = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (centroid_json, new_count, latest_photo_filename, user_id))
+
+    conn.commit()
+    conn.close()
+    return new_count
+
+def db_listar_usuarios():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, name, primary_embedding, centroid_embedding, samples_count,
+               photo_filename, latest_photo_filename, created_at, updated_at
+        FROM users ORDER BY updated_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    users = []
+    for r in rows:
+        users.append({
+            "id": r[0],
+            "name": r[1],
+            "primary_embedding": np.array(json.loads(r[2]), dtype=np.float32),
+            "centroid_embedding": np.array(json.loads(r[3]), dtype=np.float32),
+            "samples_count": r[4] or 1,
+            "photo_filename": r[5],
+            "latest_photo_filename": r[6] or r[5],
+            "created_at": r[7],
+            "updated_at": r[8]
+        })
+    return users
+
+def db_buscar_usuario(user_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, name, primary_embedding, centroid_embedding, samples_count,
+               photo_filename, latest_photo_filename, created_at, updated_at
+        FROM users WHERE id = ?
+    """, (user_id,))
+    r = cursor.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {
+        "id": r[0],
+        "name": r[1],
+        "primary_embedding": np.array(json.loads(r[2]), dtype=np.float32),
+        "centroid_embedding": np.array(json.loads(r[3]), dtype=np.float32),
+        "samples_count": r[4] or 1,
+        "photo_filename": r[5],
+        "latest_photo_filename": r[6] or r[5],
+        "created_at": r[7],
+        "updated_at": r[8]
+    }
+
+def db_buscar_historico_amostras(user_id: str, limit: int = 20):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, sample_type, distance_to_anchor, created_at
+        FROM biometric_samples
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+    """, (user_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0],
+            "sample_type": r[1],
+            "distance_to_anchor": r[2],
+            "created_at": r[3]
+        }
+        for r in rows
+    ]
+
+
+YUNET_PATH = os.getenv("YUNET_MODEL_PATH", os.path.join(BASE_DIR, "models", "face_detection_yunet_2023mar.onnx"))
+SFACE_PATH = os.getenv("SFACE_MODEL_PATH", os.path.join(BASE_DIR, "models", "face_recognition_sface_2021dec.onnx"))
+MINIFASNET_PATH = os.getenv("MINIFASNET_MODEL_PATH", os.path.join(BASE_DIR, "models", "MiniFASNetV2.onnx"))
+
+detector_yunet = None
+recognizer_sface = None
+net_minifasnet = None
+
+if os.path.exists(YUNET_PATH) and os.path.exists(SFACE_PATH):
+    try:
+        detector_yunet = cv2.FaceDetectorYN.create(
+            model=YUNET_PATH,
+            config="",
+            input_size=[320, 320],
+            score_threshold=0.5,
+            nms_threshold=0.3,
+            top_k=5000
+        )
+        recognizer_sface = cv2.FaceRecognizerSF.create(
+            model=SFACE_PATH,
+            config=""
+        )
+        print("INFO: Pipeline biométrico YuNet + SFace inicializado com sucesso!")
+    except Exception as e:
+        print(f"WARN: Falha ao carregar YuNet/SFace: {e}")
+
+if os.path.exists(MINIFASNET_PATH):
+    try:
+        net_minifasnet = cv2.dnn.readNet(MINIFASNET_PATH)
+        print("INFO: MiniFASNet V2 Anti-Spoofing inicializado com sucesso!")
+    except Exception as e:
+        print(f"WARN: Falha ao carregar MiniFASNet V2: {e}")
+
+def detectar_face_yunet(image: np.ndarray):
+    """Detecta a face mais proeminente e seus 5 marcos anatômicos com YuNet."""
+    if detector_yunet is None or image is None:
+        return None
+    h, w = image.shape[:2]
+    scale = 1.0
+    max_dim = 640
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        img_resized = cv2.resize(image, (int(w * scale), int(h * scale)))
+    else:
+        img_resized = image
+
+    h_r, w_r = img_resized.shape[:2]
+    detector_yunet.setInputSize((w_r, h_r))
+    _, faces = detector_yunet.detect(img_resized)
+
+    if faces is None or len(faces) == 0:
+        return None
+
+    best_face = max(faces, key=lambda f: f[-1])
+    if scale != 1.0:
+        best_face = best_face.copy()
+        best_face[:14] /= scale
+
+    return best_face
+
+def extrair_face_completa(frame: np.ndarray) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    """Detecta face com YuNet e extrai (feat_128d, aligned_crop_112x112, frame_upright, face_data)."""
+    if recognizer_sface is None or detector_yunet is None or frame is None:
+        return None, None, None, None
+    face_data = None
+    frame_final = frame
+    for rot in [None, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180]:
+        cand = cv2.rotate(frame, rot) if rot is not None else frame
+        f_data = detectar_face_yunet(cand)
+        if f_data is not None:
+            frame_final = cand
+            face_data = f_data
+            break
+    if face_data is None:
+        return None, None, None, None
+    aligned = recognizer_sface.alignCrop(frame_final, face_data)
+    feat = recognizer_sface.feature(aligned)
+    return feat, aligned, frame_final, face_data
+
+def extrair_embedding_e_recorte(frame: np.ndarray) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Detecta face com YuNet e extrai vetor embedding SFace (128D) e recorte facial alinhado."""
+    feat, aligned, _, _ = extrair_face_completa(frame)
+    return feat, aligned
+
+class DetectFacePayload(BaseModel):
+    image_base64: Optional[str] = None
+    image: Optional[str] = None
+
+@app.post("/detect_face")
+async def detect_face_presence(
+    request: Request,
+    payload: Optional[DetectFacePayload] = None,
+    photo: Optional[UploadFile] = File(None)
+):
+    """
+    Verifica rapidamente (< 30ms) se há um rosto humano enquadrado e centralizado na câmera.
+    Permite que o aplicativo móvel aguarde o usuário posicionar o rosto antes de disparar
+    a sequência de flashes e gravação biométrica.
+    """
+    img = None
+    try:
+        if photo is not None:
+            contents = await photo.read()
+            nparr = np.frombuffer(contents, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        elif payload and (payload.image_base64 or payload.image):
+            b64 = payload.image_base64 or payload.image
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        else:
+            try:
+                raw_json = await request.json()
+                b64 = raw_json.get("image_base64") or raw_json.get("image")
+                if b64:
+                    if "," in b64:
+                        b64 = b64.split(",", 1)[1]
+                    img_bytes = base64.b64decode(b64)
+                    nparr = np.frombuffer(img_bytes, np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception:
+                pass
+
+        if img is None:
+            return {"detected": False, "centered": False, "message": "Nenhuma imagem válida recebida"}
+
+        face_data = None
+        frame_final = img
+        for rot in [None, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180]:
+            cand = cv2.rotate(img, rot) if rot is not None else img
+            f_cand = detectar_face_yunet(cand)
+            if f_cand is not None:
+                face_data = f_cand
+                frame_final = cand
+                break
+
+        if face_data is None:
+            return {
+                "detected": False,
+                "centered": False,
+                "message": "Nenhum rosto identificado no círculo. Aproxime-se da câmera."
+            }
+
+        x, y, w, h = face_data[:4]
+        img_h, img_w = frame_final.shape[:2]
+
+        cx = x + w / 2.0
+        cy = y + h / 2.0
+        norm_cx = cx / max(1.0, float(img_w))
+        norm_cy = cy / max(1.0, float(img_h))
+        ratio_w = w / max(1.0, float(img_w))
+        ratio_h = h / max(1.0, float(img_h))
+
+        if ratio_w < 0.10 or ratio_h < 0.10:
+            return {
+                "detected": True,
+                "centered": False,
+                "message": "Aproxime um pouco mais o celular do rosto.",
+                "confidence": round(float(face_data[-1]), 3)
+            }
+
+        is_centered = (0.18 <= norm_cx <= 0.82) and (0.12 <= norm_cy <= 0.88)
+        if not is_centered:
+            return {
+                "detected": True,
+                "centered": False,
+                "message": "Centralize seu rosto no círculo.",
+                "confidence": round(float(face_data[-1]), 3)
+            }
+
+        return {
+            "detected": True,
+            "centered": True,
+            "message": "Rosto enquadrado perfeitamente!",
+            "confidence": round(float(face_data[-1]), 3)
+        }
+    except Exception as e:
+        return {"detected": False, "centered": False, "error": str(e), "message": "Erro ao analisar imagem"}
+
+class MiniFASNetCropper:
+    """Implementação oficial do gerador de patches para MiniFASNet (Minivision AI)."""
+    @staticmethod
+    def _get_new_box(src_w: int, src_h: int, bbox, scale: float):
+        x = float(bbox[0])
+        y = float(bbox[1])
+        box_w = float(bbox[2])
+        box_h = float(bbox[3])
+
+        scale = min((src_h - 1) / max(1.0, box_h), min((src_w - 1) / max(1.0, box_w), scale))
+
+        new_width = box_w * scale
+        new_height = box_h * scale
+        center_x = box_w / 2.0 + x
+        center_y = box_h / 2.0 + y
+
+        left_top_x = center_x - new_width / 2.0
+        left_top_y = center_y - new_height / 2.0
+        right_bottom_x = center_x + new_width / 2.0
+        right_bottom_y = center_y + new_height / 2.0
+
+        if left_top_x < 0:
+            right_bottom_x -= left_top_x
+            left_top_x = 0
+
+        if left_top_y < 0:
+            right_bottom_y -= left_top_y
+            left_top_y = 0
+
+        if right_bottom_x > src_w - 1:
+            left_top_x -= right_bottom_x - src_w + 1
+            right_bottom_x = src_w - 1
+
+        if right_bottom_y > src_h - 1:
+            left_top_y -= right_bottom_y - src_h + 1
+            right_bottom_y = src_h - 1
+
+        left_top_x = max(0, min(src_w - 1, int(left_top_x)))
+        left_top_y = max(0, min(src_h - 1, int(left_top_y)))
+        right_bottom_x = max(0, min(src_w - 1, int(right_bottom_x)))
+        right_bottom_y = max(0, min(src_h - 1, int(right_bottom_y)))
+
+        if right_bottom_x <= left_top_x or right_bottom_y <= left_top_y:
+            return 0, 0, src_w - 1, src_h - 1
+
+        return left_top_x, left_top_y, right_bottom_x, right_bottom_y
+
+    @classmethod
+    def crop(cls, org_img: np.ndarray, bbox, scale: float = 2.7, out_w: int = 80, out_h: int = 80):
+        src_h, src_w = org_img.shape[:2]
+        x1, y1, x2, y2 = cls._get_new_box(src_w, src_h, bbox, scale)
+        crop_img = org_img[y1:y2 + 1, x1:x2 + 1]
+        if crop_img.size == 0:
+            return cv2.resize(org_img, (out_w, out_h))
+        return cv2.resize(crop_img, (out_w, out_h))
+
+def avaliar_liveness_minifasnet(
+    frame: np.ndarray,
+    face_box,
+    min_live_score: float = 0.70
+) -> tuple[bool, float, str, dict]:
+    """
+    Avalia a prova de vida passiva utilizando a rede neural profunda MiniFASNet V2.
+    Classifica ataques de apresentação:
+      - Classe 0: Print Attack (foto impressa em papel)
+      - Classe 1: Genuine Live (pele humana real ao vivo)
+      - Classe 2: Screen Replay Attack (tela de monitor, celular, tablet)
+    
+    Nota de calibração: MiniFASNet opera com valores brutos no intervalo [0, 255] float32 em RGB.
+    Normalização por 1/255 reduzia a imagem a valores próximos de zero, simulando tela escura
+    e gerando falsos positivos de tela (prob_screen > 99%) em rostos humanos reais.
+    """
+    if net_minifasnet is None or frame is None or face_box is None:
+        return True, 1.0, "MiniFASNet desativado ou indisponível.", {"status": "skipped"}
+
+    try:
+        crop_img = MiniFASNetCropper.crop(frame, face_box, scale=2.7, out_w=80, out_h=80)
+        # MiniFASNet espera imagem RGB com canais no intervalo 0..255 (float32)
+        blob = cv2.dnn.blobFromImage(crop_img, scalefactor=1.0, size=(80, 80), swapRB=True)
+        net_minifasnet.setInput(blob)
+        logits = net_minifasnet.forward()[0]
+
+        # Softmax normalizado
+        exp_l = np.exp(logits - np.max(logits))
+        probs = exp_l / np.sum(exp_l)
+        prob_print = float(probs[0])
+        prob_live = float(probs[1])
+        prob_screen = float(probs[2])
+
+        pred_label = int(np.argmax(probs))
+        detalhes = {
+            "print_prob": round(prob_print, 4),
+            "live_prob": round(prob_live, 4),
+            "screen_prob": round(prob_screen, 4),
+            "predicted_label": pred_label
+        }
+
+        # Bloqueio categórico se for detectado replay em tela com alta probabilidade
+        if pred_label == 2 and prob_screen >= 0.70:
+            pct = prob_screen * 100
+            return False, prob_live, f"Tentativa de fraude detectada: apresentação em tela/monitor de computador ({pct:.1f}%).", detalhes
+        elif pred_label == 0 and prob_print >= 0.70:
+            pct = prob_print * 100
+            return False, prob_live, f"Tentativa de fraude detectada: foto impressa em papel identificada ({pct:.1f}%).", detalhes
+
+        # Para aprovação como pessoa viva ao vivo, exige probabilidade de vivacidade acima do limiar
+        if prob_live < min_live_score:
+            pct = prob_live * 100
+            return False, prob_live, f"Prova de vida inconclusiva (Score de autenticidade: {pct:.1f}% < {min_live_score * 100:.0f}%).", detalhes
+
+        return True, prob_live, "Pessoa real ao vivo autenticada.", detalhes
+    except Exception as e:
+        print(f"WARN: Erro durante inferência MiniFASNet: {e}")
+        return True, 1.0, f"Erro MiniFASNet: {e}", {"error": str(e)}
+
+def detectar_face_roi(frame: np.ndarray) -> tuple[int, int, int, int] | None:
+    """
+    Detecta o rosto e calcula a sub-região de interesse (ROI) para análise de reflexo.
+    Utiliza YuNet quando disponível (muito mais preciso) ou Haar Cascade como fallback.
+    """
+    if detector_yunet is not None:
+        face = detectar_face_yunet(frame)
+        if face is not None:
+            x, y, w, h = int(face[0]), int(face[1]), int(face[2]), int(face[3])
+            x1 = max(0, x + int(w * 0.20))
+            x2 = min(frame.shape[1], x + int(w * 0.80))
+            y1 = max(0, y + int(h * 0.15))
+            y2 = min(frame.shape[0], y + int(h * 0.70))
+            return x1, y1, x2, y2
+
+    if face_cascade is not None:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=4,
+            minSize=(50, 50)
+        )
+        if len(faces) > 0:
+            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+            x1 = x + int(w * 0.20)
+            x2 = x + int(w * 0.80)
+            y1 = y + int(h * 0.15)
+            y2 = y + int(h * 0.70)
+            return x1, y1, x2, y2
+
+    return None
+
+def detectar_face_com_rotacao(frame: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int] | None, int | None]:
+    """
+    Testa rotações (0°, 270°, 90°) para encontrar a face na orientação vertical correta.
+    Muitas câmeras frontais Android gravam frames deitados (90°/270° do sensor nativo).
+    Retorna o frame rotacionado na vertical, a ROI da face e o rot_code do OpenCV.
+    """
+    # 1. Tenta orientação original
+    roi = detectar_face_roi(frame)
+    if roi is not None:
+        return frame, roi, None
+
+    # 2. Tenta 270° (rotação padrão da câmera frontal Android para ficar em pé)
+    rot270 = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    roi270 = detectar_face_roi(rot270)
+    if roi270 is not None:
+        return rot270, roi270, cv2.ROTATE_90_COUNTERCLOCKWISE
+
+    # 3. Tenta 90° (horário)
+    rot90 = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    roi90 = detectar_face_roi(rot90)
+    if roi90 is not None:
+        return rot90, roi90, cv2.ROTATE_90_CLOCKWISE
+
+    # 4. Tenta 180°
+    rot180 = cv2.rotate(frame, cv2.ROTATE_180)
+    roi180 = detectar_face_roi(rot180)
+    if roi180 is not None:
+        return rot180, roi180, cv2.ROTATE_180
+
+    return frame, None, None
+
+def extrair_cor_media_face(
+    frame: np.ndarray,
+    roi_box: tuple[int, int, int, int] | None = None
+) -> tuple[float, float, float]:
+    """
+    Extrai a média dos canais B, G, R na região de interesse do rosto.
+    Se roi_box (x1, y1, x2, y2) for informada, utiliza o recorte dinâmico;
+    caso contrário, aplica recorte central de segurança (30% a 70%).
+    """
+    h, w, _ = frame.shape
+    if roi_box:
+        x1, y1, x2, y2 = roi_box
+        x1, x2 = max(0, min(x1, w - 1)), max(1, min(x2, w))
+        y1, y2 = max(0, min(y1, h - 1)), max(1, min(y2, h))
+        roi = frame[y1:y2, x1:x2]
+    else:
+        roi = frame[int(h * 0.3):int(h * 0.7), int(w * 0.3):int(w * 0.7)]
+
+    if roi.size == 0:
+        b, g, r = cv2.mean(frame)[:3]
+    else:
+        b, g, r = cv2.mean(roi)[:3]
+    return b, g, r
+
+def calcular_nitidez_laplaciano(
+    frame: np.ndarray,
+    roi_box: tuple[int, int, int, int] | None = None
+) -> float:
+    """Calcula o índice de foco/nitidez usando a variância do operador Laplaciano."""
+    if roi_box:
+        x1, y1, x2, y2 = roi_box
+        h, w = frame.shape[:2]
+        x1, x2 = max(0, min(x1, w - 1)), max(1, min(x2, w))
+        y1, y2 = max(0, min(y1, h - 1)), max(1, min(y2, h))
+        crop = frame[y1:y2, x1:x2]
+        if crop.size > 0:
+            frame = crop
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+def selecionar_melhor_frame_nitido(
+    video_path: str,
+    max_frames: int = 40,
+    roi_box: tuple[int, int, int, int] | None = None,
+    rot_code: int | None = None
+) -> np.ndarray:
+    """
+    Varre os frames do vídeo e seleciona aquele com maior nitidez e melhor iluminação facial,
+    garantindo que o rosto esteja perfeitamente orientado na vertical para o ArcFace.
+    """
+    cap = cv2.VideoCapture(video_path)
+    best_frame = None
+    best_score = -1.0
+    frames_lidos = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Pula os 3 primeiros frames escuros da inicialização
+    cap.set(cv2.CAP_PROP_POS_FRAMES, min(4, total_frames // 4))
+
+    while cap.isOpened() and frames_lidos < max_frames:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if rot_code is not None:
+            frame = cv2.rotate(frame, rot_code)
+
+        current_roi = detectar_face_roi(frame) or roi_box
+        score = calcular_nitidez_laplaciano(frame, current_roi)
+
+        if current_roi:
+            x1, y1, x2, y2 = current_roi
+            crop = frame[y1:y2, x1:x2]
+            if crop.size > 0:
+                brilho = np.mean(crop)
+                if brilho > 35:
+                    score += brilho # Bonifica frames bem iluminados durante o flash
+
+        if score > best_score:
+            best_score = score
+            best_frame = frame.copy()
+
+        frames_lidos += 1
+
+    cap.release()
+
+    if best_frame is None:
+        cap = cv2.VideoCapture(video_path)
+        ret, best_frame = cap.read()
+        cap.release()
+        if rot_code is not None and best_frame is not None:
+            best_frame = cv2.rotate(best_frame, rot_code)
+
+    return best_frame if best_frame is not None else np.zeros((240, 320, 3), dtype=np.uint8)
+
+def validar_reflexo_delta_rgb(
+    video_path: str,
+    cores_esperadas: list[str],
+    mock_roi: tuple[int, int, int, int] | None = None
+) -> tuple[bool, str, tuple[int, int, int, int] | None]:
+    """
+    Valida a prova de vida calculando o ganho relativo (Delta) de cada canal de cor
+    em relação ao frame de iluminação inicial (baseline), resistindo a salas iluminadas.
+    Detecta dinamicamente a posição do rosto e a rotação correta (0°, 90°, 270°).
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return False, "Não foi possível abrir o arquivo de vídeo gravado.", None
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames < 6:
+        cap.release()
+        return False, f"Vídeo muito curto para análise ({total_frames} frames).", None
+
+    # 1. Detecção dinâmica do rosto e orientação correta nos primeiros frames
+    face_roi = mock_roi
+    rot_code = None
+    frames_buffer = []
+
+    if face_roi is None:
+        check_frames = min(15, total_frames)
+        for _ in range(check_frames):
+            ret, f = cap.read()
+            if not ret:
+                break
+            frames_buffer.append(f)
+            _, detected_roi, detected_rot = detectar_face_com_rotacao(f)
+            if detected_roi is not None:
+                face_roi = detected_roi
+                rot_code = detected_rot
+                break
+
+        if face_roi is None:
+            cap.release()
+            return False, "Nenhum rosto identificado no vídeo", None
+
+    # 2. Leitura do frame baseline (início do vídeo com tela escura)
+    frame_base_raw = frames_buffer[0] if frames_buffer else cap.read()[1]
+    if frame_base_raw is None:
+        cap.release()
+        return False, "Não foi possível ler o primeiro frame de iluminação base.", None
+
+    frame_base = cv2.rotate(frame_base_raw, rot_code) if rot_code is not None else frame_base_raw
+    b_base, g_base, r_base = extrair_cor_media_face(frame_base, face_roi)
+    b_base = max(b_base, 1.0)
+    g_base = max(g_base, 1.0)
+    r_base = max(r_base, 1.0)
+
+    # 3. Segmentação temporal do vídeo pelas cores com amostragem em janela
+    frames_restantes = []
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if rot_code is not None:
+            frame = cv2.rotate(frame, rot_code)
+        frames_restantes.append(frame)
+    cap.release()
+
+    total_validos = len(frames_restantes)
+    if total_validos < 6:
+        return False, f"Vídeo com frames insuficientes ({total_validos} frames).", face_roi
+
+    segmento = total_validos // len(cores_esperadas)
+    respostas_corretas = 0
+
+    for cor_idx, cor in enumerate(cores_esperadas):
+        cor_esperada = cor.strip().upper()
+        # Amostra múltiplos frames no miolo do flash para evitar ruído de exposição/piscadas
+        inicio = cor_idx * segmento + max(1, segmento // 4)
+        fim = (cor_idx + 1) * segmento - max(1, segmento // 4)
+        janela = frames_restantes[inicio:max(inicio + 1, fim)]
+
+        cor_validada = False
+        for f in janela:
+            b_atual, g_atual, r_atual = extrair_cor_media_face(f, face_roi)
+            delta_r = (r_atual - r_base) / r_base
+            delta_g = (g_atual - g_base) / g_base
+            delta_b = (b_atual - b_base) / b_base
+
+            diff_r = r_atual - r_base
+            diff_g = g_atual - g_base
+            diff_b = b_atual - b_base
+
+            # Exige que o canal da cor esperada domine os outros canais em pelo menos 10%
+            # e apresente um ganho de luz real (evitando reflexos espúrios em telas de computador)
+            if cor_esperada == "VERMELHO":
+                if delta_r > max(delta_g, delta_b) * 1.10 and (delta_r > 0.04 or diff_r > 2.0):
+                    cor_validada = True
+                    break
+            elif cor_esperada == "AZUL":
+                if delta_b > max(delta_r, delta_g) * 1.10 and (delta_b > 0.04 or diff_b > 2.0):
+                    cor_validada = True
+                    break
+            elif cor_esperada == "VERDE":
+                if delta_g > max(delta_r, delta_b) * 1.10 and (delta_g > 0.04 or diff_g > 2.0):
+                    cor_validada = True
+                    break
+
+        if cor_validada:
+            respostas_corretas += 1
+
+    # Em ambientes reais, validar 2 de 3 cores garante que é uma pessoa real (fotos pontuam 0/3)
+    minimo_exigido = 2 if len(cores_esperadas) >= 3 else len(cores_esperadas)
+    if respostas_corretas >= minimo_exigido:
+        return True, "Reflexo espectral correspondente à pele real.", face_roi
+
+    return False, f"Reflexo não compatível ({respostas_corretas}/{len(cores_esperadas)} cores validadas).", face_roi
+
+def calcular_distancia_usuario(probe_embedding: np.ndarray, user: dict) -> float:
+    """
+    Compara o embedding ao vivo do login contra o perfil biométrico completo:
+    1. Distância contra a Âncora Primária do cadastro (d_anchor).
+    2. Distância contra o Centroide Adaptativo consolidado (d_centroid).
+    Retorna a menor distância encontrada (quanto menor, mais próximo).
+    """
+    if recognizer_sface is None or probe_embedding is None:
+        return 1.0
+
+    p_norm = normalizar_embedding(probe_embedding)
+
+    # 1. Distância para âncora inicial
+    anchor = user.get("primary_embedding")
+    sim_anchor = float(recognizer_sface.match(p_norm, anchor, cv2.FaceRecognizerSF_FR_COSINE)) if anchor is not None else -1.0
+    dist_anchor = max(0.0, 1.0 - sim_anchor)
+
+    # 2. Distância para o centroide adaptativo
+    centroid = user.get("centroid_embedding")
+    sim_centroid = float(recognizer_sface.match(p_norm, centroid, cv2.FaceRecognizerSF_FR_COSINE)) if centroid is not None else -1.0
+    dist_centroid = max(0.0, 1.0 - sim_centroid)
+
+    return min(dist_anchor, dist_centroid)
+
+@app.post("/register")
+async def register_biometrics(
+    request: Request,
+    video: UploadFile = File(...),
+    name: str = Form(...),
+    user_id: Optional[str] = Form(None),
+    expected_colors: Optional[str] = Form(None),
+    session_token: Optional[str] = Form(None)
+):
+    """
+    Cadastra a biometria facial de um novo usuário DIRETAMENTE AO VIVO via vídeo gravado da câmera.
+    Sem precisar de foto da galeria.
+    Valida a prova de vida se expected_colors for fornecido.
+    Extrai o frame mais nítido com Laplaciano, detecta e alinha a face com YuNet,
+    calcula o embedding de 128 dimensões com SFace e salva no SQLite e storage/faces.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    aplicar_rate_limit(client_ip)
+
+    name_clean = name.strip()
+    if not name_clean:
+        raise HTTPException(status_code=400, detail="O nome do usuário é obrigatório.")
+
+    uid = user_id.strip() if user_id and user_id.strip() else f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
+
+    # Validação do session_token e cores para prova de vida
+    cores = None
+    if session_token and session_token.strip():
+        challenge_data = PENDING_CHALLENGES.pop(session_token.strip(), None)
+        if challenge_data is None:
+            return {
+                "success": False,
+                "verified": False,
+                "is_live": False,
+                "reason": "Token de sessão inválido ou expirado. Solicite um novo desafio.",
+                "status": "Token de sessão inválido."
+            }
+        challenge_colors, challenge_ts = challenge_data
+        if time.time() - challenge_ts > CHALLENGE_TTL_SECONDS:
+            return {
+                "success": False,
+                "verified": False,
+                "is_live": False,
+                "reason": "Desafio expirado. Solicite um novo desafio.",
+                "status": "Desafio expirado."
+            }
+        cores = challenge_colors  # Usa as cores oficiais vinculadas ao challenge
+    elif expected_colors and expected_colors.strip():
+        cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
+
+    temp_dir = tempfile.mkdtemp()
+    video_path = os.path.join(temp_dir, "register_video.mp4")
+
+    try:
+        with open(video_path, "wb") as f:
+            shutil.copyfileobj(video.file, f)
+
+        face_roi = None
+        if cores:
+            is_live, liveness_msg, face_roi = validar_reflexo_delta_rgb(video_path, cores)
+            if not is_live:
+                return {
+                    "success": False,
+                    "is_live": False,
+                    "reason": liveness_msg,
+                    "status": liveness_msg
+                }
+
+        # Seleciona o frame mais nítido
+        melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi)
+
+        # Extrai embedding e recorte facial alinhado com YuNet + SFace
+        feat, aligned_crop, upright_frame, face_data = extrair_face_completa(melhor_frame)
+        if feat is None or aligned_crop is None or face_data is None:
+            return {
+                "success": False,
+                "is_live": True,
+                "reason": "Não foi possível identificar um rosto nítido e de frente. Mantenha o rosto centralizado e bem iluminado.",
+                "status": "Falha na detecção facial"
+            }
+
+        # Validação Anti-Spoofing profunda com MiniFASNet V2 (bloqueio categórico de telas de PC e fotos impressas)
+        is_real, fas_score, fas_reason, fas_detalhes = avaliar_liveness_minifasnet(upright_frame, face_data[:4], min_live_score=0.70)
+        if not is_real:
+            registrar_auditoria({
+                "client_ip": client_ip,
+                "action": "register",
+                "name": name_clean,
+                "success": False,
+                "fraud_detected": True,
+                "reason": fas_reason,
+                "details": fas_detalhes
+            })
+            return {
+                "success": False,
+                "is_live": False,
+                "reason": fas_reason,
+                "status": "Fraude Biométrica Detectada",
+                "anti_spoofing": fas_detalhes
+            }
+
+        photo_filename = f"{uid}_anchor.jpg"
+        photo_full_path = os.path.join(STORAGE_FACES_DIR, photo_filename)
+        cv2.imwrite(photo_full_path, aligned_crop)
+
+        # Salva o usuário com a primeira amostra no SQLite (sem comparação prévia)
+        db_salvar_usuario_inicial(uid, name_clean, feat, photo_filename)
+
+        registrar_auditoria({
+            "client_ip": client_ip,
+            "user_id": uid,
+            "action": "register",
+            "name": name_clean,
+            "samples_count": 1,
+            "success": True
+        })
+
+        return {
+            "success": True,
+            "user_id": uid,
+            "name": name_clean,
+            "photo_url": f"/faces/{photo_filename}",
+            "samples_count": 1,
+            "message": f"Biometria facial de {name_clean} cadastrada com sucesso! Primeira amostra âncora armazenada."
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+@app.get("/users")
+def list_registered_users():
+    """Retorna a lista de todos os usuários cadastrados com suas contagens de amostras aprendidas."""
+    users = db_listar_usuarios()
+    return {
+        "total": len(users),
+        "users": [
+            {
+                "id": u["id"],
+                "name": u["name"],
+                "samples_count": u["samples_count"],
+                "photo_url": f"/faces/{u['photo_filename']}",
+                "latest_photo_url": f"/faces/{u['latest_photo_filename']}",
+                "created_at": u["created_at"],
+                "updated_at": u["updated_at"]
+            }
+            for u in users
+        ]
+    }
+
+@app.get("/users/{user_id}/history")
+def get_user_biometric_history(user_id: str):
+    """Retorna o histórico de amostras biométricas aprendidas nos logins do usuário."""
+    user = db_buscar_usuario(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    history = db_buscar_historico_amostras(user_id)
+    return {
+        "user_id": user["id"],
+        "name": user["name"],
+        "samples_count": user["samples_count"],
+        "created_at": user["created_at"],
+        "updated_at": user["updated_at"],
+        "history": history
+    }
+
+@app.get("/faces/{filename}")
+def get_face_photo(filename: str):
+    """Serve a foto facial salva no banco de dados biométrico."""
+    safe_name = os.path.basename(filename)
+    file_path = os.path.join(STORAGE_FACES_DIR, safe_name)
+    resolved = os.path.realpath(file_path)
+    if not resolved.startswith(os.path.realpath(STORAGE_FACES_DIR)):
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Foto biométrica não encontrada.")
+    return FileResponse(file_path, media_type="image/jpeg")
+
+@app.delete("/users/{user_id}")
+def delete_registered_user(user_id: str):
+    """Remove um usuário, suas fotos biométricas e seu histórico de amostras."""
+    user = db_buscar_usuario(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    for p_key in ["photo_filename", "latest_photo_filename"]:
+        p_name = user.get(p_key)
+        if p_name:
+            photo_path = os.path.join(STORAGE_FACES_DIR, p_name)
+            if os.path.exists(photo_path):
+                try:
+                    os.remove(photo_path)
+                except Exception:
+                    pass
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM biometric_samples WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": f"Usuário {user_id} e histórico biométrico excluídos com sucesso."}
+
+@app.post("/verify")
+async def verify_identity(
+    request: Request,
+    video: UploadFile = File(...),
+    expected_colors: str = Form(...), # Ex: "VERMELHO,AZUL,VERDE"
+    profile_photo: Optional[UploadFile] = File(None),
+    user_id: Optional[str] = Form(None),
+    session_token: Optional[str] = Form(None)
+):
+    """
+    Verificação biométrica ao vivo contra o banco de dados (1:N ou 1:1) ou foto de perfil.
+    NÃO exige foto da galeria quando o banco já possui usuários cadastrados.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    aplicar_rate_limit(client_ip)
+
+    cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
+    # Validação do session_token (se fornecido)
+    if session_token and session_token.strip():
+        challenge_data = PENDING_CHALLENGES.pop(session_token.strip(), None)
+        if challenge_data is None:
+            return {
+                "verified": False,
+                "is_live": False,
+                "reason": "Token de sessão inválido ou expirado. Solicite um novo desafio.",
+                "status": "Token de sessão inválido."
+            }
+        challenge_colors, challenge_ts = challenge_data
+        if time.time() - challenge_ts > CHALLENGE_TTL_SECONDS:
+            return {
+                "verified": False,
+                "is_live": False,
+                "reason": "Desafio expirado. Solicite um novo desafio.",
+                "status": "Desafio expirado."
+            }
+        cores = challenge_colors  # Usa as cores oficiais do challenge
+
+    temp_dir = tempfile.mkdtemp()
+
+    video_path = os.path.join(temp_dir, "challenge_video.mp4")
+    profile_path = os.path.join(temp_dir, "profile_photo.jpg") if profile_photo else None
+
+    try:
+        # 1. Salva vídeo temporário
+        with open(video_path, "wb") as f:
+            shutil.copyfileobj(video.file, f)
+
+        if profile_photo and profile_path:
+            with open(profile_path, "wb") as f:
+                shutil.copyfileobj(profile_photo.file, f)
+
+        # 2. ETAPA 1: Prova de Vida Ativa com reflexo espectral
+        is_live, liveness_msg, face_roi = validar_reflexo_delta_rgb(video_path, cores)
+        if not is_live:
+            registrar_auditoria({
+                "client_ip": client_ip,
+                "user_id": user_id or "anonymous",
+                "verified": False,
+                "is_live": False,
+                "reason": liveness_msg
+            })
+            return {
+                "verified": False,
+                "is_live": False,
+                "reason": liveness_msg,
+                "status": liveness_msg
+            }
+
+        # 3. ETAPA 2: Seleciona o melhor frame com maior nitidez (Laplaciano)
+        melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi)
+        cv2.imwrite(os.path.join(DEBUG_DIR, "last_probe_frame.jpg"), melhor_frame)
+
+        # 4. Extrai embedding biométrico do vídeo ao vivo com YuNet + SFace
+        feat_probe, aligned_probe, upright_probe, face_data_probe = extrair_face_completa(melhor_frame)
+        if feat_probe is None or aligned_probe is None or face_data_probe is None:
+            return {
+                "verified": False,
+                "is_live": True,
+                "reason": "Não foi possível isolar um rosto nítido na gravação. Mantenha o rosto estável e centralizado.",
+                "status": "Falha na detecção facial"
+            }
+
+        # Validação Anti-Spoofing profunda com MiniFASNet V2 (bloqueio categórico de telas de PC e fotos impressas)
+        is_real, fas_score, fas_reason, fas_detalhes = avaliar_liveness_minifasnet(upright_probe, face_data_probe[:4], min_live_score=0.70)
+        if not is_real:
+            registrar_auditoria({
+                "client_ip": client_ip,
+                "user_id": user_id or "anonymous",
+                "verified": False,
+                "is_live": False,
+                "fraud_detected": True,
+                "reason": fas_reason,
+                "details": fas_detalhes
+            })
+            return {
+                "verified": False,
+                "is_live": False,
+                "reason": fas_reason,
+                "status": "Fraude Biométrica Detectada",
+                "anti_spoofing": fas_detalhes
+            }
+
+        cv2.imwrite(os.path.join(DEBUG_DIR, "last_aligned_probe.jpg"), aligned_probe)
+
+        verified = False
+        distance = 1.0
+        threshold = 0.35
+        matched_user = None
+
+        # CASO A: Comparação direta com foto enviada na requisição (modo legado)
+        if profile_path and os.path.exists(profile_path):
+            profile_img = cv2.imread(profile_path)
+            if profile_img is not None:
+                feat_profile, aligned_profile = extrair_embedding_e_recorte(profile_img)
+                if feat_profile is not None:
+                    similarity = float(recognizer_sface.match(feat_probe, feat_profile, cv2.FaceRecognizerSF_FR_COSINE))
+                    distance = max(0.0, 1.0 - similarity)
+                    verified = distance <= threshold
+
+        # CASO B: Reconhecimento Facial ao vivo com Aprendizado Adaptativo (sem foto de galeria!)
+        else:
+            # Subcaso B1: user_id especificado -> comparação 1:1 contra o perfil adaptativo
+            if user_id and user_id.strip():
+                alvo = db_buscar_usuario(user_id.strip())
+                if alvo is not None:
+                    distance = calcular_distancia_usuario(feat_probe, alvo)
+                    if distance <= threshold:
+                        verified = True
+                        matched_user = alvo
+                else:
+                    return {
+                        "verified": False,
+                        "is_live": True,
+                        "reason": f"Usuário '{user_id}' não encontrado no banco de dados.",
+                        "status": f"Usuário '{user_id}' não cadastrado."
+                    }
+            # Subcaso B2: reconhecimento 1:N contra todos os perfis adaptativos
+            else:
+                todos_usuarios = db_listar_usuarios()
+                if not todos_usuarios:
+                    return {
+                        "verified": False,
+                        "is_live": True,
+                        "reason": "Nenhum usuário cadastrado no sistema. Por favor, crie sua conta primeiro.",
+                        "status": "Nenhum usuário cadastrado."
+                    }
+
+                menor_distancia = 999.0
+                melhor_candidato = None
+                for u in todos_usuarios:
+                    dist = calcular_distancia_usuario(feat_probe, u)
+                    if dist < menor_distancia:
+                        menor_distancia = dist
+                        melhor_candidato = u
+
+                distance = menor_distancia
+                if distance <= threshold and melhor_candidato is not None:
+                    verified = True
+                    matched_user = melhor_candidato
+
+        # ======================================================================
+        # RETROALIMENTAÇÃO ADAPTATIVA: APRENDIZADO CONTÍNUO AO VIVO
+        # ======================================================================
+        adaptive_updated = False
+        current_samples_count = matched_user["samples_count"] if matched_user else 1
+
+        if verified and matched_user is not None:
+            # Salva o novo recorte facial alinhado deste login bem-sucedido
+            uid = matched_user["id"]
+            login_photo_filename = f"{uid}_latest.jpg"
+            login_photo_path = os.path.join(STORAGE_FACES_DIR, login_photo_filename)
+            cv2.imwrite(login_photo_path, aligned_probe)
+
+            # Adiciona amostra ao histórico e recalcula o centroide biométrico ponderado
+            current_samples_count = db_adicionar_amostra_login(
+                user_id=uid,
+                new_embedding=feat_probe,
+                latest_photo_filename=login_photo_filename,
+                distance_to_anchor=distance
+            )
+            adaptive_updated = True
+
+        # 5. Geração de Token JWT assinado em caso de aprovação
+        jwt_token = None
+        token_sub = matched_user["id"] if matched_user else (user_id or "senior_user_anonymous")
+        if verified:
+            jwt_token = gerar_jwt_biometria(token_sub, distance, threshold)
+
+        registrar_auditoria({
+            "client_ip": client_ip,
+            "user_id": token_sub,
+            "verified": verified,
+            "is_live": True,
+            "distance": round(distance, 4),
+            "matched_name": matched_user["name"] if matched_user else None,
+            "samples_count": current_samples_count,
+            "adaptive_updated": adaptive_updated,
+            "reason": "Sucesso" if verified else "Rosto não reconhecido"
+        })
+
+        resp_user = {
+            "id": matched_user["id"],
+            "name": matched_user["name"],
+            "samples_count": current_samples_count,
+            "photo_url": f"/faces/{matched_user['photo_filename']}",
+            "latest_photo_url": f"/faces/{matched_user.get('latest_photo_filename', matched_user['photo_filename'])}"
+        } if matched_user else None
+
+        msg_status = (
+            f"Olá {matched_user['name']}! Login biométrico aprovado! Perfil atualizado ({current_samples_count} amostras aprendidas)."
+            if (verified and matched_user)
+            else ("Reconhecimento facial aprovado com sucesso!" if verified else "Rosto não reconhecido ou biometria não confere.")
+        )
+
+        return {
+            "verified": verified,
+            "is_live": True,
+            "distance": round(distance, 4),
+            "threshold": threshold,
+            "samples_count": current_samples_count,
+            "adaptive_updated": adaptive_updated,
+            "jwt_token": jwt_token,
+            "matched_user": resp_user,
+            "status": msg_status
+        }
+
+    except Exception as e:
+        registrar_auditoria({
+            "client_ip": client_ip,
+            "user_id": user_id or "anonymous",
+            "verified": False,
+            "is_live": False,
+            "error": str(e)
+        })
+        return {"verified": False, "is_live": False, "error": str(e)}
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+

@@ -14,8 +14,21 @@ Com essa intenção identificada, o sistema principal (que faremos depois em Jav
 ## 2. O que cada arquivo faz? (O Processo Passo a Passo)
 
 ### 📄 `dataset.csv` (A Base do Conhecimento)
-- **Para que serve:** É a matéria-prima. A IA não sabe falar português, ela precisa de exemplos.
-- **O que faz:** Contém dezenas de frases categorizadas. Nós criamos categorias como `NORMAL`, `PEDIDO_DINHEIRO`, `EMERGENCIA_FINANCEIRA`, `PEDIDO_CREDENCIAL`, etc. A IA lê isso para entender os padrões das palavras.
+- **Para que serve:** É a matéria-prima do classificador de intenções.
+- **O que faz:** Contém exatamente **15.000 frases** balanceadas e categorizadas em **13 classes de proteção**:
+  1. `NORMAL` (3.000 frases): Afeto legítimo 50+, rotina, família, compras diárias, hobbies e encontros reais em locais públicos.
+  2. `PEDIDO_DINHEIRO` (1.200 frases): Pedidos diretos de Pix, transferências bancárias e empréstimos com promessas de devolução.
+  3. `MENSAGEM_SUSPEITA` (1.200 frases): Tentativas de ofuscação proposital (`p.i.x`, `c-v-v`, `d i n h e i r o`, traços e símbolos entre letras).
+  4. `SUBLIMACAO_MENSAGEM` (1.200 frases): Vitimização velada por piedade para induzir oferta financeira e pedidos para apagar mensagens/manter segredo da família.
+  5. `AMEACA_EXTORSAO` (1.200 frases): Extorsão moral, falso delegado de polícia, ameaças de expor fotos/conversas e ordens de prisão.
+  6. `EMERGENCIA_FINANCEIRA` (1.000 frases): Falsas internações em UTI, hospitais particulares, remédios urgentes, guincho adiantado e assaltos.
+  7. `ENCOMENDA_TAXA` (1.000 frases): Golpe do presente ou mala com dólares/joias presa na alfândega com falsa cobrança da Receita Federal.
+  8. `INVESTIMENTO_SUSPEITO` (1.000 frases): *Pig Butchering*, falsos rendimentos diários de 5%, arbitragem de criptomoedas (USDT/Bitcoin) e Forex.
+  9. `LINK_MALICIOSO` (1.000 frases): Phishing, links encurtados (*bit.ly*, *t.me*), arquivos executáveis (*.apk*) e páginas clonadas.
+  10. `FALSA_DOACAO_HERANCA` (800 frases): Falsa herança ou doação milionária de caridade mediante pagamento de taxas cartorárias.
+  11. `PEDIDO_CREDENCIAL` (800 frases): Solicitação de tokens SMS, códigos de 6 dígitos, fotos frente/verso de cartão e senhas.
+  12. `SONDAGEM_FINANCEIRA` (800 frases): Perguntas invasivas sobre limite de cartão de crédito, aposentadoria do INSS, pensão e imóveis.
+  13. `FALSO_INTERMEDIARIO` (800 frases): Golpista se passando por mecânico, policial ou amigo em nome de filho/neto pedindo Pix urgente.
 
 ### 📄 `treinar.py` (A Sala de Aula da IA)
 - **Para que serve:** É o script que ensina a máquina. Só precisa ser rodado quando quisermos melhorar a IA (ex: adicionarmos frases novas no CSV).

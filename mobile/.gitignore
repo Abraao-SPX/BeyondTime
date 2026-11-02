@@ -9,6 +9,10 @@ npm-debug.*
 *.mobileprovision
 *.orig.*
 web-build/
+*.log
+yarn-debug.*
+yarn-error.*
 
 # macOS
 .DS_Store
+Thumbs.db
