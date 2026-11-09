@@ -48,6 +48,7 @@ env/
 .DS_Store
 Thumbs.db
 .idea/
+*.iml
 .vscode/
 *.swp
 *.swo
@@ -56,3 +57,16 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# ==========================================
+# 6. Agentes, Skills, Regras e Contextos de IA
+# ==========================================
+.agents/
+agentes/
+.gemini/
+GEMINI.md
+skills/
+.skills/
+regras/
+CONTEXTO*.md
+*contexto*.md
