@@ -1,5 +1,26 @@
 services:
   # ==========================================
+  # 0. Banco de Dados Relacional (PostgreSQL 16 — RF04)
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: beyondtime-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-beyondtime_db}
+      POSTGRES_USER: ${POSTGRES_USER:-beyondtime_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-beyondtime_user} -d ${POSTGRES_DB:-beyondtime_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
   # 1. Reconhecimento Facial & Liveness (IA)
   # ==========================================
   face-api:
@@ -38,6 +59,17 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beyondtime_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
     depends_on:
-      - anjo-da-guarda
-      - face-api
+      postgres:
+        condition: service_healthy
+      anjo-da-guarda:
+        condition: service_started
+      face-api:
+        condition: service_started
+
+volumes:
+  postgres_data:
