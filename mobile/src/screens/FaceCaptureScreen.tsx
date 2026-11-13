@@ -1,816 +1,504 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, Text, View, Dimensions, ActivityIndicator, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import Svg, { Defs, Rect, Mask, Ellipse } from 'react-native-svg';
+/**
+ * RF11 — Validação Facial com Prova de Vida e Selo de Verificado 50+
+ *
+ * Cliente do microsserviço `reconhecimento-facial` (FastAPI + YuNet + SFace + MiniFASNetV2):
+ *   1. GET  /challenge  → recebe cores aleatórias + session_token (expira em 2 min)
+ *   2. Grava vídeo curto pela câmera frontal enquanto a tela pisca as cores
+ *      (o servidor confere o reflexo ΔRGB na pele → bloqueia fotos/telas/máscaras)
+ *   3. POST /register   → cadastra o rosto de referência do usuário (1ª vez)
+ *      POST /verify     → compara 1:1 com o rosto cadastrado e devolve jwt_token
+ *
+ * UX Defensiva 50+ (RF06): botões ≥ 48dp, botão "Voltar" visível,
+ * ícones sempre com rótulo em texto e nenhum gesto complexo.
+ */
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 
-const { width, height } = Dimensions.get('window');
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_BIOMETRIA_API_URL || 'http://10.0.2.2:8000';
+const REQUEST_TIMEOUT_MS = 30000;
 
-// Dimensões do recorte oval
-const MASK_WIDTH = width * 0.78;
-const MASK_HEIGHT = MASK_WIDTH * 1.35;
-const MASK_X = width / 2;
-const MASK_Y = height / 2.5;
-
-// Servidores disponíveis
-export const PRESET_ENDPOINTS = [
-  { label: '🚀 Cloudflare HTTPS (Recomendado)', url: 'https://coated-meals-retained-ward.trycloudflare.com' },
-  { label: '🌐 VPS Oracle Porta 80', url: 'http://132.226.242.158' },
-  { label: '🔌 VPS Oracle Porta 8000', url: 'http://132.226.242.158:8000' },
-];
-
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || PRESET_ENDPOINTS[0].url;
-
-type VerifyResponse = {
-  status: string;
-  face_detected: boolean;
-  similarity_score?: number;
-  face_match_threshold?: number;
-  face_match?: boolean;
-  liveness: {
-    available: boolean;
-    score?: number;
-    threshold?: number;
-    passed?: boolean;
-  };
+const COLOR_MAP: Record<string, string> = {
+  VERMELHO: '#FF0000',
+  AZUL: '#0000FF',
+  VERDE: '#00FF00',
 };
 
-const CHALLENGES = [
-  { id: 'near', text: '🔍 Aproxime o celular do rosto', sub: 'Mova o aparelho devagar em direção ao seu rosto' },
-  { id: 'smile', text: '😊 Dê um sorriso para a câmera', sub: 'Mantenha a expressão natural' },
-  { id: 'blink', text: '👁️ Pisque os olhos lentamente', sub: 'Confirmação de vivacidade' },
-];
+type Mode = 'REGISTER' | 'VERIFY';
+type Stage = 'START' | 'CAMERA' | 'RECORDING' | 'PROCESSING' | 'RESULT';
+
+interface ChallengeResponse {
+  session_token: string;
+  colors: string[];
+  flash_duration_ms: number;
+}
+
+interface BiometriaResult {
+  success?: boolean; // /register
+  verified?: boolean; // /verify
+  is_live?: boolean;
+  distance?: number;
+  threshold?: number;
+  jwt_token?: string | null;
+  reason?: string;
+  status?: string;
+  error?: string;
+  detail?: string;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default function FaceCaptureScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const cameraRef = useRef<CameraView>(null);
 
-  // Endpoint do servidor e modal de configurações
-  const [serverUrl, setServerUrl] = useState<string>(DEFAULT_API_URL);
-  const [showSettings, setShowSettings] = useState<boolean>(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
-  const [testingEndpoint, setTestingEndpoint] = useState<boolean>(false);
+  const [serverUrl, setServerUrl] = useState(DEFAULT_API_URL);
+  const [showSettings, setShowSettings] = useState(false);
+  const [mode, setMode] = useState<Mode>('VERIFY');
+  // Temporário até a integração com o backend Java (RF01): o id virá do JWT da sessão.
+  const [userId, setUserId] = useState('');
+  const [firstName, setFirstName] = useState('');
 
-  // Estados do fluxo
-  const [stage, setStage] = useState<'step1_intro' | 'step1_counting' | 'step2_intro' | 'step2_active' | 'analyzing' | 'result'>('step1_intro');
-  const [countdown, setCountdown] = useState(3);
-  const [selectedChallenge, setSelectedChallenge] = useState(CHALLENGES[0]);
-  const [flashActive, setFlashActive] = useState(false);
-
-  const [referencePhotoUri, setReferencePhotoUri] = useState<string | null>(null);
-  const [apiResult, setApiResult] = useState<VerifyResponse | null>(null);
+  const [stage, setStage] = useState<Stage>('START');
+  const [cameraReady, setCameraReady] = useState(false);
+  const [flashColor, setFlashColor] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [result, setResult] = useState<BiometriaResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const baseUrl = serverUrl.trim().replace(/\/$/, '');
+  const permissionsGranted = !!cameraPermission?.granted && !!micPermission?.granted;
+
   useEffect(() => {
-    if (!permission?.granted) requestPermission();
-  }, [permission]);
+    if (cameraPermission && !cameraPermission.granted) requestCameraPermission();
+    if (micPermission && !micPermission.granted) requestMicPermission();
+  }, [cameraPermission, micPermission]);
 
-  // Início automático do Passo 1
-  useEffect(() => {
-    if (stage === 'step1_intro') {
-      const timer = setTimeout(() => {
-        setCountdown(3);
-        setStage('step1_counting');
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [stage]);
+  const canStart =
+    userId.trim().length > 0 && (mode === 'VERIFY' || firstName.trim().length > 0);
 
-  // Contagem regressiva do Passo 1
-  useEffect(() => {
-    if (stage !== 'step1_counting') return;
-
-    if (countdown <= 0) {
-      captureReference();
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setCountdown((prev) => prev - 1);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [stage, countdown]);
-
-  // Início do Passo 2 (Desafio Ativo de Vivacidade)
-  useEffect(() => {
-    if (stage === 'step2_intro') {
-      // Sortear um desafio aleatório
-      const randomChallenge = CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
-      setSelectedChallenge(randomChallenge);
-
-      const timer = setTimeout(() => {
-        setCountdown(3);
-        setStage('step2_active');
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [stage]);
-
-  // Contagem do Passo 2 + Disparo do Flash Anti-Display
-  useEffect(() => {
-    if (stage !== 'step2_active') return;
-
-    if (countdown <= 0) {
-      // Dispara flash branco na tela por 300ms antes da captura para gerar reflexo natural
-      setFlashActive(true);
-      setTimeout(() => {
-        captureSelfie();
-        setFlashActive(false);
-      }, 300);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setCountdown((prev) => prev - 1);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [stage, countdown]);
-
-  const captureReference = async () => {
-    if (!cameraRef.current) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.85,
-        base64: false,
-        exif: false,
-      });
-
-      if (photo?.uri) {
-        setReferencePhotoUri(photo.uri);
-        setStage('step2_intro');
-      }
-    } catch (e) {
-      console.error(e);
-      setErrorMessage('Erro ao capturar foto base.');
-      setStage('result');
-    }
-  };
-
-  const captureSelfie = async () => {
-    if (!cameraRef.current || !referencePhotoUri) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.85,
-        base64: false,
-        exif: false,
-      });
-
-      if (photo?.uri) {
-        sendForVerification(referencePhotoUri, photo.uri);
-      }
-    } catch (e) {
-      console.error(e);
-      setErrorMessage('Erro ao capturar selfie biométrica.');
-      setStage('result');
-    }
-  };
-
-  const sendForVerification = async (refUri: string, selfieUri: string) => {
-    setStage('analyzing');
+  const goBack = () => {
+    setStage('START');
+    setFlashColor(null);
+    setResult(null);
     setErrorMessage(null);
+    setCameraReady(false);
+  };
 
-    const targetUrl = serverUrl.trim().replace(/\/$/, '');
+  const fail = (msg: string) => {
+    setFlashColor(null);
+    setErrorMessage(msg);
+    setStage('RESULT');
+  };
+
+  const runLiveness = async () => {
+    if (!cameraRef.current || !cameraReady) return;
+    setStage('RECORDING');
+    setErrorMessage(null);
+    setResult(null);
 
     try {
-      const formData = new FormData();
+      // 1. Desafio dinâmico (cores + token de sessão)
+      setStatusMessage('Preparando o teste...');
+      const chRes = await fetchWithTimeout(`${baseUrl}/challenge`);
+      if (!chRes.ok) throw new Error(`Servidor respondeu HTTP ${chRes.status} no desafio.`);
+      const challenge: ChallengeResponse = await chRes.json();
 
-      formData.append('reference_image', {
-        uri: refUri,
-        name: 'ref.jpg',
-        type: 'image/jpeg',
+      // 2. Grava o vídeo enquanto a tela pisca as cores do desafio
+      setStatusMessage('Olhe para a tela e não se mexa');
+      const recordPromise = cameraRef.current.recordAsync({ maxDuration: 5 });
+      await sleep(200);
+      setFlashColor('#000000');
+      await sleep(300);
+      for (const color of challenge.colors) {
+        setFlashColor(COLOR_MAP[color] || '#FFFFFF');
+        await sleep(challenge.flash_duration_ms || 500);
+      }
+      setFlashColor('#000000');
+      await sleep(400);
+      cameraRef.current?.stopRecording();
+      const video = await recordPromise;
+      setFlashColor(null);
+      await sleep(400); // tempo para o SO finalizar a escrita do MP4
+
+      if (!video?.uri) throw new Error('A câmera não conseguiu gravar o vídeo.');
+
+      // 3. Envia para cadastro ou verificação
+      setStage('PROCESSING');
+      setStatusMessage(mode === 'REGISTER' ? 'Cadastrando seu rosto...' : 'Conferindo sua identidade...');
+
+      const form = new FormData();
+      form.append('expected_colors', challenge.colors.join(','));
+      form.append('session_token', challenge.session_token);
+      form.append('user_id', userId.trim());
+      if (mode === 'REGISTER') form.append('name', firstName.trim());
+      form.append('video', {
+        uri: video.uri.startsWith('file://') ? video.uri : `file://${video.uri}`,
+        name: 'liveness.mp4',
+        type: 'video/mp4',
       } as any);
 
-      formData.append('selfie_image', {
-        uri: selfieUri,
-        name: 'selfie.jpg',
-        type: 'image/jpeg',
-      } as any);
+      const endpoint = mode === 'REGISTER' ? '/register' : '/verify';
+      const res = await fetchWithTimeout(`${baseUrl}${endpoint}`, { method: 'POST', body: form });
+      const data: BiometriaResult = await res.json().catch(() => ({}));
 
-      formData.append('same_person_expected', 'true');
-
-      const response = await fetch(`${targetUrl}/api/verify`, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Servidor respondeu com código HTTP ${response.status}`);
+      if (res.status === 429) {
+        throw new Error('Muitas tentativas seguidas. Aguarde 1 minuto e tente de novo.');
+      }
+      if (!res.ok) {
+        throw new Error(data.detail || `Servidor respondeu HTTP ${res.status}.`);
       }
 
-      const data: VerifyResponse = await response.json();
-      setApiResult(data);
-      setStage('result');
+      setResult(data);
+      setStage('RESULT');
     } catch (err: any) {
-      console.error(err);
-      setErrorMessage(
-        `${err.message || 'Falha de comunicação com o servidor de IA.'}\n(Servidor: ${targetUrl})\n\n💡 Dica: Toque no ícone ⚙️ no topo para alternar entre Cloudflare HTTPS e IP da VPS.`
+      const raw = err?.message || '';
+      const msg =
+        err?.name === 'AbortError' || raw.includes('Network request failed')
+          ? `Não foi possível falar com o servidor (${baseUrl}). Confira o endereço em "Configurar servidor".`
+          : raw || 'Falha inesperada no teste.';
+      fail(msg);
+    }
+  };
+
+  const testConnection = async () => {
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/health`);
+      const data = await res.json();
+      setErrorMessage(null);
+      setStatusMessage(
+        res.ok
+          ? `Conectado ✅ (versão ${data.version ?? '?'}, anti-spoofing: ${data.anti_spoofing ?? '?'})`
+          : `Servidor respondeu HTTP ${res.status}`,
       );
-      setStage('result');
+    } catch {
+      setStatusMessage(`Sem conexão com ${baseUrl} ❌`);
     }
   };
 
-  const testServerConnection = async (targetUrl?: string) => {
-    const url = (targetUrl || serverUrl).trim().replace(/\/$/, '');
-    setTestingEndpoint(true);
-    setTestResult('Testando conexão com ' + url + '...');
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(`${url}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-        },
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        setTestResult(`🟢 Conectado com Sucesso!\n(HTTP ${res.status}: ${JSON.stringify(data)})`);
-      } else {
-        setTestResult(`🔴 Servidor respondeu com código HTTP ${res.status}`);
-      }
-    } catch (err: any) {
-      setTestResult(`🔴 Falha: ${err.message || 'Sem resposta (timeout ou bloqueio de rede)'}`);
-    } finally {
-      setTestingEndpoint(false);
-    }
-  };
-
-  const restart = () => {
-    setReferencePhotoUri(null);
-    setApiResult(null);
-    setErrorMessage(null);
-    setCountdown(3);
-    setStage('step1_intro');
-  };
-
-  if (!permission) return <View style={styles.container} />;
-
-  if (!permission.granted) {
+  // ---------------------------------------------------------------- Permissões
+  if (!cameraPermission || !micPermission) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Acesso à câmera necessário para biometria.</Text>
-        <TouchableOpacity style={styles.btnPrimary} onPress={requestPermission}>
-          <Text style={styles.btnText}>Conceder Permissão</Text>
-        </TouchableOpacity>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#38BDF8" />
       </View>
     );
   }
 
+  if (!permissionsGranted) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.title}>Precisamos da sua câmera</Text>
+        <Text style={styles.text}>
+          A câmera grava um vídeo de 3 segundos para confirmar que é você mesmo. O vídeo não fica salvo no
+          celular.
+        </Text>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => {
+            requestCameraPermission();
+            requestMicPermission();
+          }}
+        >
+          <Text style={styles.primaryButtonText}>📷 Permitir câmera</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  // ---------------------------------------------------------------- Início
+  if (stage === 'START') {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <Text style={styles.title}>Selo de Verificado 50+</Text>
+          <Text style={styles.text}>
+            Vamos confirmar que o perfil é seu. A tela vai piscar algumas cores enquanto a câmera grava o seu
+            rosto por poucos segundos.
+          </Text>
+
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              style={[styles.modeButton, mode === 'REGISTER' && styles.modeButtonActive]}
+              onPress={() => setMode('REGISTER')}
+            >
+              <Text style={styles.modeButtonText}>📝 Cadastrar meu rosto</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeButton, mode === 'VERIFY' && styles.modeButtonActive]}
+              onPress={() => setMode('VERIFY')}
+            >
+              <Text style={styles.modeButtonText}>✅ Verificar identidade</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.label}>Identificador do usuário</Text>
+          <TextInput
+            style={styles.input}
+            value={userId}
+            onChangeText={setUserId}
+            placeholder="Ex.: id do perfil no BeyondTime"
+            placeholderTextColor="#64748B"
+            autoCapitalize="none"
+          />
+
+          {mode === 'REGISTER' && (
+            <>
+              <Text style={styles.label}>Primeiro nome</Text>
+              <TextInput
+                style={styles.input}
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="Ex.: Maria"
+                placeholderTextColor="#64748B"
+              />
+            </>
+          )}
+
+          <TouchableOpacity
+            style={[styles.primaryButton, !canStart && styles.buttonDisabled]}
+            disabled={!canStart}
+            onPress={() => setStage('CAMERA')}
+          >
+            <Text style={styles.primaryButtonText}>▶️ Começar</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setShowSettings((v) => !v)}>
+            <Text style={styles.secondaryButtonText}>⚙️ Configurar servidor</Text>
+          </TouchableOpacity>
+
+          {showSettings && (
+            <View style={styles.card}>
+              <Text style={styles.label}>Endereço do serviço de reconhecimento facial</Text>
+              <TextInput
+                style={styles.input}
+                value={serverUrl}
+                onChangeText={setServerUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="http://192.168.0.10:8000"
+                placeholderTextColor="#64748B"
+              />
+              <TouchableOpacity style={styles.secondaryButton} onPress={testConnection}>
+                <Text style={styles.secondaryButtonText}>🔌 Testar conexão</Text>
+              </TouchableOpacity>
+              {!!statusMessage && <Text style={styles.text}>{statusMessage}</Text>}
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ---------------------------------------------------------------- Resultado
+  if (stage === 'RESULT') {
+    const approved = !errorMessage && (mode === 'REGISTER' ? !!result?.success : !!result?.verified);
+    const reason = errorMessage || result?.reason || result?.error || result?.status;
+
+    return (
+      <SafeAreaView style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.scroll}>
+          <Text style={[styles.title, { color: approved ? '#10B981' : '#F87171' }]}>
+            {approved
+              ? mode === 'REGISTER'
+                ? '✅ Rosto cadastrado!'
+                : '✅ Identidade confirmada!'
+              : '❌ Não foi possível confirmar'}
+          </Text>
+
+          {!!reason && <Text style={styles.text}>{reason}</Text>}
+
+          {result && !errorMessage && (
+            <View style={styles.card}>
+              <Text style={styles.detail}>Prova de vida: {result.is_live ? 'aprovada' : 'reprovada'}</Text>
+              {typeof result.distance === 'number' && (
+                <Text style={styles.detail}>
+                  Distância facial: {result.distance} (limite {result.threshold})
+                </Text>
+              )}
+              {mode === 'VERIFY' && (
+                <Text style={styles.detail}>
+                  Token biométrico: {result.jwt_token ? 'emitido ✅' : 'não emitido'}
+                </Text>
+              )}
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setStage('CAMERA')}>
+            <Text style={styles.primaryButtonText}>🔄 Tentar de novo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryButton} onPress={goBack}>
+            <Text style={styles.secondaryButtonText}>⬅️ Voltar ao início</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ---------------------------------------------------------------- Câmera / gravação / processamento
+  const busy = stage === 'RECORDING' || stage === 'PROCESSING';
+
   return (
-    <View style={styles.container}>
-      {stage !== 'result' && (
+    <SafeAreaView style={[styles.screen, flashColor ? { backgroundColor: flashColor } : null]}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={[styles.backButton, busy && styles.buttonDisabled]}
+          disabled={busy}
+          onPress={goBack}
+        >
+          <Text style={styles.secondaryButtonText}>⬅️ Voltar</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.cameraTitle}>
+        {stage === 'CAMERA' ? 'Coloque o rosto dentro do círculo' : statusMessage}
+      </Text>
+
+      <View style={styles.ovalMask}>
         <CameraView
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="front"
-          mode="picture"
+          mode="video"
+          mute
+          videoQuality="480p"
+          onCameraReady={() => setCameraReady(true)}
         />
-      )}
-
-      {/* Máscara Oval com SVG */}
-      {stage !== 'result' && (
-        <Svg height="100%" width="100%" style={StyleSheet.absoluteFill}>
-          <Defs>
-            <Mask id="mask">
-              <Rect height="100%" width="100%" fill="white" />
-              <Ellipse cx={MASK_X} cy={MASK_Y} rx={MASK_WIDTH / 2} ry={MASK_HEIGHT / 2} fill="black" />
-            </Mask>
-          </Defs>
-          <Rect
-            height="100%"
-            width="100%"
-            fill="rgba(0,0,0,0.72)"
-            mask="url(#mask)"
-          />
-          <Ellipse
-            cx={MASK_X}
-            cy={MASK_Y}
-            rx={MASK_WIDTH / 2}
-            ry={MASK_HEIGHT / 2}
-            fill="none"
-            stroke={stage === 'step2_active' ? '#00E676' : '#FFFFFF'}
-            strokeWidth={3.5}
-          />
-        </Svg>
-      )}
-
-      {/* Flash Branco Anti-Display (Reflexo de Luz) */}
-      {flashActive && <View style={styles.flashOverlay} />}
-
-      {/* Camada de Feedbacks Interativos */}
-      <View style={styles.topContainer}>
-        {/* PASSO 1: FOTO BASE */}
-        {stage === 'step1_intro' && (
-          <View style={styles.cardInfo}>
-            <Text style={styles.badgeStep}>ETAPA 1/2: FOTO CADASTRO</Text>
-            <Text style={styles.mainTitle}>Enquadre seu Rosto</Text>
-            <Text style={styles.subTitle}>Mantenha-se centralizado no círculo</Text>
-          </View>
-        )}
-
-        {stage === 'step1_counting' && (
-          <View style={styles.cardInfo}>
-            <Text style={styles.badgeStep}>ETAPA 1/2: CAPTURANDO</Text>
-            <Text style={styles.timerNumber}>{countdown > 0 ? countdown : '📸'}</Text>
-            <Text style={styles.subTitle}>Fique parado...</Text>
-          </View>
-        )}
-
-        {/* PASSO 2: PROVA DE VIDA ATIVA */}
-        {stage === 'step2_intro' && (
-          <View style={[styles.cardInfo, { borderColor: '#FF9100' }]}>
-            <Text style={[styles.badgeStep, { backgroundColor: '#FF9100' }]}>ETAPA 2/2: PROVA DE VIDA</Text>
-            <Text style={styles.mainTitle}>{selectedChallenge.text}</Text>
-            <Text style={styles.subTitle}>{selectedChallenge.sub}</Text>
-          </View>
-        )}
-
-        {stage === 'step2_active' && (
-          <View style={[styles.cardInfo, { borderColor: '#00E676' }]}>
-            <Text style={[styles.badgeStep, { backgroundColor: '#00E676' }]}>DESAFIO ATIVO</Text>
-            <Text style={styles.timerNumber}>{countdown > 0 ? countdown : '📸'}</Text>
-            <Text style={styles.subTitle}>{selectedChallenge.text}</Text>
-          </View>
-        )}
-
-        {/* ANÁLISE DE SEGURANÇA NO DOCKER */}
-        {stage === 'analyzing' && (
-          <View style={styles.analyzingCard}>
-            <ActivityIndicator size="large" color="#00E676" />
-            <Text style={styles.analyzingTitle}>Analisando Biometria & Anti-Spoofing</Text>
-            <Text style={styles.analyzingDesc}>
-              Processando rede neural MiniFASNet e cálculo vetorial SFace...
-            </Text>
-          </View>
-        )}
-
-        {/* CARD FINAL DE RESULTADOS */}
-        {stage === 'result' && (
-          <View style={styles.finalCard}>
-            {errorMessage ? (
-              <>
-                <Text style={styles.finalIcon}>⚠️</Text>
-                <Text style={styles.titleError}>Erro na Verificação</Text>
-                <Text style={styles.descText}>{errorMessage}</Text>
-              </>
-            ) : apiResult ? (
-              <>
-                <Text style={styles.finalIcon}>
-                  {apiResult.status === 'VERIFIED'
-                    ? '🛡️✅'
-                    : apiResult.status === 'LIVENESS_FAILED'
-                    ? '🚫🤖'
-                    : '❌👤'}
-                </Text>
-
-                <Text
-                  style={
-                    apiResult.status === 'VERIFIED'
-                      ? styles.titleSuccess
-                      : styles.titleError
-                  }
-                >
-                  {apiResult.status === 'VERIFIED'
-                    ? 'Aprovado: Pessoa Real & Mesma Face!'
-                    : apiResult.status === 'LIVENESS_FAILED'
-                    ? 'Reprovado: Ataque Anti-Spoofing Detectado!'
-                    : 'Reprovado: Rostos Diferentes!'}
-                </Text>
-
-                {/* Tabela de Métricas do Backend */}
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Anti-Spoofing (MiniFASNet):</Text>
-                  <Text
-                    style={[
-                      styles.metricValue,
-                      {
-                        color:
-                          apiResult.liveness?.passed
-                            ? '#00E676'
-                            : '#FF5252',
-                      },
-                    ]}
-                  >
-                    {apiResult.liveness?.available
-                      ? `${( (apiResult.liveness?.score ?? 0) * 100).toFixed(1)}% (${apiResult.liveness?.passed ? 'VIVO' : 'SPOOF'})`
-                      : 'Não disponível'}
-                  </Text>
-                </View>
-
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Similaridade 1:1 (SFace):</Text>
-                  <Text style={styles.metricValue}>
-                    {apiResult.similarity_score !== undefined
-                      ? `${(apiResult.similarity_score * 100).toFixed(1)}%`
-                      : 'N/A'}
-                  </Text>
-                </View>
-
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Rosto Detectado:</Text>
-                  <Text style={styles.metricValue}>
-                    {apiResult.face_detected ? 'Sim (YuNet)' : 'Não'}
-                  </Text>
-                </View>
-
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Status Geral:</Text>
-                  <Text style={[styles.metricValue, { fontWeight: '900' }]}>
-                    {apiResult.status}
-                  </Text>
-                </View>
-              </>
-            ) : null}
-
-            <TouchableOpacity style={styles.btnRestart} onPress={restart}>
-              <Text style={styles.btnRestartText}>🔄 Realizar Novo Teste</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
 
-      {/* Botão Flutuante de Configurações do Servidor */}
-      <TouchableOpacity
-        style={styles.settingsBtnFloating}
-        onPress={() => {
-          setTestResult(null);
-          setShowSettings(true);
-        }}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.settingsBtnText}>⚙️</Text>
-      </TouchableOpacity>
+      {stage === 'PROCESSING' && <ActivityIndicator size="large" color="#38BDF8" style={{ marginTop: 24 }} />}
 
-      {/* Modal de Configuração do Servidor */}
-      <Modal
-        visible={showSettings}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowSettings(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>⚙️ Configurar Servidor da IA</Text>
-            <Text style={styles.modalSubtitle}>
-              Selecione o endpoint ou digite a URL da VPS:
-            </Text>
-
-            <TextInput
-              style={styles.inputUrl}
-              value={serverUrl}
-              onChangeText={setServerUrl}
-              placeholder="https://..."
-              placeholderTextColor="#777"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={styles.presetHeading}>Opções Rápidas:</Text>
-            {PRESET_ENDPOINTS.map((preset, idx) => {
-              const isSelected = serverUrl === preset.url;
-              return (
-                <TouchableOpacity
-                  key={idx}
-                  style={[styles.presetCard, isSelected && styles.presetCardActive]}
-                  onPress={() => {
-                    setServerUrl(preset.url);
-                    testServerConnection(preset.url);
-                  }}
-                >
-                  <Text style={[styles.presetName, isSelected && styles.presetNameActive]}>
-                    {preset.label}
-                  </Text>
-                  <Text style={styles.presetAddress}>{preset.url}</Text>
-                </TouchableOpacity>
-              );
-            })}
-
-            <TouchableOpacity
-              style={styles.testConnectionBtn}
-              onPress={() => testServerConnection()}
-              disabled={testingEndpoint}
-            >
-              {testingEndpoint ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.testConnectionText}>🧪 Testar Conexão Agora</Text>
-              )}
-            </TouchableOpacity>
-
-            {testResult && (
-              <View style={styles.testResultCard}>
-                <Text style={styles.testResultFeedback}>{testResult}</Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={styles.closeModalBtn}
-              onPress={() => setShowSettings(false)}
-            >
-              <Text style={styles.closeModalText}>Salvar e Fechar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      {stage === 'CAMERA' && (
+        <TouchableOpacity
+          style={[styles.primaryButton, !cameraReady && styles.buttonDisabled]}
+          disabled={!cameraReady}
+          onPress={runLiveness}
+        >
+          <Text style={styles.primaryButtonText}>
+            {cameraReady ? '📸 Estou pronto' : 'Abrindo a câmera...'}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: { flex: 1, backgroundColor: '#0F172A' },
+  center: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-  },
-  flashOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#FFFFFF',
-    opacity: 0.95,
-    zIndex: 999,
-  },
-  text: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    paddingHorizontal: 25,
-    marginBottom: 20,
-  },
-  topContainer: {
-    position: 'absolute',
-    top: height * 0.08,
-    width: '100%',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  cardInfo: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(15,15,15,0.85)',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  badgeStep: {
-    backgroundColor: '#1E88E5',
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginBottom: 6,
-    overflow: 'hidden',
-  },
-  mainTitle: {
-    color: '#fff',
-    fontSize: 19,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  subTitle: {
-    color: '#bbb',
-    fontSize: 13,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  timerNumber: {
-    color: '#00E676',
-    fontSize: 52,
-    fontWeight: '900',
-  },
-  analyzingCard: {
-    marginTop: height * 0.28,
-    backgroundColor: 'rgba(20,20,20,0.92)',
-    padding: 28,
-    borderRadius: 24,
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#00E676',
-  },
-  analyzingTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 15,
-  },
-  analyzingDesc: {
-    color: '#aaa',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 6,
-    paddingHorizontal: 10,
-  },
-  finalCard: {
-    marginTop: height * 0.12,
-    backgroundColor: '#181818',
-    width: width * 0.9,
     padding: 24,
-    borderRadius: 24,
-    alignItems: 'center',
+  },
+  scroll: { padding: 24, paddingBottom: 48 },
+  header: { paddingHorizontal: 16, paddingTop: 12 },
+  title: { color: '#F8FAFC', fontSize: 26, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  cameraTitle: {
+    color: '#F8FAFC',
+    fontSize: 22,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginVertical: 16,
+    paddingHorizontal: 16,
+    textShadowColor: '#000',
+    textShadowRadius: 6,
+  },
+  text: { color: '#CBD5E1', fontSize: 18, lineHeight: 26, marginBottom: 16, textAlign: 'center' },
+  detail: { color: '#CBD5E1', fontSize: 16, marginBottom: 6 },
+  label: { color: '#F8FAFC', fontSize: 18, fontWeight: '600', marginTop: 12, marginBottom: 6 },
+  input: {
+    minHeight: 52,
     borderWidth: 1.5,
-    borderColor: '#333',
-    elevation: 10,
-  },
-  finalIcon: {
-    fontSize: 50,
-    marginBottom: 8,
-  },
-  titleSuccess: {
-    color: '#00E676',
-    fontSize: 21,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  titleError: {
-    color: '#FF5252',
-    fontSize: 21,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  descText: {
-    color: '#ccc',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  metricRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#282828',
-  },
-  metricLabel: {
-    color: '#888',
-    fontSize: 14,
-  },
-  metricValue: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  btnPrimary: {
-    backgroundColor: '#1E88E5',
-    paddingVertical: 12,
-    paddingHorizontal: 28,
-    borderRadius: 12,
-  },
-  btnText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
-  btnRestart: {
-    backgroundColor: '#2A2A2A',
-    marginTop: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 14,
-    width: '100%',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  btnRestartText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
-  settingsBtnFloating: {
-    position: 'absolute',
-    top: height * 0.05,
-    right: 20,
-    backgroundColor: 'rgba(20,20,20,0.85)',
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    zIndex: 9999,
-  },
-  settingsBtnText: {
-    fontSize: 20,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: '#1C1C1E',
-    width: '100%',
-    maxHeight: '90%',
-    borderRadius: 24,
-    padding: 24,
-    borderWidth: 1.5,
-    borderColor: '#333',
-  },
-  modalTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    color: '#AAA',
-    fontSize: 13,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  inputUrl: {
-    backgroundColor: '#2C2C2E',
-    color: '#FFF',
+    borderColor: '#334155',
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#444',
-    marginBottom: 16,
+    color: '#F8FAFC',
+    fontSize: 18,
+    backgroundColor: '#1E293B',
   },
-  presetHeading: {
-    color: '#888',
-    fontSize: 12,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  presetCard: {
-    backgroundColor: '#262628',
+  modeRow: { flexDirection: 'row', gap: 10, marginVertical: 8 },
+  modeButton: {
+    flex: 1,
+    minHeight: 56,
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#38383A',
-  },
-  presetCardActive: {
-    borderColor: '#00E676',
-    backgroundColor: 'rgba(0, 230, 118, 0.1)',
-  },
-  presetName: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  presetNameActive: {
-    color: '#00E676',
-  },
-  presetAddress: {
-    color: '#888',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  testConnectionBtn: {
-    backgroundColor: '#1E88E5',
-    paddingVertical: 12,
-    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#334155',
     alignItems: 'center',
-    marginTop: 10,
+    justifyContent: 'center',
+    padding: 8,
   },
-  testConnectionText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  testResultCard: {
-    backgroundColor: '#111',
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  testResultFeedback: {
-    color: '#FFF',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  closeModalBtn: {
-    backgroundColor: '#333',
-    paddingVertical: 12,
-    borderRadius: 12,
+  modeButtonActive: { borderColor: '#38BDF8', backgroundColor: '#0C4A6E' },
+  modeButtonText: { color: '#F8FAFC', fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  primaryButton: {
+    minHeight: 56,
+    backgroundColor: '#0284C7',
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+    marginHorizontal: 16,
+    paddingHorizontal: 20,
+  },
+  primaryButtonText: { color: '#FFFFFF', fontSize: 20, fontWeight: 'bold' },
+  secondaryButton: {
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#475569',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 14,
+    paddingHorizontal: 16,
   },
-  closeModalText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: 'bold',
+  secondaryButtonText: { color: '#E2E8F0', fontSize: 18, fontWeight: '600' },
+  backButton: {
+    minHeight: 48,
+    minWidth: 120,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#475569',
+    backgroundColor: 'rgba(15,23,42,0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  buttonDisabled: { opacity: 0.45 },
+  card: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+  },
+  ovalMask: {
+    alignSelf: 'center',
+    width: 280,
+    height: 360,
+    borderRadius: 180,
+    overflow: 'hidden',
+    borderWidth: 4,
+    borderColor: '#38BDF8',
+    backgroundColor: '#000',
   },
 });

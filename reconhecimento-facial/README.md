@@ -83,11 +83,11 @@ Para rodar o projeto você precisa apenas de:
 O backend contém todas as dependências pré-instaladas (Python 3.11, OpenCV Headless, FastAPI e os modelos ONNX):
 
 ```bash
-# Clone o repositório
-git clone https://github.com/Abraao-SPX/Reconhecimeto_Facil.git
-cd Reconhecimeto_Facil/backend
+# Dentro do monorepo BeyondTime (recomendado — sobe junto com o backend Java):
+docker compose up -d --build reconhecimento-facial
 
-# Inicie o container
+# Ou apenas este microsserviço isolado:
+cd reconhecimento-facial/backend
 docker compose up -d --build
 ```
 

@@ -21,20 +21,25 @@ services:
       retries: 5
 
   # ==========================================
-  # 1. Reconhecimento Facial & Liveness (IA)
+  # 1. Reconhecimento Facial & Prova de Vida (RF11)
+  #    YuNet + SFace + MiniFASNetV2 + flash espectral
   # ==========================================
-  face-api:
+  reconhecimento-facial:
     build:
-      context: ./face-api
+      context: ./reconhecimento-facial/backend
       dockerfile: Dockerfile
-    container_name: beyondtime-face-api
+    container_name: beyondtime-reconhecimento-facial
     ports:
-      - "8000:8000"
+      - "${BIOMETRIA_PORT:-8000}:8000"
     restart: unless-stopped
     environment:
-      - FACE_MATCH_THRESHOLD=0.60
-      - LIVENESS_THRESHOLD=0.80
-      - SAVE_TEST_IMAGES=false
+      # Chave HS256 do token biométrico (validado pelo backend Java para o Selo 50+).
+      # Se vazia, o serviço gera uma chave efêmera (só serve para testes locais).
+      JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-}
+      CORS_ALLOWED_ORIGINS: ${BIOMETRIA_CORS_ALLOWED_ORIGINS:-*}
+    volumes:
+      # Embeddings (SQLite) e recortes faciais persistidos fora do container
+      - biometria_data:/app/storage
 
   # ==========================================
   # 2. Inteligência Artificial Anti-Fraude (NLP)
@@ -63,13 +68,16 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beyondtime_db}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
+      # Chave de validação dos tokens biométricos (HS256)
+      BIOMETRIA_JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-troque_por_uma_chave_biometrica_aleatoria_de_32_bytes_ou_mais}
     depends_on:
       postgres:
         condition: service_healthy
       anjo-da-guarda:
         condition: service_started
-      face-api:
+      reconhecimento-facial:
         condition: service_started
 
 volumes:
   postgres_data:
+  biometria_data:

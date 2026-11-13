@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura."
+        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura.",
+        "NSMicrophoneUsageDescription": "O BeyondTime usa o sensor de vídeo apenas durante a prova de vida da verificação facial (o áudio não é gravado)."
       }
     },
     "android": {
@@ -19,7 +20,8 @@
         "backgroundColor": "#000000"
       },
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.vanytas.beyondtime"
     },
@@ -38,7 +40,9 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura."
+          "cameraPermission": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura.",
+          "microphonePermission": "O BeyondTime usa o sensor de vídeo apenas durante a prova de vida da verificação facial (o áudio não é gravado).",
+          "recordAudioAndroid": false
         }
       ]
     ],

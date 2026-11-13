@@ -5,6 +5,8 @@ import random
 import string
 import time
 import json
+import uuid
+import re
 import hmac
 import hashlib
 import base64
@@ -92,13 +94,14 @@ def gerar_jwt_biometria(user_id: str, distance: float, threshold: float) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
     now = int(time.time())
     payload = {
+        "jti": str(uuid.uuid4()),
         "sub": user_id,
         "verified": True,
         "biometrics_model": "YuNet-SFace",
         "distance": round(distance, 4),
         "threshold": threshold,
         "iat": now,
-        "exp": now + (24 * 3600), # Válido por 24 horas
+        "exp": now + (5 * 60), # Válido estritamente por 5 minutos (Anti-Replay)
         "iss": "reconhecimento-facil-service"
     }
     header_bytes = json.dumps(header, separators=(',', ':')).encode('utf-8')
@@ -235,8 +238,11 @@ except Exception:
 # BIOMETRIA FACIAL ADAPTATIVA (YUNET + SFACE) - RECONHECIMENTO FÁCIL
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Conformidade LGPD: gravação de imagens de debug desativada por padrão em produção
+ENABLE_DEBUG_PROBE_SAVE = os.getenv("ENABLE_DEBUG_PROBE_SAVE", "false").lower() == "true"
 DEBUG_DIR = os.path.join(BASE_DIR, "debug")
-os.makedirs(DEBUG_DIR, exist_ok=True)
+if ENABLE_DEBUG_PROBE_SAVE:
+    os.makedirs(DEBUG_DIR, exist_ok=True)
 
 STORAGE_DIR = os.path.join(BASE_DIR, "storage")
 STORAGE_FACES_DIR = os.path.join(STORAGE_DIR, "faces")
@@ -1098,7 +1104,14 @@ async def register_biometrics(
     if not name_clean:
         raise HTTPException(status_code=400, detail="O nome do usuário é obrigatório.")
 
-    uid = user_id.strip() if user_id and user_id.strip() else f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
+    if user_id and user_id.strip():
+        # Sanitização contra Path Traversal: permite apenas caracteres alfanuméricos, traço e underline
+        uid_input = user_id.strip()
+        uid = os.path.basename(uid_input)
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', uid):
+            raise HTTPException(status_code=400, detail="Identificador de usuário com formato inválido.")
+    else:
+        uid = f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
 
     # Validação do session_token e cores para prova de vida
     cores = None
@@ -1347,7 +1360,8 @@ async def verify_identity(
 
         # 3. ETAPA 2: Seleciona o melhor frame com maior nitidez (Laplaciano)
         melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi)
-        cv2.imwrite(os.path.join(DEBUG_DIR, "last_probe_frame.jpg"), melhor_frame)
+        if ENABLE_DEBUG_PROBE_SAVE:
+            cv2.imwrite(os.path.join(DEBUG_DIR, "last_probe_frame.jpg"), melhor_frame)
 
         # 4. Extrai embedding biométrico do vídeo ao vivo com YuNet + SFace
         feat_probe, aligned_probe, upright_probe, face_data_probe = extrair_face_completa(melhor_frame)
@@ -1379,7 +1393,8 @@ async def verify_identity(
                 "anti_spoofing": fas_detalhes
             }
 
-        cv2.imwrite(os.path.join(DEBUG_DIR, "last_aligned_probe.jpg"), aligned_probe)
+        if ENABLE_DEBUG_PROBE_SAVE:
+            cv2.imwrite(os.path.join(DEBUG_DIR, "last_aligned_probe.jpg"), aligned_probe)
 
         verified = False
         distance = 1.0
