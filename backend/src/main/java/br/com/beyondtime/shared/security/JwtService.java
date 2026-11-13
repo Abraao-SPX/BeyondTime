@@ -23,6 +23,8 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    private static final String ISSUER = "beyondtime-api";
+
     private final SecretKey secretKey;
     private final long accessTokenExpirationMinutes;
     private final long refreshTokenExpirationDays;
@@ -31,7 +33,7 @@ public class JwtService {
     public JwtService(
             @Value("${beyondtime.security.jwt.secret}") String secret,
             @Value("${beyondtime.security.jwt.access-token-expiration-minutes:15}") long accessTokenExpirationMinutes,
-            @Value("${beyondtime.security.jwt.refresh-token-expiration-days:7}") long refreshTokenExpirationDays) {
+            @Value("${beyondtime.security.jwt.refresh-token-expiration-days:365}") long refreshTokenExpirationDays) {
         if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
             throw new IllegalArgumentException("JWT_SECRET_KEY deve possuir no mínimo 32 bytes (256 bits).");
         }
@@ -45,6 +47,8 @@ public class JwtService {
         Instant expiration = now.plus(accessTokenExpirationMinutes, ChronoUnit.MINUTES);
 
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .issuer(ISSUER)
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
                 .claim("role", user.getRole().name())
@@ -57,6 +61,7 @@ public class JwtService {
     public AuthenticatedUser parseAccessToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(secretKey)
+                .requireIssuer(ISSUER)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
@@ -91,5 +96,9 @@ public class JwtService {
 
     public long getRefreshTokenExpirationDays() {
         return refreshTokenExpirationDays;
+    }
+
+    public long getRefreshTokenExpirationSeconds() {
+        return refreshTokenExpirationDays * 24 * 60 * 60;
     }
 }

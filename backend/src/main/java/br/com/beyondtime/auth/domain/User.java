@@ -118,6 +118,14 @@ public class User {
         return deletedAt;
     }
 
+    public void changePassword(String newPasswordHash) {
+        if (newPasswordHash == null || newPasswordHash.isBlank()) {
+            throw new IllegalArgumentException("O hash da nova senha não pode ser vazio.");
+        }
+        this.passwordHash = newPasswordHash;
+        this.updatedAt = OffsetDateTime.now();
+    }
+
     public void setStatus(UserStatus status) {
         this.status = status;
         if (status == UserStatus.PENDING_DELETION || status == UserStatus.DELETED) {

@@ -14,9 +14,15 @@ public record AuthResponse(
         String accessToken,
         String refreshToken,
         String tokenType,
-        long expiresInSeconds
+        long expiresInSeconds,
+        long refreshExpiresInSeconds
 ) {
-    public static AuthResponse of(User user, String accessToken, String refreshToken, long expiresInSeconds) {
+    public static AuthResponse of(
+            User user,
+            String accessToken,
+            String refreshToken,
+            long expiresInSeconds,
+            long refreshExpiresInSeconds) {
         return new AuthResponse(
                 user.getId(),
                 user.getEmail(),
@@ -26,7 +32,8 @@ public record AuthResponse(
                 accessToken,
                 refreshToken,
                 "Bearer",
-                expiresInSeconds
+                expiresInSeconds,
+                refreshExpiresInSeconds
         );
     }
 }
