@@ -10,6 +10,7 @@ aprendizado/
 **/.expo/
 **/dist/
 **/web-build/
+*.tsbuildinfo
 npm-debug.*
 yarn-debug.*
 yarn-error.*

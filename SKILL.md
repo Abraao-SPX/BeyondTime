@@ -56,3 +56,18 @@
   - Bloqueio total de fechamento acidental: sem botão `"X"`, sem fechamento por clique no backdrop e sem fechamento pela tecla `ESC`.
   - **Botão Seguro Padrão:** `"Continuar preenchendo meu cadastro"` permanece habilitado e recebe foco automático imediato (`t = 0`).
   - **Botão Destrutivo com Temporizador de 3s:** `"Sim, voltar e apagar dados"` inicia `disabled` por **3 segundos** com contagem regressiva visível no próprio rótulo (`"Aguarde 3s para confirmar descarte..."` -> `"Aguarde 2s para confirmar descarte..."` -> `"Aguarde 1s para confirmar descarte..."`), habilitando `"Sim, voltar e apagar dados"` somente após zerar o temporizador.
+
+---
+
+## 6. Fluxo de Onboarding 50+ (Passos 1 a 7 — `[RF-01]`, `[RF-02]`, `[RF-03]`, `[RF-05]`, `[RF-06]`)
+- **Persistência Validada (`[RF-02]` — `src/services/profileStorage.ts`):** Serviço puro que valida idade mínima (`MIN_ALLOWED_AGE = 50`) e foto Base64 (`image/jpeg`, `image/png`, `image/webp` até `2 MB`), persistindo e recuperando o perfil (`beyondtime_user_profile_v1`) para criação e edição.
+- **Catálogo Master Data (`[RF-03]` — `src/data/hobbiesTaxonomy.ts`):** Exporta `MIN_HOBBIES_SELECTION = 3`, `MAX_HOBBIES_SELECTION = 10`, categorias (`Arte e Cultura`, `Lazer e Bem-estar`, `Gastronomia`) e os 12 hobbies parametrizados.
+- **Orquestração DRY (`src/hooks/useOnboardingWizard.ts`):** Gerencia o passo atual (`1` a `7`), o estado tipado `OnboardingFormData`, carregamento/salvamento em `profileStorage`, modo de edição (`startEditingProfile`) e detecção de formulário sujo (`hasUnsavedChanges`) integrada ao `DefensiveModalRF06`.
+- **Componentização SRP (`src/components/onboarding/`):**
+  - `OnboardingStepHeader.tsx`: exibe `"Boas-vindas"` no Passo 1 e `"← Voltar"` (`min-height: 48px`) nos Passos 2 a 7, além de `"Passo X de 7 (Y%)"` e barra de progresso (`#991B1B`).
+  - `Step2DadosPessoais.tsx` (`[RF-02]`): nome e data de nascimento (`DD/MM/AAAA`) com trava automática para idade `< 50 anos` (`MIN_ALLOWED_AGE = 50`).
+  - `Step3Localizacao.tsx` (`[RF-02]` / `[RF-05]`): seletor de cidades de Sergipe (padrão `Aracaju (SE)`) e callout âmbar de privacidade LGPD.
+  - `Step4FotoPerfil.tsx` (`[RF-02]`): preview circular âmbar `120x120px`, upload local de imagem e opção `"Adicionar foto mais tarde"`.
+  - `Step5Interesses.tsx` (`[RF-03]`): categorias e grade de 12 hobbies com mínimo de `3` (`MIN_HOBBIES_COUNT`) e máximo de `10` (`MAX_HOBBIES_COUNT`).
+  - `Step6Objetivo.tsx` (`[RF-02]` / `[RF-05]`): cards acessíveis de seleção (`Amizade`, `Relacionamento`, `Companhia`).
+  - `Step7SenhaLgpd.tsx` (`[RF-01]`): criação e confirmação de senha (`MIN_PASSWORD_LENGTH = 8`) com botões de visualização isolados `50x50px`, aceite LGPD explícito e resumo final de cadastro concluído.
