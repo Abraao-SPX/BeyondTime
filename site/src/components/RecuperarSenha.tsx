@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useContactForm } from '../hooks/useContactForm';
 import type { AuthViewId } from '../types/auth';
-import { validateContactValue } from '../utils/validation';
 
 interface RecuperarSenhaProps {
   contact: string;
@@ -14,44 +12,21 @@ export function RecuperarSenha({
   onContactChange,
   onNavigate,
 }: RecuperarSenhaProps) {
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const inputRef = useRef<HTMLInputElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const timerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    headingRef.current?.focus();
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (isSubmitting) return;
-
-    setFeedbackMessage(null);
-    const validationError = validateContactValue(contact);
-    if (validationError !== null) {
-      setErrorMessage(validationError);
-      inputRef.current?.focus();
-      return;
-    }
-
-    setErrorMessage(null);
-    setIsSubmitting(true);
-    timerRef.current = window.setTimeout(() => {
-      setIsSubmitting(false);
-      setFeedbackMessage(
-        'Se o contato estiver cadastrado, você receberá um código de segurança de 6 números em instantes.'
-      );
-    }, 700);
-  }
+  const {
+    errorMessage,
+    feedbackMessage,
+    setFeedbackMessage,
+    isSubmitting,
+    inputRef,
+    headingRef,
+    handleInputChange,
+    handleSubmit,
+  } = useContactForm({
+    contact,
+    onContactChange,
+    successMessage:
+      'Se o contato estiver cadastrado, você receberá um código de segurança de 6 números em instantes.',
+  });
 
   function handleSupportClick() {
     setFeedbackMessage(
@@ -90,10 +65,7 @@ export function RecuperarSenha({
             autoComplete="username"
             placeholder="exemplo@email.com ou (79) 99999-9999"
             value={contact}
-            onChange={(event) => {
-              onContactChange(event.target.value);
-              if (errorMessage !== null) setErrorMessage(null);
-            }}
+            onChange={(event) => handleInputChange(event.target.value)}
             aria-invalid={errorMessage !== null ? 'true' : undefined}
             aria-describedby="recover-contact-error"
           />

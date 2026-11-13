@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useContactForm } from '../hooks/useContactForm';
 import type { AuthViewId, SocialProvider } from '../types/auth';
-import { validateContactValue } from '../utils/validation';
 import { SocialAuthGrid } from './SocialAuthGrid';
 
 interface CriarMinhaContaProps {
@@ -15,44 +13,21 @@ export function CriarMinhaConta({
   onContactChange,
   onNavigate,
 }: CriarMinhaContaProps) {
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const inputRef = useRef<HTMLInputElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const timerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    headingRef.current?.focus();
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (isSubmitting) return;
-
-    setFeedbackMessage(null);
-    const validationError = validateContactValue(contact);
-    if (validationError !== null) {
-      setErrorMessage(validationError);
-      inputRef.current?.focus();
-      return;
-    }
-
-    setErrorMessage(null);
-    setIsSubmitting(true);
-    timerRef.current = window.setTimeout(() => {
-      setIsSubmitting(false);
-      setFeedbackMessage(
-        'Contato validado para o Passo 1 de 7. Preparando a próxima etapa do cadastro.'
-      );
-    }, 700);
-  }
+  const {
+    errorMessage,
+    feedbackMessage,
+    setFeedbackMessage,
+    isSubmitting,
+    inputRef,
+    headingRef,
+    handleInputChange,
+    handleSubmit,
+  } = useContactForm({
+    contact,
+    onContactChange,
+    successMessage:
+      'Contato validado para o Passo 1 de 7. Preparando a próxima etapa do cadastro.',
+  });
 
   function handleSocialSelect(provider: SocialProvider) {
     setFeedbackMessage(
@@ -106,10 +81,7 @@ export function CriarMinhaConta({
             autoComplete="username"
             placeholder="Digite seu e-mail ou celular"
             value={contact}
-            onChange={(event) => {
-              onContactChange(event.target.value);
-              if (errorMessage !== null) setErrorMessage(null);
-            }}
+            onChange={(event) => handleInputChange(event.target.value)}
             aria-invalid={errorMessage !== null ? 'true' : undefined}
             aria-describedby="register-contact-error"
           />
