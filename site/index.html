@@ -3,111 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#214d40">
-  <meta name="description" content="Conheça o BeyondTime: um aplicativo em desenvolvimento para pessoas 50+ criarem amizades, encontrarem companhia e viverem novas histórias por afinidade.">
-  <meta property="og:type" content="website">
-  <meta property="og:locale" content="pt_BR">
-  <meta property="og:title" content="BeyondTime — Boas histórias não têm idade">
-  <meta property="og:description" content="Amizade, companhia e novas possibilidades. Conheça a proposta do BeyondTime, pensado para pessoas 50+.">
-  <title>BeyondTime — Boas histórias não têm idade</title>
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
-  <script src="config.js" defer></script>
-  <script src="script.js" defer></script>
+  <meta name="theme-color" content="#6E0B14">
+  <meta name="description" content="BeyondTime: plataforma 50+ para amizades, companhias e relacionamentos com segurança, acessibilidade e afinidade.">
+  <title>BeyondTime | Acesso seguro para conexões reais</title>
+  <link rel="icon" href="/assets/beyondlogoicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,600;6..72,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
 </head>
 <body>
-  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
-  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <symbol id="arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
-    <symbol id="arrow-up" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12"/></symbol>
-    <symbol id="heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></symbol>
-    <symbol id="leaf" viewBox="0 0 24 24"><path d="M20 3C9 2 3 7 5 14c2 7 14 7 15-11ZM4 21 15 10"/></symbol>
-    <symbol id="coffee" viewBox="0 0 24 24"><path d="M3 8h14v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V8Zm14 1h2a3 3 0 0 1 0 6h-2M7 2v2m5-2v2M2 23h17"/></symbol>
-    <symbol id="chat" viewBox="0 0 24 24"><path d="M21 11.5a9 9 0 0 1-9 9 10 10 0 0 1-4-.8L3 21l1.3-5a9 9 0 1 1 16.7-4.5Z"/><path d="M8 11h.01M12 11h.01M16 11h.01" stroke-width="3"/></symbol>
-    <symbol id="shield" viewBox="0 0 24 24"><path d="m12 2 9 4v6c0 5-6 9-9 10-3-1-9-5-9-10V6l9-4Z"/><path d="m8 12 3 3 5-6"/></symbol>
-    <symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 1v2m0 18v2M1 12h2m18 0h2M4.2 4.2l1.4 1.4m12.8 12.8 1.4 1.4M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
-    <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-    <symbol id="spark" viewBox="0 0 24 24"><path d="m12 2 2.8 7.2L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8L12 2Z"/></symbol>
-    <symbol id="lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/></symbol>
-    <symbol id="music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 9l11-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="17" cy="16" rx="3" ry="3"/></symbol>
-    <symbol id="close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
-  </svg>
-
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="#inicio" aria-label="BeyondTime — início"><img src="assets/favicon.svg" width="38" height="38" alt=""><span>Beyond<span class="brand-light">Time</span><span class="brand-dot">.</span></span></a>
-      <button class="menu-toggle" type="button" aria-controls="main-nav" aria-expanded="false" aria-label="Abrir menu"><span></span><span></span></button>
-      <nav class="main-nav" id="main-nav" aria-label="Navegação principal">
-        <a href="#conexoes">Nossa proposta</a>
-        <a href="#como-funciona">Como funciona</a>
-        <a href="#seguranca">Segurança</a>
-        <a class="nav-cta" href="#aplicativo">Conheça o app <svg class="icon" aria-hidden="true"><use href="#arrow-up"/></svg></a>
-      </nav>
-    </div>
-  </header>
-
-  <main id="conteudo">
-    <section class="hero container" id="inicio" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow"><span class="little-sun" aria-hidden="true">✳</span> NOVAS CONEXÕES. NO SEU TEMPO.</p>
-        <h1 id="hero-title">Boas histórias<br>não têm <em>idade.</em></h1>
-        <p class="hero-description">Um café, uma conversa, um novo começo.<br>Conheça o BeyondTime: um lugar pensado para criar conexões de verdade depois dos 50.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="#conexoes">Encontre novas possibilidades <svg class="icon" aria-hidden="true"><use href="#arrow"/></svg></a>
-          <a class="text-link" href="#como-funciona">No seu ritmo, do seu jeito <span aria-hidden="true">↘</span></a>
-        </div>
-        <div class="hero-note"><div class="mini-portraits" aria-hidden="true"><img src="assets/perfil-helena.svg" alt="" width="44" height="44"><img src="assets/perfil-marcos.svg" alt="" width="44" height="44"><img src="assets/perfil-lucia.svg" alt="" width="44" height="44"></div><p>Para quem tem muita vida<br><strong>e novas histórias pela frente.</strong></p></div>
-      </div>
-      <div class="hero-art">
-        <div class="art-note"><svg class="icon" aria-hidden="true"><use href="#leaf"/></svg> Sempre é tempo de florescer.</div>
-        <img class="hero-illustration" src="assets/encontro.svg" width="760" height="800" alt="Ilustração de duas pessoas maduras sorrindo e conversando em uma mesa de café ao ar livre." fetchpriority="high">
-        <div class="floating-conversation"><span class="conversation-icon"><svg class="icon" aria-hidden="true"><use href="#coffee"/></svg></span><div><span>PODE COMEÇAR COM UM SIMPLES</span><p>“Vamos tomar um café?”</p></div><span class="conversation-heart" aria-hidden="true">♡</span></div>
-        <span class="art-caption">Gente, encontros e o que faz a vida valer.</span>
-      </div>
-      <span class="hero-page-note">UM NOVO CAPÍTULO ESTÁ SENDO ESCRITO <span aria-hidden="true">↓</span></span>
-    </section>
-
-    <div class="values-band" aria-label="Princípios do BeyondTime"><div class="container values-inner"><span><svg class="icon" aria-hidden="true"><use href="#heart"/></svg> Afinidade antes de tudo</span><i aria-hidden="true">✳</i><span><svg class="icon" aria-hidden="true"><use href="#leaf"/></svg> Respeito ao seu tempo</span><i aria-hidden="true">✳</i><span><svg class="icon" aria-hidden="true"><use href="#shield"/></svg> Cuidado em cada conexão</span></div></div>
-
-    <section class="section container connections" id="conexoes" aria-labelledby="connections-title">
-      <div class="section-heading"><div><p class="eyebrow">HÁ MUITAS FORMAS DE ESTAR JUNTO</p><h2 id="connections-title">O próximo capítulo<br>pode ser <em>compartilhado.</em></h2></div><p>Você escolhe o que faz sentido para a sua vida. A nossa proposta é aproximar pessoas que procuram o mesmo que você.</p></div>
-      <div class="intent-tabs" role="tablist" aria-label="Explore os tipos de conexão">
-        <button id="tab-amizade" class="intent-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="intent-panel" data-intent="amizade"><svg class="icon" aria-hidden="true"><use href="#chat"/></svg> Uma boa amizade</button>
-        <button id="tab-companhia" class="intent-tab" type="button" role="tab" aria-selected="false" aria-controls="intent-panel" tabindex="-1" data-intent="companhia"><svg class="icon" aria-hidden="true"><use href="#coffee"/></svg> Companhia para a vida</button>
-        <button id="tab-relacionamento" class="intent-tab" type="button" role="tab" aria-selected="false" aria-controls="intent-panel" tabindex="-1" data-intent="relacionamento"><svg class="icon" aria-hidden="true"><use href="#heart"/></svg> Um novo amor</button>
-      </div>
-      <div class="intent-panel" id="intent-panel" role="tabpanel" aria-labelledby="tab-amizade" tabindex="0">
-        <div class="intent-copy"><span class="panel-number" aria-hidden="true">01 / 03</span><h3 id="intent-title">Aquela conversa que<br>faz o dia mais leve.</h3><p id="intent-description">Trocar histórias, descobrir um gosto em comum ou simplesmente ter alguém para perguntar: “Como foi seu dia?”. Uma boa amizade pode começar assim.</p><ul class="check-list" id="intent-features"><li><svg class="icon" aria-hidden="true"><use href="#check"/></svg> Interesses que aproximam</li><li><svg class="icon" aria-hidden="true"><use href="#check"/></svg> Conversas com espaço para ser você</li><li><svg class="icon" aria-hidden="true"><use href="#check"/></svg> Conexões sem pressa</li></ul></div>
-        <div class="profile-preview"><div class="profile-image-wrap"><img id="profile-image" src="assets/perfil-helena.svg" width="400" height="440" alt="Ilustração de Helena, personagem de um perfil demonstrativo." loading="lazy"><span class="profile-caption">PERFIL ILUSTRATIVO</span></div><div class="profile-summary"><div><h4 id="profile-name">Helena, 58</h4><p id="profile-bio">Uma boa conversa sempre cabe no dia.</p></div><span class="profile-flower" aria-hidden="true">✳</span></div><div class="profile-interests" id="profile-interests"><span>Jardinagem</span><span>Um bom café</span><span>MPB</span></div></div>
-        <div class="affinity-note"><svg class="icon" aria-hidden="true"><use href="#spark"/></svg><span>O primeiro assunto?<br><strong>Vocês já têm em comum.</strong></span></div>
-      </div>
-      <p class="section-footnote">Uma prévia da experiência que estamos construindo. Perfis e situações são ilustrativos.</p>
-    </section>
-
-    <section class="how-section" id="como-funciona" aria-labelledby="how-title"><div class="container">
-      <div class="how-heading"><div><p class="eyebrow">SIMPLES DESDE O PRIMEIRO OLÁ</p><h2 id="how-title">Menos complicação.<br><em>Mais conexão.</em></h2></div><p>Estamos desenhando uma experiência clara e acolhedora, para que a tecnologia deixe espaço para o que importa: as pessoas.</p></div>
-      <div class="steps"><article class="step"><div class="step-top"><span>01</span><svg class="icon" aria-hidden="true"><use href="#sun"/></svg></div><h3>Conte um pouco de você</h3><p>Seus interesses, suas histórias e o que você busca. Um perfil que vai além da foto.</p></article><article class="step"><div class="step-top"><span>02</span><svg class="icon" aria-hidden="true"><use href="#leaf"/></svg></div><h3>Encontre afinidades</h3><p>A proposta é apresentar pessoas com interesses e intenções que combinam com os seus.</p></article><article class="step"><div class="step-top"><span>03</span><svg class="icon" aria-hidden="true"><use href="#chat"/></svg></div><h3>Dê espaço à conversa</h3><p>Quando o interesse for mútuo, um primeiro olá pode abrir a porta para uma boa história.</p></article></div>
-      <div class="how-bottom"><span>Sem corrida. Sem obrigação. No seu tempo.</span><svg class="icon" aria-hidden="true"><use href="#heart"/></svg></div>
-    </div></section>
-
-    <section class="section container safety" id="seguranca" aria-labelledby="safety-title">
-      <div class="safety-art" aria-hidden="true"><div class="safety-orbit orbit-one"></div><div class="safety-orbit orbit-two"></div><span class="orbit-spark spark-one">✳</span><span class="orbit-spark spark-two">✳</span><div class="safety-center"><svg viewBox="0 0 100 112" fill="none"><path d="m50 6 39 17v27c0 25-25 47-39 55C36 97 11 75 11 50V23L50 6Z" fill="#214d40"/><path d="M50 26c-10-12-27-2-21 11 6 12 21 21 21 21s15-9 21-21c6-13-11-23-21-11Z" fill="#f3ead3"/><path d="m35 77 9 9 21-22" stroke="#e5bc8b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="safety-tag tag-top"><svg class="icon"><use href="#lock"/></svg> Sua privacidade importa.</div><div class="safety-tag tag-bottom"><svg class="icon"><use href="#heart"/></svg> Sua autonomia também.</div><span class="safety-handwriting">Cuidar também é conectar.</span></div>
-      <div class="safety-copy"><p class="eyebrow">CONFIANÇA SE CONSTRÓI COM CUIDADO</p><h2 id="safety-title">Para conhecer alguém,<br>você precisa se sentir<br><em>à vontade.</em></h2><p>Segurança e respeito fazem parte do que queremos construir, desde o primeiro contato.</p><div class="safety-points"><article><span class="point-icon"><svg class="icon" aria-hidden="true"><use href="#shield"/></svg></span><div><h3>Verificação com transparência</h3><p>Estamos desenvolvendo a verificação de perfil. Ela será um apoio, sem prometer que um perfil está livre de riscos.</p></div></article><article><span class="point-icon"><svg class="icon" aria-hidden="true"><use href="#chat"/></svg></span><div><h3>Uma ajuda para reconhecer sinais</h3><p>O “Anjo da Guarda” é nossa proposta de alertas educativos sobre mensagens suspeitas, sem acusações automáticas.</p></div></article><article><span class="point-icon"><svg class="icon" aria-hidden="true"><use href="#lock"/></svg></span><div><h3>Você no controle</h3><p>Bloqueio, denúncia e escolhas de privacidade estão previstos para ajudar você a decidir com quem interagir.</p></div></article></div><p class="safety-note">Recursos em desenvolvimento. Nenhuma tecnologia elimina todos os riscos.</p></div>
-    </section>
-
-    <section class="manifesto"><div class="container manifesto-inner"><span aria-hidden="true">“</span><h2>A vida não para de surpreender.<br>E a gente não precisa<br><em>vivê-la sozinho.</em></h2><p>ESSA É A IDEIA POR TRÁS DO BEYONDTIME.</p><svg class="icon" aria-hidden="true"><use href="#leaf"/></svg></div></section>
-
-    <section class="section container faq-section" id="duvidas" aria-labelledby="faq-title"><div class="faq-heading"><p class="eyebrow">VAMOS CONVERSAR?</p><h2 id="faq-title">Algumas dúvidas,<br><em>boas respostas.</em></h2><p>Conheça um pouco mais da proposta.</p></div><div class="faq-list">
-      <details open><summary>O BeyondTime é só para namoro?<span aria-hidden="true">+</span></summary><p>Não. A proposta também inclui amizade, companhia e pessoas para compartilhar interesses e atividades. Cada pessoa poderá dizer o que procura, respeitando suas próprias escolhas.</p></details>
-      <details><summary>Para quem o aplicativo está sendo pensado?<span aria-hidden="true">+</span></summary><p>O BeyondTime está sendo desenvolvido principalmente para pessoas com 50 anos ou mais. Queremos uma experiência simples, legível e respeitosa, com espaço para diferentes histórias e níveis de familiaridade com a tecnologia.</p></details>
-      <details><summary>Já posso baixar e criar uma conta?<span aria-hidden="true">+</span></summary><p data-release-answer>O aplicativo ainda está em desenvolvimento e não há uma data de lançamento anunciada. Este site apresenta a proposta. O acesso oficial será divulgado aqui quando estiver disponível.</p></details>
-      <details><summary>Como a segurança vai funcionar?<span aria-hidden="true">+</span></summary><p>Estamos trabalhando em verificação de perfil, orientações de segurança, bloqueio, denúncia e alertas educativos. Esses recursos precisam de validação antes do lançamento e não serão uma garantia absoluta sobre a identidade ou as intenções de alguém.</p></details>
-      <details><summary>Vou precisar entender muito de tecnologia?<span aria-hidden="true">+</span></summary><p>A intenção é tornar o caminho fácil de entender: textos legíveis, botões claros e etapas curtas. A experiência será validada com usuários para entender o que precisa ser melhorado.</p></details>
-    </div></section>
-
-    <section class="app-section container" id="aplicativo" aria-labelledby="app-title"><div class="app-callout"><div class="app-copy"><p class="launch-status"><span></span><span data-release-status>APLICATIVO EM DESENVOLVIMENTO</span></p><h2 id="app-title">Ainda há tanta<br>coisa boa <em>para viver.</em></h2><p>Estamos preparando um novo espaço para encontrar pessoas, compartilhar momentos e começar histórias. Que bom ter você por aqui.</p><a class="button button-cream" href="#lancamento" data-app-action>Sobre o lançamento <svg class="icon" aria-hidden="true"><use href="#arrow-up"/></svg></a><span class="launch-hint" data-release-hint>As novidades sobre o lançamento serão publicadas aqui.</span></div><div class="app-art" aria-hidden="true"><div class="app-stamp"><span>NOVOS COMEÇOS</span><svg class="icon"><use href="#sun"/></svg><span>NÃO TÊM IDADE</span></div><div class="large-brand-mark">b<span>t</span><i>♡</i></div><span class="app-art-caption">o melhor da vida é compartilhar.</span></div></div><div class="launch-information" id="lancamento"><svg class="icon" aria-hidden="true"><use href="#leaf"/></svg><p><strong>Um passo de cada vez.</strong> <span data-launch-text>O BeyondTime está em desenvolvimento. Ainda não estamos abrindo cadastros nem coletando inscrições neste site.</span></p></div></section>
-  </main>
-
-  <footer class="site-footer"><div class="container"><div class="footer-main"><div><a class="brand" href="#inicio" aria-label="BeyondTime — voltar ao início"><img src="assets/favicon.svg" width="34" height="34" alt=""><span>Beyond<span class="brand-light">Time</span><span class="brand-dot">.</span></span></a><p>Conexões reais não têm idade.</p></div><nav aria-label="Navegação do rodapé"><a href="#conexoes">Nossa proposta</a><a href="#seguranca">Segurança</a><a href="#duvidas">Dúvidas frequentes</a><a data-contact-link hidden>Fale com a equipe</a></nav></div><div class="footer-bottom"><span>© <span id="year">2026</span> BeyondTime. Feito para novas histórias.</span><a href="#privacidade">Privacidade deste site <svg class="icon" aria-hidden="true"><use href="#arrow-up"/></svg></a><span class="footer-location">Feito com cuidado, no Brasil <span aria-hidden="true">✳</span></span></div><details class="privacy-note" id="privacidade"><summary>Sobre os dados desta página</summary><p>Esta página não possui formulário de cadastro, ferramentas de rastreamento ou cookies de publicidade. Fontes e imagens são servidas sem serviços externos. A infraestrutura de hospedagem pode registrar dados técnicos de acesso. A política de privacidade do aplicativo será apresentada antes da abertura dos cadastros.</p></details></div></footer>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
