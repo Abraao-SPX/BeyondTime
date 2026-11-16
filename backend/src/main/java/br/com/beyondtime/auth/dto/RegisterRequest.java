@@ -20,7 +20,10 @@ public record RegisterRequest(
 
         @NotBlank(message = "A senha é obrigatória.")
         @Size(min = 8, max = 72, message = "A senha deve ter entre 8 e 72 caracteres.")
-        @Pattern(regexp = "^\\S+$", message = "A senha não pode conter espaços em branco.")
+        @Pattern(
+                regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9\\s])\\S{8,72}$",
+                message = "A senha deve conter letra maiúscula, letra minúscula, número e caractere especial (ex.: . , @ ! #), sem espaços em branco."
+        )
         String password,
 
         @NotNull(message = "A data de nascimento é obrigatória.")

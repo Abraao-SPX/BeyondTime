@@ -40,7 +40,7 @@ public class SecurityConfig {
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
             ObjectMapper objectMapper,
-            @Value("${beyondtime.security.cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://localhost:8081}") String allowedOriginsCsv) {
+            @Value("${beyondtime.security.cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://localhost:8081,http://localhost:8085,http://127.0.0.1:8085,http://bytime.me,https://bytime.me,http://www.bytime.me,https://www.bytime.me,http://132.226.242.158:8085}") String allowedOriginsCsv) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.objectMapper = objectMapper;
         this.allowedOrigins = Arrays.stream(allowedOriginsCsv.split(","))
@@ -58,6 +58,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/").permitAll()
                         .requestMatchers("/api/v1/locations/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/hobbies", "/api/v1/hobbies/**").permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/login",

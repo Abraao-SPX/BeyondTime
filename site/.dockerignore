@@ -1,9 +1,6 @@
-*
-!Dockerfile
-!nginx.conf
-!index.html
-!styles.css
-!script.js
-!config.js
-!assets/
-!assets/**
+node_modules
+dist
+.git
+.env
+.env.local
+*.log

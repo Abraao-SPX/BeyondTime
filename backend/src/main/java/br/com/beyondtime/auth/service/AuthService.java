@@ -57,6 +57,7 @@ public class AuthService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final PasswordResetMailService passwordResetMailService;
     private final long passwordResetExpirationMinutes;
     private final boolean exposeDebugResetCode;
     private final String dummyBcryptHash;
@@ -69,6 +70,7 @@ public class AuthService {
             PasswordResetTokenRepository passwordResetTokenRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
+            PasswordResetMailService passwordResetMailService,
             @Value("${beyondtime.security.password-reset.expiration-minutes:15}") long passwordResetExpirationMinutes,
             @Value("${beyondtime.security.password-reset.expose-debug-code:false}") boolean exposeDebugResetCode) {
         this.userRepository = userRepository;
@@ -77,6 +79,7 @@ public class AuthService {
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.passwordResetMailService = passwordResetMailService;
         this.passwordResetExpirationMinutes = passwordResetExpirationMinutes;
         this.exposeDebugResetCode = exposeDebugResetCode;
         this.dummyBcryptHash = passwordEncoder.encode("BeyondTimeDummyConstantTimePassword2026!");
@@ -232,6 +235,7 @@ public class AuthService {
         OffsetDateTime expiresAt = now.plusMinutes(passwordResetExpirationMinutes);
 
         passwordResetTokenRepository.save(new PasswordResetToken(user, tokenHash, expiresAt));
+        passwordResetMailService.sendResetCode(normalizedEmail, assortedResetCode, passwordResetExpirationMinutes);
         log.info("[BeyondTime Auth] Solicitação de recuperação de senha registrada para userId={} (expira em {} min).",
                 user.getId(), passwordResetExpirationMinutes);
 

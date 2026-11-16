@@ -63,13 +63,32 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beyondtime_db}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-beyondtime-dev-secret-key-must-be-at-least-256-bits-long-2026-sergipe}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      BEYONDTIME_MAIL_FROM: ${BEYONDTIME_MAIL_FROM:-nao-responda@beyondtime.com.br}
+      PASSWORD_RESET_EXPOSE_DEBUG_CODE: ${PASSWORD_RESET_EXPOSE_DEBUG_CODE:-false}
     depends_on:
       postgres:
         condition: service_healthy
-      anjo-da-guarda:
-        condition: service_started
-      face-api:
-        condition: service_started
+
+  # ==========================================
+  # 4. Site Web & Aplicação React 18 (Nginx)
+  # ==========================================
+  site:
+    build:
+      context: ./site
+      dockerfile: Dockerfile
+    container_name: beyondtime-site
+    ports:
+      - "${SITE_PORT:-8085}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

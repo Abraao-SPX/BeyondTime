@@ -13,6 +13,7 @@ import br.com.beyondtime.auth.dto.ResetPasswordRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeResponse;
 import br.com.beyondtime.auth.service.AuthService;
+import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.security.AuthenticatedUser;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -76,7 +77,8 @@ public class AuthController {
     public ResponseEntity<Void> changePassword(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
             @Valid @RequestBody ChangePasswordRequest request) {
-        authService.changePassword(currentUser.userId(), request);
+        AuthenticatedUser user = requireAuthenticatedUser(currentUser);
+        authService.changePassword(user.userId(), request);
         return ResponseEntity.noContent().build();
     }
 
@@ -84,12 +86,24 @@ public class AuthController {
     public ResponseEntity<Void> logout(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
             @RequestBody(required = false) LogoutRequest request) {
-        authService.logout(currentUser.userId(), request);
+        AuthenticatedUser user = requireAuthenticatedUser(currentUser);
+        authService.logout(user.userId(), request);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/me")
     public ResponseEntity<AuthenticatedUser> me(@AuthenticationPrincipal AuthenticatedUser currentUser) {
-        return ResponseEntity.ok(currentUser);
+        return ResponseEntity.ok(requireAuthenticatedUser(currentUser));
+    }
+
+    private AuthenticatedUser requireAuthenticatedUser(AuthenticatedUser currentUser) {
+        if (currentUser == null || currentUser.userId() == null) {
+            throw new BusinessException(
+                    "UNAUTHORIZED",
+                    "Autenticação necessária. Faça login novamente para continuar.",
+                    HttpStatus.UNAUTHORIZED
+            );
+        }
+        return currentUser;
     }
 }

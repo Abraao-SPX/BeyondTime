@@ -4,10 +4,12 @@ import br.com.beyondtime.shared.exception.BusinessException;
 
 import java.time.LocalDate;
 import java.time.Period;
+import java.time.ZoneId;
 
 public final class AgeValidator {
 
     public static final int MINIMUM_AGE_BEYONDTIME = 50;
+    public static final ZoneId SERGIPE_ZONE = ZoneId.of("America/Maceio");
 
     private AgeValidator() {
     }
@@ -16,10 +18,11 @@ public final class AgeValidator {
         if (birthDate == null) {
             throw new BusinessException("BIRTH_DATE_REQUIRED", "A data de nascimento é obrigatória.");
         }
-        if (birthDate.isAfter(LocalDate.now())) {
+        LocalDate today = LocalDate.now();
+        if (birthDate.isAfter(today)) {
             throw new BusinessException("INVALID_BIRTH_DATE", "A data de nascimento não pode ser uma data futura.");
         }
-        return Period.between(birthDate, LocalDate.now()).getYears();
+        return Period.between(birthDate, today).getYears();
     }
 
     public static void enforceMinimumAge50Plus(LocalDate birthDate) {

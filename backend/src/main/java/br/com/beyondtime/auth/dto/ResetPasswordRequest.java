@@ -17,7 +17,10 @@ public record ResetPasswordRequest(
 
         @NotBlank(message = "A nova senha é obrigatória.")
         @Size(min = 8, max = 72, message = "A nova senha deve ter entre 8 e 72 caracteres.")
-        @Pattern(regexp = "^\\S+$", message = "A nova senha não pode conter espaços em branco.")
+        @Pattern(
+                regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9\\s])\\S{8,72}$",
+                message = "A nova senha deve conter letra maiúscula, letra minúscula, número e caractere especial (ex.: . , @ ! #), sem espaços em branco."
+        )
         String newPassword,
 
         @NotBlank(message = "A confirmação da nova senha é obrigatória.")

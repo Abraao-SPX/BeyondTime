@@ -389,4 +389,45 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.code", is("UNAUTHORIZED")))
                 .andExpect(jsonPath("$.status", is(401)));
     }
+
+    @Test
+    void shouldEnforceStrongPasswordPolicyAndAcceptDotCommaAndAtSpecialCharacters() throws Exception {
+        String[] weakPasswords = {
+                "semmaiuscula1!",
+                "SEMMINUSCULA1!",
+                "SemNumeroAqui!",
+                "SemCaractereEspecial123",
+                "Com Espaco123!",
+                "Cur1!"
+        };
+
+        for (String weakPassword : weakPasswords) {
+            RegisterRequest invalidReq = new RegisterRequest(
+                    "teste.senha@beyondtime.com.br",
+                    null,
+                    weakPassword,
+                    LocalDate.now().minusYears(55)
+            );
+
+            mockMvc.perform(post("/api/v1/auth/register")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(invalidReq)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code", is("VALIDATION_ERROR")));
+        }
+
+        RegisterRequest validWithDotAndComma = new RegisterRequest(
+                "maria.ponto@beyondtime.com.br",
+                "79991234567",
+                "Maria50+,Sergipe.2026@",
+                LocalDate.now().minusYears(62)
+        );
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validWithDotAndComma)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email", is("maria.ponto@beyondtime.com.br")))
+                .andExpect(jsonPath("$.accessToken", notNullValue()));
+    }
 }
