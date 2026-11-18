@@ -2,6 +2,7 @@ package br.com.beyondtime.auth.controller;
 
 import br.com.beyondtime.auth.dto.AuthResponse;
 import br.com.beyondtime.auth.dto.ChangePasswordRequest;
+import br.com.beyondtime.auth.dto.DeleteAccountRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
 import br.com.beyondtime.auth.dto.GoogleLoginRequest;
@@ -19,6 +20,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -94,6 +96,15 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<AuthenticatedUser> me(@AuthenticationPrincipal AuthenticatedUser currentUser) {
         return ResponseEntity.ok(requireAuthenticatedUser(currentUser));
+    }
+
+    @DeleteMapping("/account")
+    public ResponseEntity<Void> deleteAccount(
+            @AuthenticationPrincipal AuthenticatedUser currentUser,
+            @RequestBody(required = false) DeleteAccountRequest request) {
+        AuthenticatedUser user = requireAuthenticatedUser(currentUser);
+        authService.deleteAccount(user.userId(), request);
+        return ResponseEntity.noContent().build();
     }
 
     private AuthenticatedUser requireAuthenticatedUser(AuthenticatedUser currentUser) {

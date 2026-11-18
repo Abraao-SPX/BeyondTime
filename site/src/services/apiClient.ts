@@ -206,6 +206,25 @@ export async function logoutAccount(session: AuthSession | null): Promise<void> 
   }
 }
 
+export async function deleteAccountDefinitively(
+  session: AuthSession,
+  password?: string
+): Promise<void> {
+  await requestJson<void>(
+    '/api/v1/auth/account',
+    {
+      method: 'DELETE',
+      body: JSON.stringify({
+        password: password || null,
+        confirmedViaDefensiveModal: true,
+      }),
+    },
+    session.accessToken
+  );
+  clearAuthSession();
+  clearUserProfile();
+}
+
 export async function fetchSergipeCities(): Promise<CityOption[]> {
   return requestJson<CityOption[]>('/api/v1/locations/cities?uf=SE');
 }

@@ -1,2 +1,4 @@
 .validation/
 .env
+node_modules/
+dist/

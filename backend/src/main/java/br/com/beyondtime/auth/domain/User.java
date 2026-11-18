@@ -43,6 +43,12 @@ public class User {
     @Column(name = "status", nullable = false, length = 30)
     private UserStatus status = UserStatus.ACTIVE;
 
+    @Column(name = "failed_login_attempts", nullable = false)
+    private short failedLoginAttempts = 0;
+
+    @Column(name = "locked_until")
+    private OffsetDateTime lockedUntil;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -135,5 +141,47 @@ public class User {
 
     public boolean isActive() {
         return this.status == UserStatus.ACTIVE;
+    }
+
+    public short getFailedLoginAttempts() {
+        return failedLoginAttempts;
+    }
+
+    public OffsetDateTime getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public boolean isCurrentlyLocked(OffsetDateTime now) {
+        return this.lockedUntil != null && this.lockedUntil.isAfter(now);
+    }
+
+    public int recordFailedLoginAttempt(int maxAttempts, long lockMinutes, OffsetDateTime now) {
+        if (this.lockedUntil != null && !this.lockedUntil.isAfter(now)) {
+            this.failedLoginAttempts = 0;
+            this.lockedUntil = null;
+        }
+        this.failedLoginAttempts++;
+        if (this.failedLoginAttempts >= maxAttempts) {
+            this.lockedUntil = now.plusMinutes(lockMinutes);
+        }
+        this.updatedAt = now;
+        return this.failedLoginAttempts;
+    }
+
+    public void resetLoginAttempts() {
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    public void anonymizeAndMarkDeleted(OffsetDateTime now) {
+        String deletedSuffix = this.id != null ? this.id.toString() : UUID.randomUUID().toString();
+        this.email = "deleted-" + deletedSuffix + "@excluded.beyondtime.local";
+        this.phone = null;
+        this.passwordHash = null;
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+        this.status = UserStatus.DELETED;
+        this.deletedAt = now;
+        this.updatedAt = now;
     }
 }

@@ -1,5 +1,6 @@
 package br.com.beyondtime.auth.service;
 
+import br.com.beyondtime.auth.domain.LgpdDataRequest;
 import br.com.beyondtime.auth.domain.OAuthProvider;
 import br.com.beyondtime.auth.domain.PasswordResetToken;
 import br.com.beyondtime.auth.domain.RefreshToken;
@@ -7,6 +8,7 @@ import br.com.beyondtime.auth.domain.User;
 import br.com.beyondtime.auth.domain.UserOAuthAccount;
 import br.com.beyondtime.auth.dto.AuthResponse;
 import br.com.beyondtime.auth.dto.ChangePasswordRequest;
+import br.com.beyondtime.auth.dto.DeleteAccountRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
 import br.com.beyondtime.auth.dto.GoogleLoginRequest;
@@ -17,13 +19,16 @@ import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.auth.dto.ResetPasswordRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeResponse;
+import br.com.beyondtime.auth.repository.LgpdDataRequestRepository;
 import br.com.beyondtime.auth.repository.PasswordResetTokenRepository;
 import br.com.beyondtime.auth.repository.RefreshTokenRepository;
 import br.com.beyondtime.auth.repository.UserOAuthAccountRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.security.JwtService;
 import br.com.beyondtime.shared.util.AgeValidator;
+import br.com.beyondtime.shared.util.XssSanitizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Locale;
 import java.util.UUID;
@@ -55,11 +61,15 @@ public class AuthService {
     private final UserOAuthAccountRepository oauthAccountRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final LgpdDataRequestRepository lgpdDataRequestRepository;
+    private final ProfileRepository profileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final PasswordResetMailService passwordResetMailService;
     private final long passwordResetExpirationMinutes;
     private final boolean exposeDebugResetCode;
+    private final int maxFailedLoginAttempts;
+    private final long loginLockMinutes;
     private final String dummyBcryptHash;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -68,20 +78,28 @@ public class AuthService {
             UserOAuthAccountRepository oauthAccountRepository,
             RefreshTokenRepository refreshTokenRepository,
             PasswordResetTokenRepository passwordResetTokenRepository,
+            LgpdDataRequestRepository lgpdDataRequestRepository,
+            ProfileRepository profileRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             PasswordResetMailService passwordResetMailService,
             @Value("${beyondtime.security.password-reset.expiration-minutes:15}") long passwordResetExpirationMinutes,
-            @Value("${beyondtime.security.password-reset.expose-debug-code:false}") boolean exposeDebugResetCode) {
+            @Value("${beyondtime.security.password-reset.expose-debug-code:false}") boolean exposeDebugResetCode,
+            @Value("${beyondtime.security.login.max-failed-attempts:5}") int maxFailedLoginAttempts,
+            @Value("${beyondtime.security.login.lock-minutes:15}") long loginLockMinutes) {
         this.userRepository = userRepository;
         this.oauthAccountRepository = oauthAccountRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.lgpdDataRequestRepository = lgpdDataRequestRepository;
+        this.profileRepository = profileRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetMailService = passwordResetMailService;
         this.passwordResetExpirationMinutes = passwordResetExpirationMinutes;
         this.exposeDebugResetCode = exposeDebugResetCode;
+        this.maxFailedLoginAttempts = maxFailedLoginAttempts;
+        this.loginLockMinutes = loginLockMinutes;
         this.dummyBcryptHash = passwordEncoder.encode("BeyondTimeDummyConstantTimePassword2026!");
     }
 
@@ -90,7 +108,16 @@ public class AuthService {
         // RF02: Bloqueio obrigatório de cadastro para idade < 50 anos
         AgeValidator.enforceMinimumAge50Plus(request.birthDate());
 
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        if (XssSanitizer.containsMaliciousScript(request.email())
+                || XssSanitizer.containsMaliciousScript(request.phone())) {
+            throw new BusinessException(
+                    "XSS_PAYLOAD_DETECTED",
+                    "Conteúdo não permitido detectado nos dados de cadastro.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        String normalizedEmail = XssSanitizer.sanitizeSingleLine(request.email()).toLowerCase(Locale.ROOT);
         if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
             throw new BusinessException(
                     "EMAIL_ALREADY_REGISTERED",
@@ -100,7 +127,7 @@ public class AuthService {
         }
 
         String normalizedPhone = (request.phone() != null && !request.phone().isBlank())
-                ? request.phone().trim()
+                ? XssSanitizer.sanitizeSingleLine(request.phone())
                 : null;
         if (normalizedPhone != null && userRepository.existsByPhone(normalizedPhone)) {
             throw new BusinessException(
@@ -117,10 +144,22 @@ public class AuthService {
         return issueTokensForUser(user);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse login(LoginRequest request) {
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
-        User user = userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
+        String normalizedEmail = XssSanitizer.sanitizeSingleLine(request.email()).toLowerCase(Locale.ROOT);
+        User user = userRepository.findByEmailIgnoreCaseForUpdate(normalizedEmail).orElse(null);
+        OffsetDateTime now = OffsetDateTime.now();
+
+        if (user != null && user.isCurrentlyLocked(now)) {
+            long remainingSeconds = Math.max(1, Duration.between(now, user.getLockedUntil()).getSeconds());
+            long remainingMinutes = Math.max(1, (remainingSeconds + 59) / 60);
+            throw new BusinessException(
+                    "TOO_MANY_LOGIN_ATTEMPTS",
+                    "Muitas tentativas de login sem sucesso. Por segurança, sua conta foi bloqueada temporariamente por "
+                            + remainingMinutes + " minuto(s). Você também pode redefinir sua senha em 'Esqueceu a senha?'.",
+                    HttpStatus.TOO_MANY_REQUESTS
+            );
+        }
 
         String targetHash = (user != null && user.getPasswordHash() != null)
                 ? user.getPasswordHash()
@@ -128,6 +167,19 @@ public class AuthService {
         boolean passwordMatches = passwordEncoder.matches(request.password(), targetHash);
 
         if (user == null || user.getPasswordHash() == null || !passwordMatches) {
+            if (user != null && user.isActive()) {
+                int attempts = user.recordFailedLoginAttempt(maxFailedLoginAttempts, loginLockMinutes, now);
+                userRepository.saveAndFlush(user);
+                if (attempts >= maxFailedLoginAttempts) {
+                    throw new BusinessException(
+                            "TOO_MANY_LOGIN_ATTEMPTS",
+                            "Você excedeu o limite de " + maxFailedLoginAttempts
+                                    + " tentativas de login. Por segurança, o acesso foi bloqueado por "
+                                    + loginLockMinutes + " minutos.",
+                            HttpStatus.TOO_MANY_REQUESTS
+                    );
+                }
+            }
             throw new BusinessException(
                     "INVALID_CREDENTIALS",
                     "E-mail ou senha inválidos.",
@@ -136,6 +188,10 @@ public class AuthService {
         }
 
         ensureUserIsActive(user);
+        if (user.getFailedLoginAttempts() > 0 || user.getLockedUntil() != null) {
+            user.resetLoginAttempts();
+            userRepository.save(user);
+        }
         return issueTokensForUser(user);
     }
 
@@ -276,6 +332,7 @@ public class AuthService {
         passwordResetTokenRepository.save(resetToken);
 
         user.changePassword(passwordEncoder.encode(request.newPassword()));
+        user.resetLoginAttempts();
         userRepository.save(user);
 
         OffsetDateTime now = OffsetDateTime.now();
@@ -312,11 +369,67 @@ public class AuthService {
         }
 
         user.changePassword(passwordEncoder.encode(request.newPassword()));
+        user.resetLoginAttempts();
         userRepository.save(user);
 
         OffsetDateTime now = OffsetDateTime.now();
         refreshTokenRepository.revokeAllActiveTokensByUserId(user.getId(), now);
         refreshTokenRepository.deleteInactiveTokensByUserId(user.getId(), now);
+    }
+
+    /**
+     * RF14 — Exclusão Definitiva de Conta e Dados Pessoais (LGPD).
+     * Exige confirmação via modal defensivo (RF06) e validação de senha quando a conta possui senha local.
+     */
+    @Transactional
+    public void deleteAccount(UUID authenticatedUserId, DeleteAccountRequest request) {
+        User user = userRepository.findById(authenticatedUserId)
+                .orElseThrow(() -> new BusinessException(
+                        "USER_NOT_FOUND",
+                        "Usuário não encontrado.",
+                        HttpStatus.NOT_FOUND
+                ));
+
+        ensureUserIsActive(user);
+
+        if (user.getPasswordHash() != null) {
+            String rawPassword = (request != null && request.password() != null) ? request.password() : "";
+            if (rawPassword.isBlank() || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
+                throw new BusinessException(
+                        "INVALID_PASSWORD_FOR_DELETION",
+                        "Para excluir sua conta definitivamente, confirme sua senha atual corretamente.",
+                        HttpStatus.UNAUTHORIZED
+                );
+            }
+        }
+
+        boolean confirmedViaModal = request == null
+                || request.confirmedViaDefensiveModal() == null
+                || request.confirmedViaDefensiveModal();
+        if (!confirmedViaModal) {
+            throw new BusinessException(
+                    "DEFENSIVE_CONFIRMATION_REQUIRED",
+                    "Confirme a exclusão da conta no modal de segurança (RF-06) para prosseguir.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+
+        refreshTokenRepository.deleteAllByUserId(user.getId());
+        passwordResetTokenRepository.deleteAllByUserId(user.getId());
+        oauthAccountRepository.deleteAllByUserId(user.getId());
+        profileRepository.deleteByUserId(user.getId());
+
+        lgpdDataRequestRepository.save(
+                LgpdDataRequest.createCompletedAccountDeletion(user.getId(), true, now)
+        );
+
+        user.anonymizeAndMarkDeleted(now);
+        userRepository.saveAndFlush(user);
+
+        log.info("[BeyondTime LGPD RF-14] Conta userId={} excluída e anonimizada definitivamente com trilha de auditoria LGPD.",
+                authenticatedUserId);
     }
 
     private PasswordResetToken findValidResetTokenOrThrow(String normalizedEmail, String normalizedCode) {

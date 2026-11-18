@@ -1,5 +1,5 @@
 import type { ConnectionGoal } from '../types/auth';
-import { MIN_ALLOWED_AGE } from '../utils/validation';
+import { MIN_ALLOWED_AGE, sanitizeTextInput } from '../utils/validation';
 
 export const PROFILE_STORAGE_KEY = 'beyondtime_user_profile_v1';
 export const MAX_PHOTO_SIZE_BYTES = 2 * 1024 * 1024;
@@ -78,7 +78,16 @@ export function saveUserProfile(profile: UserProfileData): void {
     throw new Error('Formato de foto inválido para persistência.');
   }
 
-  window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+  const sanitizedProfile: UserProfileData = {
+    ...profile,
+    contact: sanitizeTextInput(profile.contact),
+    fullName: sanitizeTextInput(profile.fullName),
+    city: sanitizeTextInput(profile.city),
+    photoFileName: profile.photoFileName ? sanitizeTextInput(profile.photoFileName) : null,
+    hobbies: profile.hobbies.map((h) => sanitizeTextInput(h)).filter((h) => h.length > 0),
+  };
+
+  window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(sanitizedProfile));
 }
 
 export function loadUserProfile(expectedUserId?: string): UserProfileData | null {
@@ -116,20 +125,21 @@ export function loadUserProfile(expectedUserId?: string): UserProfileData | null
         : null;
 
     return {
-      userId: typeof candidate.userId === 'string' ? candidate.userId : undefined,
-      contact: typeof candidate.contact === 'string' ? candidate.contact : '',
-      fullName: candidate.fullName,
-      birthDate: candidate.birthDate,
+      userId: typeof candidate.userId === 'string' ? sanitizeTextInput(candidate.userId) : undefined,
+      contact: typeof candidate.contact === 'string' ? sanitizeTextInput(candidate.contact) : '',
+      fullName: sanitizeTextInput(candidate.fullName),
+      birthDate: sanitizeTextInput(candidate.birthDate),
       age: candidate.age,
-      city: candidate.city,
+      city: sanitizeTextInput(candidate.city),
       photoDataUrl: validPhotoUrl,
       photoFileName:
         typeof candidate.photoFileName === 'string'
-          ? candidate.photoFileName
+          ? sanitizeTextInput(candidate.photoFileName)
           : null,
-      hobbies: candidate.hobbies.filter(
-        (item): item is string => typeof item === 'string'
-      ),
+      hobbies: candidate.hobbies
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => sanitizeTextInput(item))
+        .filter((item) => item.length > 0),
       goal:
         candidate.goal === 'Amizade' ||
         candidate.goal === 'Relacionamento' ||

@@ -97,7 +97,7 @@ class ProfileControllerIntegrationTest {
                 .andExpect(jsonPath("$.firstName", is("José")))
                 .andExpect(jsonPath("$.city", is("Aracaju (SE)")))
                 .andExpect(jsonPath("$.goal", is("Amizade")))
-                .andExpect(jsonPath("$.bio", is("Gosto de caminhar na Orla alert(1) e ouvir MPB.")))
+                .andExpect(jsonPath("$.bio", is("Gosto de caminhar na Orla  e ouvir MPB.")))
                 .andExpect(jsonPath("$.hobbies", hasSize(3)));
 
         // Atualiza perfil existente trocando hobbies e objetivo sem violação de constraint (SEC-03)

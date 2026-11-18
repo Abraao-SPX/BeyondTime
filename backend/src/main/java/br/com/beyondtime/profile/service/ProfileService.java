@@ -17,6 +17,7 @@ import br.com.beyondtime.profile.repository.ProfileIntentRepository;
 import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import br.com.beyondtime.shared.util.XssSanitizer;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -102,10 +103,17 @@ public class ProfileService {
             );
         }
 
-        String displayName = sanitizePlainText(request.fullName());
-        String sanitizedBio = sanitizeBio(request.bio());
+        String displayName = XssSanitizer.sanitizeSingleLine(request.fullName());
+        if (displayName.length() < 2) {
+            throw new BusinessException(
+                    "INVALID_DISPLAY_NAME",
+                    "O nome de exibição informado não é válido.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+        String sanitizedBio = XssSanitizer.sanitizeMultiLine(request.bio());
         String firstName = extractFirstName(displayName);
-        Integer cityId = resolveCityId(request.city());
+        Integer cityId = resolveCityId(XssSanitizer.sanitizeSingleLine(request.city()));
 
         Profile profile = profileRepository.findByUserId(userId).orElse(null);
         if (profile == null) {
@@ -127,21 +135,6 @@ public class ProfileService {
                 .ifPresent(intent -> profileIntentRepository.save(new ProfileIntent(savedProfileId, intent.getId())));
 
         return toResponse(profile);
-    }
-
-    private String sanitizePlainText(String input) {
-        if (input == null) return "";
-        return input.replaceAll("<[^>]*>", "")
-                .replaceAll("[\\p{Cntrl}]", "")
-                .trim();
-    }
-
-    private String sanitizeBio(String bio) {
-        if (bio == null || bio.isBlank()) return null;
-        String clean = bio.replaceAll("<[^>]*>", "")
-                .replaceAll("[\\p{Cntrl}&&[^\r\n\t]]", "")
-                .trim();
-        return clean.isEmpty() ? null : clean;
     }
 
     private ProfileResponse toResponse(Profile profile) {

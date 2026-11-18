@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
+  containsDangerousXss,
   formatBirthDateInput,
+  sanitizeTextInput,
   validateBirthDate50Plus,
 } from '../../utils/validation';
 
@@ -34,7 +36,13 @@ export function Step2DadosPessoais({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const trimmedName = fullName.trim();
+    if (containsDangerousXss(fullName)) {
+      setNameError('Scripts ou tags HTML não são permitidos no nome.');
+      nameInputRef.current?.focus();
+      return;
+    }
+
+    const trimmedName = sanitizeTextInput(fullName);
     if (trimmedName.length < 2) {
       setNameError('Informe como você gosta de ser chamado(a) com pelo menos 2 letras.');
       nameInputRef.current?.focus();
@@ -44,6 +52,9 @@ export function Step2DadosPessoais({
       setNameError('Use apenas letras, números e espaços no seu nome.');
       nameInputRef.current?.focus();
       return;
+    }
+    if (trimmedName !== fullName) {
+      onFullNameChange(trimmedName);
     }
     setNameError(null);
 

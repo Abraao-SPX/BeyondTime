@@ -1,9 +1,11 @@
 package br.com.beyondtime.auth;
 
+import br.com.beyondtime.auth.domain.LgpdDataRequest;
 import br.com.beyondtime.auth.domain.User;
 import br.com.beyondtime.auth.domain.UserStatus;
 import br.com.beyondtime.auth.dto.AuthResponse;
 import br.com.beyondtime.auth.dto.ChangePasswordRequest;
+import br.com.beyondtime.auth.dto.DeleteAccountRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
 import br.com.beyondtime.auth.dto.GoogleLoginRequest;
@@ -13,8 +15,11 @@ import br.com.beyondtime.auth.dto.RefreshTokenRequest;
 import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.auth.dto.ResetPasswordRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
+import br.com.beyondtime.auth.repository.LgpdDataRequestRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.shared.security.LoginRateLimitFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -31,6 +36,7 @@ import java.util.Locale;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -52,6 +58,17 @@ class AuthControllerIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private LgpdDataRequestRepository lgpdDataRequestRepository;
+
+    @Autowired
+    private LoginRateLimitFilter loginRateLimitFilter;
+
+    @BeforeEach
+    void clearRateLimitBuckets() {
+        loginRateLimitFilter.clearBuckets();
+    }
 
     @Test
     void shouldBlockRegistrationWhenUserIsUnder50YearsOld() throws Exception {
@@ -429,5 +446,97 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.email", is("maria.ponto@beyondtime.com.br")))
                 .andExpect(jsonPath("$.accessToken", notNullValue()));
+    }
+
+    @Test
+    void shouldLockAccountTemporarilyAfterFiveFailedLoginAttempts() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest(
+                "bloqueio.login@beyondtime.com.br",
+                "79991110022",
+                "SenhaCorreta2026!",
+                LocalDate.now().minusYears(61)
+        );
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated());
+
+        LoginRequest wrongLogin = new LoginRequest("bloqueio.login@beyondtime.com.br", "SenhaErrada999!");
+
+        for (int i = 1; i <= 4; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(wrongLogin)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code", is("INVALID_CREDENTIALS")));
+        }
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(wrongLogin)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code", is("TOO_MANY_LOGIN_ATTEMPTS")));
+
+        // Mesmo informando a senha correta enquanto bloqueado, deve rejeitar com 429
+        LoginRequest correctLogin = new LoginRequest("bloqueio.login@beyondtime.com.br", "SenhaCorreta2026!");
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(correctLogin)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code", is("TOO_MANY_LOGIN_ATTEMPTS")));
+    }
+
+    @Test
+    void shouldDeleteAccountDefinitivelyAndRecordLgpdAuditTrail() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest(
+                "excluir.conta@beyondtime.com.br",
+                "79993334455",
+                "ExcluirConta2026!",
+                LocalDate.now().minusYears(65)
+        );
+
+        MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        AuthResponse auth = objectMapper.readValue(
+                registerResult.getResponse().getContentAsString(), AuthResponse.class);
+
+        // Rejeita exclusão com senha incorreta
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + auth.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new DeleteAccountRequest("SenhaErrada123!", true))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code", is("INVALID_PASSWORD_FOR_DELETION")));
+
+        // Exclui conta definitivamente com senha correta e confirmação defensiva RF06
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + auth.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new DeleteAccountRequest("ExcluirConta2026!", true))))
+                .andExpect(status().isNoContent());
+
+        // Verifica bloqueio imediato do JWT
+        mockMvc.perform(get("/api/v1/auth/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + auth.accessToken()))
+                .andExpect(status().isUnauthorized());
+
+        // Verifica anonimização no banco e registro na tabela lgpd_data_requests
+        User deletedUser = userRepository.findById(auth.userId()).orElseThrow();
+        assertThat(deletedUser.getStatus()).isEqualTo(UserStatus.DELETED);
+        assertThat(deletedUser.getPasswordHash()).isNull();
+        assertThat(deletedUser.getPhone()).isNull();
+        assertThat(deletedUser.getEmail()).startsWith("deleted-");
+
+        var lgpdRequests = lgpdDataRequestRepository.findByUserIdOrderByCreatedAtDesc(auth.userId());
+        assertThat(lgpdRequests).hasSize(1);
+        LgpdDataRequest auditReq = lgpdRequests.get(0);
+        assertThat(auditReq.getRequestType()).isEqualTo("DEFINITIVE_ACCOUNT_DELETION");
+        assertThat(auditReq.getStatus()).isEqualTo("COMPLETED");
+        assertThat(auditReq.isConfirmedViaDefensiveModal()).isTrue();
     }
 }

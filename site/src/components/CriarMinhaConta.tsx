@@ -9,7 +9,11 @@ import type {
   OnboardingStep,
   SocialProvider,
 } from '../types/auth';
-import { calculateAgeFromBirthDate } from '../utils/validation';
+import {
+  calculateAgeFromBirthDate,
+  containsDangerousXss,
+  sanitizeTextInput,
+} from '../utils/validation';
 import { OnboardingStepHeader } from './onboarding/OnboardingStepHeader';
 import { Step2DadosPessoais } from './onboarding/Step2DadosPessoais';
 import { Step3Localizacao } from './onboarding/Step3Localizacao';
@@ -69,7 +73,12 @@ export function CriarMinhaConta({
 
   function handleStep1Submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmed = contact.trim();
+    if (containsDangerousXss(contact)) {
+      setStep1Error('Scripts ou tags HTML não são permitidos no campo de e-mail.');
+      inputRef.current?.focus();
+      return;
+    }
+    const trimmed = sanitizeTextInput(contact);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
       setStep1Error('Informe um endereço de e-mail válido para criar sua conta.');
       inputRef.current?.focus();

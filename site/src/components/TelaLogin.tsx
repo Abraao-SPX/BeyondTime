@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError, loginWithEmail } from '../services/apiClient';
 import type { AuthSession, AuthViewId, SocialProvider } from '../types/auth';
+import {
+  containsDangerousXss,
+  MAX_LOGIN_ATTEMPTS,
+  sanitizeTextInput,
+} from '../utils/validation';
 import { SocialAuthGrid } from './SocialAuthGrid';
 
 interface TelaLoginProps {
@@ -22,6 +27,8 @@ export function TelaLogin({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockCountdownSeconds, setLockCountdownSeconds] = useState(0);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +36,20 @@ export function TelaLogin({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (lockCountdownSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setLockCountdownSeconds((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [lockCountdownSeconds]);
 
   function handleSocialSelect(provider: SocialProvider) {
     setFeedbackMessage(
@@ -41,7 +62,20 @@ export function TelaLogin({
     setErrorMessage(null);
     setFeedbackMessage(null);
 
-    const trimmedEmail = contact.trim();
+    if (lockCountdownSeconds > 0) {
+      setErrorMessage(
+        `Acesso temporariamente bloqueado por excesso de tentativas. Aguarde ${lockCountdownSeconds}s ou use "Esqueceu a senha?".`
+      );
+      return;
+    }
+
+    if (containsDangerousXss(contact)) {
+      setErrorMessage('Formato de e-mail inválido. Scripts ou tags HTML não são permitidos.');
+      inputRef.current?.focus();
+      return;
+    }
+
+    const trimmedEmail = sanitizeTextInput(contact);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail)) {
       setErrorMessage('Informe o e-mail cadastrado para entrar.');
       inputRef.current?.focus();
@@ -56,13 +90,35 @@ export function TelaLogin({
     setIsSubmitting(true);
     try {
       const session = await loginWithEmail(trimmedEmail, password);
+      setFailedAttempts(0);
+      setLockCountdownSeconds(0);
       setFeedbackMessage('Acesso confirmado. Carregando sua conta...');
       onAuthSuccess(session);
     } catch (err) {
+      const nextAttempts = failedAttempts + 1;
+      setFailedAttempts(nextAttempts);
+
       if (err instanceof ApiError) {
-        setErrorMessage(err.message);
+        if (err.status === 429 || nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+          setLockCountdownSeconds(60);
+        }
+        const remaining = Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts);
+        if (err.status === 401 && remaining > 0) {
+          setErrorMessage(
+            `${err.message} (Tentativa ${nextAttempts} de ${MAX_LOGIN_ATTEMPTS} — restam ${remaining}).`
+          );
+        } else {
+          setErrorMessage(err.message);
+        }
       } else {
-        setErrorMessage('Não foi possível entrar agora. Tente novamente.');
+        if (nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+          setLockCountdownSeconds(60);
+          setErrorMessage(
+            `Limite de ${MAX_LOGIN_ATTEMPTS} tentativas excedido. Aguarde 60 segundos antes de tentar novamente.`
+          );
+        } else {
+          setErrorMessage('Não foi possível entrar agora. Tente novamente.');
+        }
       }
     } finally {
       setIsSubmitting(false);
@@ -158,10 +214,14 @@ export function TelaLogin({
         <button
           type="submit"
           className="btn btn--primary"
-          disabled={isSubmitting}
+          disabled={isSubmitting || lockCountdownSeconds > 0}
           aria-busy={isSubmitting}
         >
-          {isSubmitting ? 'Verificando acesso...' : 'Entrar'}
+          {lockCountdownSeconds > 0
+            ? `Bloqueado temporariamente (${lockCountdownSeconds}s)`
+            : isSubmitting
+              ? 'Verificando acesso...'
+              : 'Entrar'}
         </button>
       </form>
 

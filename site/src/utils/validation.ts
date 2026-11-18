@@ -3,8 +3,35 @@ export const MIN_HOBBIES_COUNT = 3;
 export const MAX_HOBBIES_COUNT = 10;
 export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 72;
+export const MAX_LOGIN_ATTEMPTS = 5;
+export const LOGIN_LOCK_SECONDS = 15 * 60;
 
 const MIN_BIRTH_YEAR = 1900;
+
+const XSS_DANGEROUS_PATTERN =
+  /<\s*\/?\s*(script|iframe|object|embed|svg|math|style|link|meta|base|form|img|input|body|html)\b|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html|\bon[a-z]{3,20}\s*=|expression\s*\(|eval\s*\(/i;
+
+const SCRIPT_BLOCK_PATTERN =
+  /<\s*(script|iframe|object|embed|svg|math|style|link|meta|base|form)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
+
+const ANY_TAG_PATTERN = /<[^>]*>/g;
+
+export function containsDangerousXss(value: string): boolean {
+  if (!value) return false;
+  return XSS_DANGEROUS_PATTERN.test(value);
+}
+
+export function sanitizeTextInput(value: string): string {
+  if (!value) return '';
+  return value
+    .replace(SCRIPT_BLOCK_PATTERN, '')
+    .replace(ANY_TAG_PATTERN, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/vbscript\s*:/gi, '')
+    .replace(/\bon[a-z]{3,20}\s*=/gi, '')
+    .replace(/[<>]/g, '')
+    .trim();
+}
 
 export function validateHobbiesSelection(hobbies: readonly string[]): string | null {
   const uniqueHobbies = new Set(
