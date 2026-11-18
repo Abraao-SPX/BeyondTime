@@ -1,9 +1,9 @@
 -- =========================================================================
--- V3 — Evolução 3FN da Taxonomia de Hobbies (RF-03 / Issue #8)
--- Mantém 100% de compatibilidade com V1 e V2 (RF-04)
+-- V5 — Evolucao 3FN da Taxonomia de Hobbies (RF-03 / Issue #8)
+-- Mantem 100% de compatibilidade com V1, V2, V3 e V4
 -- =========================================================================
 
--- 1. Evolução de hobby_categories (id, slug UNIQUE, name, display_order)
+-- 1. Evolucao de hobby_categories (id, slug UNIQUE, name, display_order)
 ALTER TABLE hobby_categories
     ADD COLUMN IF NOT EXISTS slug VARCHAR(60),
     ADD COLUMN IF NOT EXISTS display_order SMALLINT NOT NULL DEFAULT 1;
@@ -31,20 +31,20 @@ BEGIN
     END IF;
 END $$;
 
--- 2. Evolução de hobbies (id, category_id FK, slug UNIQUE, name, active BOOLEAN)
+-- 2. Evolucao de hobbies (id, category_id FK, slug UNIQUE, name, active BOOLEAN)
 ALTER TABLE hobbies
     ADD COLUMN IF NOT EXISTS slug VARCHAR(60),
     ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 
 ALTER TABLE hobbies
-    ALTER COLUMN icon SET DEFAULT '✳';
+    ALTER COLUMN icon SET DEFAULT 'star';
 
 UPDATE hobbies
 SET slug = LOWER(REPLACE(code, '_', '-'))
 WHERE slug IS NULL;
 
 INSERT INTO hobbies (category_id, code, slug, name, icon, active)
-SELECT hc.id, 'SERTANEJO', 'sertanejo', 'Música Sertaneja e Raiz', '🎸', TRUE
+SELECT hc.id, 'SERTANEJO', 'sertanejo', 'Música Sertaneja e Raiz', 'music', TRUE
 FROM hobby_categories hc
 WHERE hc.code = 'MUSICA_DANCA'
 ON CONFLICT (code) DO NOTHING;

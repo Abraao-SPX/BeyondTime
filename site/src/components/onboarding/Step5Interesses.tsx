@@ -60,7 +60,7 @@ export function Step5Interesses({
       </div>
 
       <div className="hobbies-grid" role="group" aria-label="Lista de interesses">
-        {HOBBIES_CATALOG.map((hobby) => {
+        {HOBBIES_CATALOG.filter((h) => h.category === activeCategory).map((hobby) => {
           const isSelected = selectedHobbies.includes(hobby.label);
           const isDisabled = !isSelected && reachedLimit;
           return (
