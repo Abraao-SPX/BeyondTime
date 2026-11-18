@@ -8,8 +8,10 @@ import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -87,6 +89,17 @@ public class JwtService {
             return HexFormat.of().formatHex(hashBytes);
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("Algoritmo SHA-256 indisponível na JVM.", ex);
+        }
+    }
+
+    public String hashWithSecretPepper(String input) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(secretKey);
+            byte[] hmacBytes = mac.doFinal(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hmacBytes);
+        } catch (NoSuchAlgorithmException | InvalidKeyException ex) {
+            throw new IllegalStateException("Algoritmo HmacSHA256 indisponível ou chave inválida.", ex);
         }
     }
 

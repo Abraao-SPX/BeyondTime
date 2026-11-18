@@ -117,25 +117,32 @@ export function CriarMinhaConta({
         setCreatedSession(session);
       }
 
+      const sanitizedFullName = sanitizeTextInput(formData.fullName);
+      const sanitizedCity = sanitizeTextInput(formData.city);
+      const sanitizedHobbies = formData.hobbies
+        .map((h) => sanitizeTextInput(h))
+        .filter((h) => h.length > 0);
+      const sanitizedGoal = sanitizeTextInput(formData.goal) as typeof formData.goal;
+
       await upsertMyProfile(session, {
-        fullName: formData.fullName.trim(),
-        city: formData.city,
-        hobbies: formData.hobbies,
-        goal: formData.goal,
+        fullName: sanitizedFullName,
+        city: sanitizedCity,
+        hobbies: sanitizedHobbies,
+        goal: sanitizedGoal,
       });
 
       const age = calculateAgeFromBirthDate(formData.birthDate) ?? 50;
       saveUserProfile({
         userId: session.userId,
-        contact: contact.trim(),
-        fullName: formData.fullName.trim(),
+        contact: sanitizeTextInput(contact),
+        fullName: sanitizedFullName,
         birthDate: formData.birthDate,
         age,
-        city: formData.city,
+        city: sanitizedCity,
         photoDataUrl: formData.photoPreviewUrl,
-        photoFileName: formData.photoFileName,
-        hobbies: formData.hobbies,
-        goal: formData.goal,
+        photoFileName: formData.photoFileName ? sanitizeTextInput(formData.photoFileName) : null,
+        hobbies: sanitizedHobbies,
+        goal: sanitizedGoal,
         updatedAt: new Date().toISOString(),
       });
 

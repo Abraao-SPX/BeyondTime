@@ -1,6 +1,6 @@
 package br.com.beyondtime.shared.security;
 
-import br.com.beyondtime.auth.domain.UserStatus;
+import br.com.beyondtime.auth.domain.User;
 import br.com.beyondtime.auth.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -45,11 +45,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String jwt = authHeader.substring(BEARER_PREFIX.length()).trim();
         if (!jwt.isEmpty() && SecurityContextHolder.getContext().getAuthentication() == null) {
             try {
-                AuthenticatedUser principal = jwtService.parseAccessToken(jwt);
-                if (userRepository.existsByIdAndStatus(principal.userId(), UserStatus.ACTIVE)) {
-                    var authority = new SimpleGrantedAuthority("ROLE_" + principal.role().name());
+                AuthenticatedUser tokenPrincipal = jwtService.parseAccessToken(jwt);
+                var userOpt = userRepository.findById(tokenPrincipal.userId());
+                if (userOpt.isPresent() && userOpt.get().isActive()) {
+                    User user = userOpt.get();
+                    AuthenticatedUser verifiedPrincipal = new AuthenticatedUser(
+                            user.getId(),
+                            user.getEmail(),
+                            user.getRole()
+                    );
+                    var authority = new SimpleGrantedAuthority("ROLE_" + user.getRole().name());
                     var authToken = new UsernamePasswordAuthenticationToken(
-                            principal,
+                            verifiedPrincipal,
                             null,
                             List.of(authority)
                     );

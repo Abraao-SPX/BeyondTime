@@ -18,6 +18,7 @@ import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
 import br.com.beyondtime.auth.repository.LgpdDataRequestRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
 import br.com.beyondtime.shared.security.LoginRateLimitFilter;
+import br.com.beyondtime.shared.util.AgeValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,7 +77,7 @@ class AuthControllerIntegrationTest {
                 "jovem@beyondtime.com.br",
                 "79999990001",
                 "SenhaSegura123!",
-                LocalDate.now().minusYears(49).minusMonths(11)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(49).minusMonths(11)
         );
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -93,7 +94,7 @@ class AuthControllerIntegrationTest {
                 "helena.aracaju@beyondtime.com.br",
                 "79999887766",
                 "HelenaSergipe2026!",
-                LocalDate.now().minusYears(64)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(64)
         );
 
         MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
@@ -168,7 +169,7 @@ class AuthControllerIntegrationTest {
                 "antonio.atalaia@beyondtime.com.br",
                 "79988776655",
                 "SenhaAntiga2026!",
-                LocalDate.now().minusYears(71)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(71)
         );
 
         MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
@@ -249,7 +250,7 @@ class AuthControllerIntegrationTest {
                 "roberto.coroa@beyondtime.com.br",
                 "79981234567",
                 "RobertoSenha123!",
-                LocalDate.now().minusYears(66)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(66)
         );
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -295,7 +296,7 @@ class AuthControllerIntegrationTest {
                 "suspenso.teste@beyondtime.com.br",
                 "79981119999",
                 "SenhaValida2026!",
-                LocalDate.now().minusYears(60)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(60)
         );
 
         MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
@@ -333,7 +334,7 @@ class AuthControllerIntegrationTest {
                 "clara.jardins@beyondtime.com.br",
                 "79991112233",
                 "ClaraInicial123!",
-                LocalDate.now().minusYears(58)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(58)
         );
 
         MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
@@ -374,7 +375,7 @@ class AuthControllerIntegrationTest {
         GoogleLoginRequest googleUnder50 = new GoogleLoginRequest(
                 "google-uid-12345",
                 "novo.google@beyondtime.com.br",
-                LocalDate.now().minusYears(42)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(42)
         );
 
         mockMvc.perform(post("/api/v1/auth/google")
@@ -386,7 +387,7 @@ class AuthControllerIntegrationTest {
         GoogleLoginRequest googleValid50Plus = new GoogleLoginRequest(
                 "google-uid-67890",
                 "marcos.sergipe@beyondtime.com.br",
-                LocalDate.now().minusYears(68)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(68)
         );
 
         mockMvc.perform(post("/api/v1/auth/google")
@@ -423,7 +424,7 @@ class AuthControllerIntegrationTest {
                     "teste.senha@beyondtime.com.br",
                     null,
                     weakPassword,
-                    LocalDate.now().minusYears(55)
+                    LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(55)
             );
 
             mockMvc.perform(post("/api/v1/auth/register")
@@ -437,7 +438,7 @@ class AuthControllerIntegrationTest {
                 "maria.ponto@beyondtime.com.br",
                 "79991234567",
                 "Maria50+,Sergipe.2026@",
-                LocalDate.now().minusYears(62)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(62)
         );
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -454,7 +455,7 @@ class AuthControllerIntegrationTest {
                 "bloqueio.login@beyondtime.com.br",
                 "79991110022",
                 "SenhaCorreta2026!",
-                LocalDate.now().minusYears(61)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(61)
         );
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -493,7 +494,7 @@ class AuthControllerIntegrationTest {
                 "excluir.conta@beyondtime.com.br",
                 "79993334455",
                 "ExcluirConta2026!",
-                LocalDate.now().minusYears(65)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(65)
         );
 
         MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
@@ -530,6 +531,7 @@ class AuthControllerIntegrationTest {
         assertThat(deletedUser.getStatus()).isEqualTo(UserStatus.DELETED);
         assertThat(deletedUser.getPasswordHash()).isNull();
         assertThat(deletedUser.getPhone()).isNull();
+        assertThat(deletedUser.getBirthDate()).isEqualTo(LocalDate.of(1900, 1, 1));
         assertThat(deletedUser.getEmail()).startsWith("deleted-");
 
         var lgpdRequests = lgpdDataRequestRepository.findByUserIdOrderByCreatedAtDesc(auth.userId());
@@ -538,5 +540,105 @@ class AuthControllerIntegrationTest {
         assertThat(auditReq.getRequestType()).isEqualTo("DEFINITIVE_ACCOUNT_DELETION");
         assertThat(auditReq.getStatus()).isEqualTo("COMPLETED");
         assertThat(auditReq.isConfirmedViaDefensiveModal()).isTrue();
+    }
+
+    @Test
+    void shouldRejectGoogleAccountTakeoverWhenLocalPasswordAccountExistsWithoutGoogleLink() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest(
+                "local.seguro@beyondtime.com.br",
+                "79994445566",
+                "SenhaLocal2026!",
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(59)
+        );
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated());
+
+        GoogleLoginRequest takeoverAttempt = new GoogleLoginRequest(
+                "attacker-google-uid-999",
+                "local.seguro@beyondtime.com.br",
+                null
+        );
+
+        mockMvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(takeoverAttempt)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is("OAUTH_ACCOUNT_LINK_REQUIRES_VERIFICATION")));
+    }
+
+    @Test
+    void shouldRejectAccountDeletionWithoutDefensiveModalConfirmation() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest(
+                "defensivo.modal@beyondtime.com.br",
+                "79995556677",
+                "ModalSeguro2026!",
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(63)
+        );
+
+        MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        AuthResponse auth = objectMapper.readValue(
+                registerResult.getResponse().getContentAsString(), AuthResponse.class);
+
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + auth.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new DeleteAccountRequest("ModalSeguro2026!", false))))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + auth.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldRevokeAllActiveRefreshTokensWhenRevokedRefreshTokenIsReused() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest(
+                "reuso.token@beyondtime.com.br",
+                "79996667788",
+                "TokenSeguro2026!",
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(67)
+        );
+
+        MvcResult registerResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        AuthResponse initialAuth = objectMapper.readValue(
+                registerResult.getResponse().getContentAsString(), AuthResponse.class);
+
+        MvcResult rotatedResult = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(initialAuth.refreshToken()))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        AuthResponse rotatedAuth = objectMapper.readValue(
+                rotatedResult.getResponse().getContentAsString(), AuthResponse.class);
+
+        // Reutiliza o refresh token já revogado -> deve revogar toda a família de tokens
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(initialAuth.refreshToken()))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code", is("EXPIRED_OR_REVOKED_REFRESH_TOKEN")));
+
+        // O token rotacionado também deve ter sido revogado defensivamente
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(rotatedAuth.refreshToken()))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code", is("EXPIRED_OR_REVOKED_REFRESH_TOKEN")));
     }
 }

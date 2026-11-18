@@ -17,33 +17,50 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.Deque;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Filtro de limitação de taxa (Rate Limiting) por IP de origem para endpoints sensíveis de autenticação
- * (/api/v1/auth/login, /api/v1/auth/register, /api/v1/auth/forgot-password, /api/v1/auth/verify-reset-code),
+ * (/api/v1/auth/login, /api/v1/auth/register, /api/v1/auth/google, /api/v1/auth/refresh,
+ * /api/v1/auth/forgot-password, /api/v1/auth/verify-reset-code, /api/v1/auth/reset-password),
  * prevenindo ataques de força bruta distribuídos e credential stuffing (RF-01).
  */
 @Component
 public class LoginRateLimitFilter extends OncePerRequestFilter {
 
-    private static final String LOGIN_PATH = "/api/v1/auth/login";
-    private static final String FORGOT_PASSWORD_PATH = "/api/v1/auth/forgot-password";
-    private static final String VERIFY_RESET_PATH = "/api/v1/auth/verify-reset-code";
+    private static final int MAX_BUCKETS = 10_000;
+    private static final int CLEANUP_INTERVAL_MASK = 255;
+
+    private static final Set<String> RATE_LIMITED_POST_PATHS = Set.of(
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/google",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/verify-reset-code",
+            "/api/v1/auth/reset-password"
+    );
 
     private final ObjectMapper objectMapper;
     private final int maxRequestsPerMinute;
     private final long windowMillis;
+    private final boolean trustForwardedHeaders;
     private final Map<String, Deque<Long>> requestTimestampsByBucket = new ConcurrentHashMap<>();
+    private final AtomicInteger requestCounter = new AtomicInteger(0);
 
     public LoginRateLimitFilter(
             ObjectMapper objectMapper,
             @Value("${beyondtime.security.login.ip-max-requests-per-minute:15}") int maxRequestsPerMinute,
-            @Value("${beyondtime.security.login.ip-window-seconds:60}") long windowSeconds) {
+            @Value("${beyondtime.security.login.ip-window-seconds:60}") long windowSeconds,
+            @Value("${beyondtime.security.login.trust-forwarded-headers:false}") boolean trustForwardedHeaders) {
         this.objectMapper = objectMapper;
         this.maxRequestsPerMinute = maxRequestsPerMinute;
         this.windowMillis = Math.max(1L, windowSeconds) * 1000L;
+        this.trustForwardedHeaders = trustForwardedHeaders;
     }
 
     @Override
@@ -55,9 +72,7 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
         if (path == null || path.isEmpty()) {
             path = request.getRequestURI();
         }
-        return !LOGIN_PATH.equals(path)
-                && !FORGOT_PASSWORD_PATH.equals(path)
-                && !VERIFY_RESET_PATH.equals(path);
+        return !RATE_LIMITED_POST_PATHS.contains(path);
     }
 
     @Override
@@ -75,32 +90,36 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
         long now = System.currentTimeMillis();
         long cutoff = now - windowMillis;
 
-        Deque<Long> timestamps = requestTimestampsByBucket.computeIfAbsent(
-                bucketKey,
-                k -> new ConcurrentLinkedDeque<>()
-        );
-
-        boolean rateLimited;
-        int currentCount;
-        synchronized (timestamps) {
-            while (!timestamps.isEmpty() && timestamps.peekFirst() < cutoff) {
-                timestamps.pollFirst();
-            }
-            if (timestamps.size() >= maxRequestsPerMinute) {
-                rateLimited = true;
-                currentCount = timestamps.size();
-            } else {
-                timestamps.addLast(now);
-                rateLimited = false;
-                currentCount = timestamps.size();
-            }
+        if ((requestCounter.incrementAndGet() & CLEANUP_INTERVAL_MASK) == 0
+                || requestTimestampsByBucket.size() > MAX_BUCKETS) {
+            evictExpiredBuckets(cutoff);
         }
 
-        int remaining = Math.max(0, maxRequestsPerMinute - currentCount);
+        AtomicBoolean rateLimited = new AtomicBoolean(false);
+        AtomicInteger currentCount = new AtomicInteger(0);
+
+        requestTimestampsByBucket.compute(bucketKey, (k, deque) -> {
+            if (deque == null) {
+                deque = new ConcurrentLinkedDeque<>();
+            }
+            while (!deque.isEmpty() && deque.peekFirst() < cutoff) {
+                deque.pollFirst();
+            }
+            if (deque.size() >= maxRequestsPerMinute) {
+                rateLimited.set(true);
+            } else {
+                deque.addLast(now);
+                rateLimited.set(false);
+            }
+            currentCount.set(deque.size());
+            return deque;
+        });
+
+        int remaining = Math.max(0, maxRequestsPerMinute - currentCount.get());
         response.setHeader("X-RateLimit-Limit", String.valueOf(maxRequestsPerMinute));
         response.setHeader("X-RateLimit-Remaining", String.valueOf(remaining));
 
-        if (rateLimited) {
+        if (rateLimited.get()) {
             long retryAfterSeconds = Math.max(1L, windowMillis / 1000L);
             response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
@@ -128,17 +147,46 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
         requestTimestampsByBucket.clear();
     }
 
-    private String extractClientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            String firstIp = forwardedFor.split(",")[0].trim();
-            if (!firstIp.isEmpty()) {
-                return firstIp;
+    private void evictExpiredBuckets(long cutoff) {
+        for (String key : requestTimestampsByBucket.keySet()) {
+            requestTimestampsByBucket.computeIfPresent(key, (k, deque) -> {
+                Long lastTimestamp = deque.peekLast();
+                if (lastTimestamp == null || lastTimestamp < cutoff) {
+                    return null;
+                }
+                while (!deque.isEmpty() && deque.peekFirst() < cutoff) {
+                    deque.pollFirst();
+                }
+                return deque.isEmpty() ? null : deque;
+            });
+        }
+
+        if (requestTimestampsByBucket.size() > MAX_BUCKETS) {
+            int excess = requestTimestampsByBucket.size() - MAX_BUCKETS;
+            var iterator = requestTimestampsByBucket.keySet().iterator();
+            while (excess > 0 && iterator.hasNext()) {
+                requestTimestampsByBucket.remove(iterator.next());
+                excess--;
             }
         }
-        String realIp = request.getHeader("X-Real-IP");
-        if (realIp != null && !realIp.isBlank()) {
-            return realIp.trim();
+    }
+
+    private String extractClientIp(HttpServletRequest request) {
+        if (trustForwardedHeaders) {
+            String realIp = request.getHeader("X-Real-IP");
+            if (realIp != null && !realIp.isBlank()) {
+                return realIp.trim();
+            }
+            String forwardedFor = request.getHeader("X-Forwarded-For");
+            if (forwardedFor != null && !forwardedFor.isBlank()) {
+                String[] parts = forwardedFor.split(",");
+                for (int i = parts.length - 1; i >= 0; i--) {
+                    String candidate = parts[i].trim();
+                    if (!candidate.isEmpty()) {
+                        return candidate;
+                    }
+                }
+            }
         }
         return request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
     }

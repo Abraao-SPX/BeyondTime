@@ -8,29 +8,65 @@ export const LOGIN_LOCK_SECONDS = 15 * 60;
 
 const MIN_BIRTH_YEAR = 1900;
 
+const MAX_SANITIZE_PASSES = 5;
+
 const XSS_DANGEROUS_PATTERN =
-  /<\s*\/?\s*(script|iframe|object|embed|svg|math|style|link|meta|base|form|img|input|body|html)\b|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html|\bon[a-z]{3,20}\s*=|expression\s*\(|eval\s*\(/i;
+  /<\s*\/?\s*[a-z!]|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html|\bon[a-z]{2,30}\s*=|expression\s*\(|eval\s*\(|&lt;\s*\/?\s*[a-z!]|&#/i;
 
 const SCRIPT_BLOCK_PATTERN =
-  /<\s*(script|iframe|object|embed|svg|math|style|link|meta|base|form)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
+  /<\s*(script|iframe|object|embed|svg|math|style|link|meta|base|form)\b[^<>]{0,512}>[\s\S]{0,10000}?<\s*\/\s*\1\s*>/gi;
 
-const ANY_TAG_PATTERN = /<[^>]*>/g;
+const ANY_TAG_PATTERN = /<[^<>]{0,1024}>/g;
+
+function decodeDangerousHtmlEntities(input: string): string {
+  return input
+    .replace(/&amp;(?=(?:lt|gt|quot|apos|colon|#))/gi, '&')
+    .replace(/&#x([0-9a-f]{1,6});?/gi, (_, hex: string) => {
+      const cp = Number.parseInt(hex, 16);
+      return cp >= 32 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+    })
+    .replace(/&#([0-9]{1,7});?/g, (_, dec: string) => {
+      const cp = Number.parseInt(dec, 10);
+      return cp >= 32 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+    })
+    .replace(/&lt(?:;|(?![a-z0-9]))/gi, '<')
+    .replace(/&gt(?:;|(?![a-z0-9]))/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&colon;/gi, ':');
+}
 
 export function containsDangerousXss(value: string): boolean {
   if (!value) return false;
-  return XSS_DANGEROUS_PATTERN.test(value);
+  let normalized = value.normalize('NFKC').replace(/\u0000/g, '');
+  for (let pass = 0; pass < MAX_SANITIZE_PASSES; pass += 1) {
+    if (XSS_DANGEROUS_PATTERN.test(normalized)) {
+      return true;
+    }
+    const decoded = decodeDangerousHtmlEntities(normalized);
+    if (decoded === normalized) break;
+    normalized = decoded;
+  }
+  return XSS_DANGEROUS_PATTERN.test(normalized);
 }
 
 export function sanitizeTextInput(value: string): string {
   if (!value) return '';
-  return value
-    .replace(SCRIPT_BLOCK_PATTERN, '')
-    .replace(ANY_TAG_PATTERN, '')
-    .replace(/javascript\s*:/gi, '')
-    .replace(/vbscript\s*:/gi, '')
-    .replace(/\bon[a-z]{3,20}\s*=/gi, '')
-    .replace(/[<>]/g, '')
-    .trim();
+  let clean = value.normalize('NFKC').replace(/[\u0000-\u001F\u007F]/g, '');
+  let pass = 0;
+  while (pass < MAX_SANITIZE_PASSES) {
+    const prev = clean;
+    clean = decodeDangerousHtmlEntities(clean)
+      .replace(SCRIPT_BLOCK_PATTERN, '')
+      .replace(ANY_TAG_PATTERN, '')
+      .replace(/javascript\s*:|vbscript\s*:|data\s*:\s*text\/html/gi, '')
+      .replace(/\bon[a-z]{2,30}\s*=/gi, '')
+      .replace(/(?:expression|eval)\s*\(/gi, '')
+      .replace(/[<>]/g, '');
+    if (clean === prev) break;
+    pass += 1;
+  }
+  return clean.trim();
 }
 
 export function validateHobbiesSelection(hobbies: readonly string[]): string | null {

@@ -8,13 +8,14 @@ import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
 import {
   ApiError,
+  clearAuthSession,
   deleteAccountDefinitively,
   fetchMyProfile,
   loadAuthSession,
   logoutAccount,
   type ServerProfile,
 } from './services/apiClient';
-import { loadUserProfile } from './services/profileStorage';
+import { clearUserProfile, loadUserProfile } from './services/profileStorage';
 import type { AuthSession, AuthViewId } from './types/auth';
 import { sanitizeTextInput } from './utils/validation';
 
@@ -103,7 +104,13 @@ export function App() {
       .then((profile) => {
         if (active) setServerProfile(profile);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (active && err instanceof ApiError && err.status === 401) {
+          clearAuthSession();
+          clearUserProfile();
+          setAuthSession(null);
+          setServerProfile(null);
+        }
         // Fallback para localStorage caso o perfil ainda não exista no banco
       });
     return () => {
@@ -173,6 +180,14 @@ export function App() {
       setActiveView('login');
     } catch (err) {
       if (err instanceof ApiError) {
+        if (err.status === 401 && err.code !== 'INVALID_PASSWORD_FOR_DELETION') {
+          clearAuthSession();
+          clearUserProfile();
+          setAuthSession(null);
+          setServerProfile(null);
+          setIsDeleteModalOpen(false);
+          setDeletePassword('');
+        }
         setDeleteError(err.message);
       } else {
         setDeleteError('Não foi possível excluir a conta agora. Verifique sua conexão e tente novamente.');
@@ -275,6 +290,12 @@ export function App() {
                   aria-labelledby="delete-account-title"
                   aria-describedby="delete-account-desc"
                   style={{ marginTop: '24px' }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && !isDeletingAccount) {
+                      e.preventDefault();
+                      handleCancelDeleteAccount();
+                    }
+                  }}
                 >
                   <p className="defensive-modal__badge">Ação Irreversível — LGPD (RF-14)</p>
                   <h2 id="delete-account-title" className="defensive-modal__title">

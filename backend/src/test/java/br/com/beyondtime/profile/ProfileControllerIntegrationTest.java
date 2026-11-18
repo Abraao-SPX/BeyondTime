@@ -3,6 +3,7 @@ package br.com.beyondtime.profile;
 import br.com.beyondtime.auth.dto.AuthResponse;
 import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.profile.dto.UpsertProfileRequest;
+import br.com.beyondtime.shared.util.AgeValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -132,7 +133,7 @@ class ProfileControllerIntegrationTest {
                 email,
                 "79998887766",
                 "SenhaForte50+.2026@",
-                LocalDate.now().minusYears(60)
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(60)
         );
 
         MvcResult result = mockMvc.perform(post("/api/v1/auth/register")

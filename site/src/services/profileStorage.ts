@@ -27,27 +27,57 @@ function isValidPhotoDataUrl(dataUrl: string): boolean {
   return /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl);
 }
 
-export function validateAndReadPhotoFile(
+async function hasValidImageMagicBytes(file: File): Promise<boolean> {
+  try {
+    const buffer = await file.slice(0, 12).arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length < 4) return false;
+
+    const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const isPng =
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47;
+    const isWebp =
+      bytes.length >= 12 &&
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50;
+
+    return isJpeg || isPng || isWebp;
+  } catch {
+    return false;
+  }
+}
+
+export async function validateAndReadPhotoFile(
   file: File
 ): Promise<{ dataUrl: string; fileName: string }> {
+  const isAllowedMime = (ALLOWED_PHOTO_MIME_TYPES as readonly string[]).includes(
+    file.type
+  );
+  if (!isAllowedMime) {
+    throw new Error('Formato não suportado. Escolha uma imagem JPEG, PNG ou WebP.');
+  }
+
+  if (file.size > MAX_PHOTO_SIZE_BYTES) {
+    throw new Error('A imagem escolhida excede 2 MB. Selecione uma foto menor.');
+  }
+
+  const validMagicBytes = await hasValidImageMagicBytes(file);
+  if (!validMagicBytes) {
+    throw new Error('O conteúdo do arquivo não corresponde a uma imagem JPEG, PNG ou WebP válida.');
+  }
+
+  const safeFileName = sanitizeTextInput(file.name).slice(0, 80) || 'foto-perfil';
+
   return new Promise((resolve, reject) => {
-    const isAllowedMime = (ALLOWED_PHOTO_MIME_TYPES as readonly string[]).includes(
-      file.type
-    );
-    if (!isAllowedMime) {
-      reject(
-        new Error('Formato não suportado. Escolha uma imagem JPEG, PNG ou WebP.')
-      );
-      return;
-    }
-
-    if (file.size > MAX_PHOTO_SIZE_BYTES) {
-      reject(
-        new Error('A imagem escolhida excede 2 MB. Selecione uma foto menor.')
-      );
-      return;
-    }
-
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== 'string' || !isValidPhotoDataUrl(reader.result)) {
@@ -56,7 +86,7 @@ export function validateAndReadPhotoFile(
       }
       resolve({
         dataUrl: reader.result,
-        fileName: file.name,
+        fileName: safeFileName,
       });
     };
     reader.onerror = () => {

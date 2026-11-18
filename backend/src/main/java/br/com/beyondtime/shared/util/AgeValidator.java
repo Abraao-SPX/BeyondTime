@@ -18,7 +18,7 @@ public final class AgeValidator {
         if (birthDate == null) {
             throw new BusinessException("BIRTH_DATE_REQUIRED", "A data de nascimento é obrigatória.");
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(SERGIPE_ZONE);
         if (birthDate.isAfter(today)) {
             throw new BusinessException("INVALID_BIRTH_DATE", "A data de nascimento não pode ser uma data futura.");
         }

@@ -103,6 +103,16 @@ public class ProfileService {
             );
         }
 
+        if (XssSanitizer.containsMaliciousScript(request.fullName())
+                || XssSanitizer.containsMaliciousScript(request.city())
+                || XssSanitizer.containsMaliciousScript(request.goal())) {
+            throw new BusinessException(
+                    "XSS_PAYLOAD_DETECTED",
+                    "Conteúdo não permitido detectado nos dados do perfil.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
         String displayName = XssSanitizer.sanitizeSingleLine(request.fullName());
         if (displayName.length() < 2) {
             throw new BusinessException(

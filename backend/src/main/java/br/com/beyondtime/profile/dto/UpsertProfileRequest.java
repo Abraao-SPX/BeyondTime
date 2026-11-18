@@ -20,13 +20,15 @@ public record UpsertProfileRequest(
         String bio,
 
         @NotBlank(message = "A cidade de Sergipe é obrigatória.")
+        @Size(max = 100, message = "A cidade deve ter no máximo 100 caracteres.")
         String city,
 
         @NotNull(message = "A seleção de hobbies é obrigatória.")
         @Size(min = 3, max = 10, message = "Selecione entre 3 e 10 hobbies (RF-03).")
-        List<String> hobbies,
+        List<@NotBlank(message = "Cada hobby deve ser preenchido.") @Size(max = 80, message = "Cada hobby deve ter no máximo 80 caracteres.") String> hobbies,
 
         @NotBlank(message = "O objetivo de conexão é obrigatório.")
+        @Size(max = 40, message = "O objetivo deve ter no máximo 40 caracteres.")
         String goal
 ) {
 }

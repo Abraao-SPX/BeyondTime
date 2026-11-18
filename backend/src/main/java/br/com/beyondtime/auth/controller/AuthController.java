@@ -101,7 +101,7 @@ public class AuthController {
     @DeleteMapping("/account")
     public ResponseEntity<Void> deleteAccount(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
-            @RequestBody(required = false) DeleteAccountRequest request) {
+            @Valid @RequestBody DeleteAccountRequest request) {
         AuthenticatedUser user = requireAuthenticatedUser(currentUser);
         authService.deleteAccount(user.userId(), request);
         return ResponseEntity.noContent().build();

@@ -178,6 +178,7 @@ public class User {
         this.email = "deleted-" + deletedSuffix + "@excluded.beyondtime.local";
         this.phone = null;
         this.passwordHash = null;
+        this.birthDate = LocalDate.of(1900, 1, 1);
         this.failedLoginAttempts = 0;
         this.lockedUntil = null;
         this.status = UserStatus.DELETED;

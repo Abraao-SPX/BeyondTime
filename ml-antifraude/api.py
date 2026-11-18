@@ -1,5 +1,7 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+import html
+import re
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 import joblib
 
 # 1. Cria a nossa aplicação web (A 'ponte' para o mundo externo)
@@ -10,12 +12,14 @@ app = FastAPI(title="API Anjo da Guarda - BeyondTime")
 print("Carregando modelo de IA...")
 modelo = joblib.load('modelo_anjo.joblib')
 
-# 3. Define o formato exato da informação que esperamos receber do Java/Aplicativo
-# Isso diz para a API: "Eu espero receber um JSON que tenha um campo chamado 'texto'"
-import re
+XSS_OUTPUT_PATTERN = re.compile(
+    r"<\s*/?\s*[a-z!]|javascript\s*:|vbscript\s*:|data\s*:\s*text/html|\bon[a-z]{2,30}\s*=",
+    re.IGNORECASE,
+)
+
 
 # Função de higienização alinhada com o modelo treinado
-def limpar_texto(texto):
+def limpar_texto(texto: str) -> str:
     t = str(texto).lower()
     # Converte números disfarçados de letras (Leet Speak)
     mapa_leet = {'0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '@': 'a'}
@@ -25,24 +29,37 @@ def limpar_texto(texto):
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
+
+def sanitizar_saida(texto: str, max_len: int = 280) -> str:
+    if XSS_OUTPUT_PATTERN.search(texto):
+        return "[CONTEUDO_SANITIZADO]"
+    return html.escape(texto, quote=True)[:max_len]
+
+
 class MensagemChat(BaseModel):
-    texto: str
+    texto: str = Field(..., min_length=1, max_length=4000)
+
 
 @app.post("/analisar")
 def analisar_mensagem(mensagem: MensagemChat):
     # 1. Aplicamos a "vacina" (Limpeza) ANTES de enviar para a IA
     texto_limpo = limpar_texto(mensagem.texto)
-    
+    if not texto_limpo:
+        raise HTTPException(
+            status_code=422,
+            detail="O texto informado não possui conteúdo válido para análise.",
+        )
+
     # 2. IA analisa o texto já higienizado
     previsao = modelo.predict([texto_limpo])[0]
     probabilidades = modelo.predict_proba([texto_limpo])[0]
-    certeza = max(probabilidades) * 100
-    
+    certeza = float(max(probabilidades)) * 100
+
     return {
-        "texto_original": mensagem.texto,
-        "texto_limpo_ia": texto_limpo,
+        "texto_original": sanitizar_saida(mensagem.texto),
+        "texto_limpo_ia": sanitizar_saida(texto_limpo),
         "intencao": previsao,
-        "certeza_percentual": round(certeza, 2)
+        "certeza_percentual": round(certeza, 2),
     }
 
 # Para rodar isso, o comando será: uvicorn api:app --reload

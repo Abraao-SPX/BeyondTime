@@ -53,7 +53,7 @@ export function RecuperarSenha({
     try {
       const res = await requestPasswordReset(trimmed);
       setFeedbackMessage(
-        res.debugResetCode
+        import.meta.env.DEV && res.debugResetCode
           ? `${res.message} (Código de teste: ${res.debugResetCode})`
           : res.message
       );

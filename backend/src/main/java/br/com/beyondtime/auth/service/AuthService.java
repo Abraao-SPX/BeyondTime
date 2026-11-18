@@ -117,7 +117,7 @@ public class AuthService {
             );
         }
 
-        String normalizedEmail = XssSanitizer.sanitizeSingleLine(request.email()).toLowerCase(Locale.ROOT);
+        String normalizedEmail = normalizeEmail(request.email());
         if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
             throw new BusinessException(
                     "EMAIL_ALREADY_REGISTERED",
@@ -146,7 +146,7 @@ public class AuthService {
 
     @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse login(LoginRequest request) {
-        String normalizedEmail = XssSanitizer.sanitizeSingleLine(request.email()).toLowerCase(Locale.ROOT);
+        String normalizedEmail = normalizeEmail(request.email());
         User user = userRepository.findByEmailIgnoreCaseForUpdate(normalizedEmail).orElse(null);
         OffsetDateTime now = OffsetDateTime.now();
 
@@ -198,7 +198,7 @@ public class AuthService {
     @Transactional
     public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
         String providerUserId = request.googleUserId().trim();
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedEmail = normalizeEmail(request.email());
 
         var existingOAuth = oauthAccountRepository.findByProviderAndProviderUserId(OAuthProvider.GOOGLE, providerUserId);
         if (existingOAuth.isPresent()) {
@@ -219,6 +219,14 @@ public class AuthService {
             user = userRepository.save(new User(normalizedEmail, null, null, request.birthDate()));
         } else {
             ensureUserIsActive(user);
+            if (user.getPasswordHash() != null
+                    && !oauthAccountRepository.existsByUserIdAndProvider(user.getId(), OAuthProvider.GOOGLE)) {
+                throw new BusinessException(
+                        "OAUTH_ACCOUNT_LINK_REQUIRES_VERIFICATION",
+                        "Já existe uma conta cadastrada com este e-mail e senha. Por segurança, entre com sua senha.",
+                        HttpStatus.CONFLICT
+                );
+            }
         }
 
         if (!oauthAccountRepository.existsByUserIdAndProvider(user.getId(), OAuthProvider.GOOGLE)) {
@@ -228,7 +236,7 @@ public class AuthService {
         return issueTokensForUser(user);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse refreshToken(RefreshTokenRequest request) {
         String tokenHash = jwtService.hashRefreshToken(request.refreshToken().trim());
         RefreshToken storedToken = refreshTokenRepository.findByTokenHash(tokenHash)
@@ -237,6 +245,20 @@ public class AuthService {
                         "Sessão inválida ou expirada. Faça login novamente.",
                         HttpStatus.UNAUTHORIZED
                 ));
+
+        if (storedToken.getRevokedAt() != null) {
+            refreshTokenRepository.revokeAllActiveTokensByUserId(
+                    storedToken.getUser().getId(),
+                    OffsetDateTime.now()
+            );
+            log.warn("[BeyondTime Auth] Reuso de refresh token revogado detectado para userId={}. Todas as sessões ativas foram revogadas.",
+                    storedToken.getUser().getId());
+            throw new BusinessException(
+                    "EXPIRED_OR_REVOKED_REFRESH_TOKEN",
+                    "Sessão expirada ou revogada. Faça login novamente.",
+                    HttpStatus.UNAUTHORIZED
+            );
+        }
 
         if (!storedToken.isValid()) {
             throw new BusinessException(
@@ -274,10 +296,10 @@ public class AuthService {
 
     @Transactional
     public ForgotPasswordResponse forgotPassword(ForgotPasswordRequest request) {
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedEmail = normalizeEmail(request.email());
         long expiresInSeconds = passwordResetExpirationMinutes * 60;
 
-        User user = userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
+        User user = userRepository.findByEmailIgnoreCaseForUpdate(normalizedEmail).orElse(null);
         if (user == null || !user.isActive()) {
             hashResetCodeForUser(UUID.randomUUID(), "000000");
             return ForgotPasswordResponse.of(FORGOT_PASSWORD_SAFE_MESSAGE, expiresInSeconds, null);
@@ -304,7 +326,7 @@ public class AuthService {
 
     @Transactional(noRollbackFor = BusinessException.class)
     public VerifyResetCodeResponse verifyResetCode(VerifyResetCodeRequest request) {
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedEmail = normalizeEmail(request.email());
         String cleanCode = normalizeResetCode(request.code());
 
         findValidResetTokenOrThrow(normalizedEmail, cleanCode);
@@ -315,7 +337,7 @@ public class AuthService {
     public void resetPassword(ResetPasswordRequest request) {
         validatePasswordConfirmation(request.newPassword(), request.confirmPassword());
 
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedEmail = normalizeEmail(request.email());
         String cleanCode = normalizeResetCode(request.code());
 
         PasswordResetToken resetToken = findValidResetTokenOrThrow(normalizedEmail, cleanCode);
@@ -392,8 +414,16 @@ public class AuthService {
 
         ensureUserIsActive(user);
 
+        if (request == null || !Boolean.TRUE.equals(request.confirmedViaDefensiveModal())) {
+            throw new BusinessException(
+                    "DEFENSIVE_CONFIRMATION_REQUIRED",
+                    "Confirme a exclusão da conta no modal de segurança (RF-06) para prosseguir.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+
         if (user.getPasswordHash() != null) {
-            String rawPassword = (request != null && request.password() != null) ? request.password() : "";
+            String rawPassword = request.password() != null ? request.password() : "";
             if (rawPassword.isBlank() || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
                 throw new BusinessException(
                         "INVALID_PASSWORD_FOR_DELETION",
@@ -401,17 +431,6 @@ public class AuthService {
                         HttpStatus.UNAUTHORIZED
                 );
             }
-        }
-
-        boolean confirmedViaModal = request == null
-                || request.confirmedViaDefensiveModal() == null
-                || request.confirmedViaDefensiveModal();
-        if (!confirmedViaModal) {
-            throw new BusinessException(
-                    "DEFENSIVE_CONFIRMATION_REQUIRED",
-                    "Confirme a exclusão da conta no modal de segurança (RF-06) para prosseguir.",
-                    HttpStatus.BAD_REQUEST
-            );
         }
 
         OffsetDateTime now = OffsetDateTime.now();
@@ -492,12 +511,16 @@ public class AuthService {
         return sb.toString();
     }
 
+    private String normalizeEmail(String rawEmail) {
+        return XssSanitizer.sanitizeSingleLine(rawEmail).toLowerCase(Locale.ROOT);
+    }
+
     private String normalizeResetCode(String rawCode) {
         return rawCode.trim().toUpperCase(Locale.ROOT);
     }
 
     private String hashResetCodeForUser(UUID userId, String normalizedCode) {
-        return jwtService.hashRefreshToken(userId + ":" + normalizedCode);
+        return jwtService.hashWithSecretPepper(userId + ":" + normalizedCode);
     }
 
     private void ensureUserIsActive(User user) {
