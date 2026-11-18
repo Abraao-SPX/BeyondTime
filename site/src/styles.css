@@ -683,3 +683,465 @@ button {
     animation: none !important;
   }
 }
+
+/* Onboarding 50+ Wizard (Passos 1 a 7) */
+.auth-card {
+  height: auto;
+}
+
+.btn--step-back {
+  min-height: var(--touch-cta);
+  padding: 10px 18px;
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-secondary);
+  border-radius: var(--radius-control);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn--step-back:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-secondary-strong);
+}
+
+.register-progress__fill--step-1 { width: 14%; }
+.register-progress__fill--step-2 { width: 28%; }
+.register-progress__fill--step-3 { width: 42%; }
+.register-progress__fill--step-4 { width: 57%; }
+.register-progress__fill--step-5 { width: 71%; }
+.register-progress__fill--step-6 { width: 85%; }
+.register-progress__fill--step-7 { width: 100%; }
+
+.callout-danger-amber {
+  width: 100%;
+  margin-top: 6px;
+  padding: 14px 16px;
+  background-color: var(--bg-callout-amber);
+  border: 1.5px solid var(--danger-text);
+  border-radius: var(--radius-control);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--danger-text);
+}
+
+.form-select {
+  width: 100%;
+  min-height: var(--touch-input);
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-input-strong);
+  border-radius: var(--radius-control);
+  padding: 12px 16px;
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  color: var(--text-primary);
+}
+
+.callout-amber-lgpd {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  background-color: var(--bg-callout-amber);
+  border: 1.5px solid var(--border-card);
+  border-radius: var(--radius-control);
+}
+
+.callout-amber-lgpd__icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+
+.callout-amber-lgpd__text {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+/* Step 4: Photo Preview & Upload */
+.photo-preview {
+  width: 120px;
+  height: 120px;
+  margin: 16px auto;
+  border-radius: 50%;
+  background-color: var(--bg-callout-amber);
+  border: 1.5px solid var(--border-input-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.photo-preview__icon {
+  width: 44px;
+  height: 44px;
+  color: var(--text-primary);
+}
+
+.photo-preview__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.btn--upload {
+  width: 100%;
+  min-height: var(--touch-social);
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-input-strong);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.btn--upload:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.btn--upload__icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.photo-selected-name {
+  margin: 10px 0 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.photo-guidelines {
+  margin: 18px 0 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.photo-guidelines p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.action-stack--compact {
+  gap: var(--gap-control);
+}
+
+/* Step 5: Hobbies */
+.hobbies-counter {
+  margin: 0 0 14px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.category-pill {
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-secondary);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.category-pill--active {
+  background-color: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--text-on-brand);
+}
+
+.hobbies-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.hobby-chip {
+  width: 100%;
+  min-height: var(--touch-cta);
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-input-strong);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  display: flex;
+  align-items: center;
+}
+
+.hobby-chip--selected {
+  background-color: var(--bg-callout-amber);
+  border: 2px solid var(--brand-primary);
+  font-weight: 700;
+}
+
+.hobby-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn--disabled-cta {
+  min-height: var(--touch-cta);
+  background-color: var(--bg-surface);
+  border: 1.5px solid var(--border-secondary);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* Step 6: Connection Goal Cards */
+.goal-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-stack);
+  margin-bottom: 20px;
+}
+
+.goal-card {
+  width: 100%;
+  min-height: var(--touch-cta);
+  padding: 16px 18px;
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-input-strong);
+  border-radius: var(--radius-control);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
+}
+
+.goal-card--selected {
+  background-color: var(--bg-callout-amber);
+  border-color: var(--brand-primary);
+}
+
+.goal-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.goal-card__title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.goal-card__desc {
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.goal-card__indicator {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--brand-primary);
+  background-color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.goal-card__indicator--selected {
+  background-color: var(--brand-primary);
+}
+
+.goal-card__check {
+  width: 16px;
+  height: 16px;
+}
+
+/* Step 7: Password & LGPD */
+.password-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-input--password {
+  flex: 1;
+  min-height: var(--touch-social);
+  border-color: var(--border-input-strong);
+}
+
+.btn-eye {
+  width: 50px;
+  height: 50px;
+  flex-shrink: 0;
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-input-strong);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.btn-eye:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.btn-eye__icon {
+  width: 22px;
+  height: 22px;
+}
+
+.form-helper {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.password-match {
+  margin: 4px 0 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.lgpd-consent {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.lgpd-checkbox-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  min-height: var(--touch-min);
+}
+
+.lgpd-checkbox-input {
+  position: absolute;
+  opacity: 0;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.lgpd-checkbox-box {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: var(--radius-control);
+  border: 2px solid var(--border-strong);
+  background-color: var(--bg-input);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.lgpd-checkbox-input:checked + .lgpd-checkbox-box {
+  background-color: var(--brand-primary);
+  border-color: var(--brand-primary);
+}
+
+.lgpd-checkbox-input:focus-visible + .lgpd-checkbox-box {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.lgpd-checkbox-box__icon {
+  width: 18px;
+  height: 18px;
+}
+
+.lgpd-checkbox-text {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.lgpd-doc-buttons {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-legal-outline {
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 10px 16px;
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-input-strong);
+  border-radius: var(--radius-control);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+}
+
+.btn-legal-outline:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.form-error--block {
+  margin: 0 0 16px 0;
+}
+
+.summary-box {
+  width: 100%;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  background-color: var(--bg-input);
+  border: 1.5px solid var(--border-card);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary-box p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}

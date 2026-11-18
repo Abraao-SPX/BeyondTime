@@ -7,6 +7,7 @@ interface UseContactFormOptions {
   onContactChange: (value: string) => void;
   successMessage: string;
   submitDelayMs?: number;
+  onValidSubmit?: () => void;
 }
 
 export function useContactForm({
@@ -14,6 +15,7 @@ export function useContactForm({
   onContactChange,
   successMessage,
   submitDelayMs = 700,
+  onValidSubmit,
 }: UseContactFormOptions) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
@@ -56,6 +58,7 @@ export function useContactForm({
     timerRef.current = window.setTimeout(() => {
       setIsSubmitting(false);
       setFeedbackMessage(successMessage);
+      onValidSubmit?.();
     }, submitDelayMs);
   }
 

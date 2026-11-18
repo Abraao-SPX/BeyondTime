@@ -5,27 +5,26 @@ import { FooterGlobal } from './components/FooterGlobal';
 import { HeaderGlobal } from './components/HeaderGlobal';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
+import { useOnboardingWizard } from './hooks/useOnboardingWizard';
 import type { AuthViewId } from './types/auth';
 
 export function App() {
   const [activeView, setActiveView] = useState<AuthViewId>('login');
-  const [contacts, setContacts] = useState<Record<AuthViewId, string>>({
-    login: '',
-    register: '',
-    recover: '',
-  });
+  const [loginContact, setLoginContact] = useState('');
+  const [recoverContact, setRecoverContact] = useState('');
   const [pendingView, setPendingView] = useState<AuthViewId | null>(null);
   const lastTriggerRef = useRef<HTMLElement | null>(null);
 
-  function updateContact(viewId: AuthViewId, value: string) {
-    setContacts((prev) => ({
-      ...prev,
-      [viewId]: value,
-    }));
-  }
+  const wizard = useOnboardingWizard();
 
   function hasUnsavedData(viewId: AuthViewId): boolean {
-    return contacts[viewId].trim().length > 0;
+    if (viewId === 'login') {
+      return loginContact.trim().length > 0;
+    }
+    if (viewId === 'recover') {
+      return recoverContact.trim().length > 0;
+    }
+    return wizard.hasUnsavedChanges;
   }
 
   function handleNavigate(targetView: AuthViewId, triggerEl: HTMLElement) {
@@ -48,7 +47,14 @@ export function App() {
 
   function handleConfirmDiscard() {
     const target = pendingView;
-    updateContact(activeView, '');
+    if (activeView === 'login') {
+      setLoginContact('');
+    } else if (activeView === 'recover') {
+      setRecoverContact('');
+    } else {
+      wizard.resetWizard();
+    }
+
     setPendingView(null);
     lastTriggerRef.current = null;
     if (target !== null) {
@@ -68,24 +74,23 @@ export function App() {
         <div className="auth-card">
           {activeView === 'login' && (
             <TelaLogin
-              contact={contacts.login}
-              onContactChange={(value) => updateContact('login', value)}
+              contact={loginContact}
+              onContactChange={setLoginContact}
               onNavigate={handleNavigate}
             />
           )}
 
           {activeView === 'register' && (
             <CriarMinhaConta
-              contact={contacts.register}
-              onContactChange={(value) => updateContact('register', value)}
+              wizard={wizard}
               onNavigate={handleNavigate}
             />
           )}
 
           {activeView === 'recover' && (
             <RecuperarSenha
-              contact={contacts.recover}
-              onContactChange={(value) => updateContact('recover', value)}
+              contact={recoverContact}
+              onContactChange={setRecoverContact}
               onNavigate={handleNavigate}
             />
           )}
