@@ -11,7 +11,6 @@ import br.com.beyondtime.auth.dto.DeleteAccountRequest;
 import br.com.beyondtime.auth.dto.FirebaseTokenClaims;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
-import br.com.beyondtime.auth.dto.GoogleLoginRequest;
 import br.com.beyondtime.auth.dto.LoginRequest;
 import br.com.beyondtime.auth.dto.LogoutRequest;
 import br.com.beyondtime.auth.dto.RefreshTokenRequest;
@@ -388,35 +387,6 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    void shouldAuthenticateWithGoogleOAuth2AndEnforce50PlusRule() throws Exception {
-        GoogleLoginRequest googleUnder50 = new GoogleLoginRequest(
-                "google-uid-12345",
-                "novo.google@beyondtime.com.br",
-                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(42)
-        );
-
-        mockMvc.perform(post("/api/v1/auth/google")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(googleUnder50)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code", is("UNDER_MINIMUM_AGE_50")));
-
-        GoogleLoginRequest googleValid50Plus = new GoogleLoginRequest(
-                "google-uid-67890",
-                "marcos.sergipe@beyondtime.com.br",
-                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(68)
-        );
-
-        mockMvc.perform(post("/api/v1/auth/google")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(googleValid50Plus)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email", is("marcos.sergipe@beyondtime.com.br")))
-                .andExpect(jsonPath("$.age", is(68)))
-                .andExpect(jsonPath("$.accessToken", notNullValue()));
-    }
-
-    @Test
     void shouldReturn401ProblemDetailWhenAccessingProtectedEndpointWithoutJwt() throws Exception {
         mockMvc.perform(get("/api/v1/auth/me")
                         .accept(MediaType.APPLICATION_JSON))
@@ -573,17 +543,20 @@ class AuthControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(registerRequest)))
                 .andExpect(status().isCreated());
 
-        GoogleLoginRequest takeoverAttempt = new GoogleLoginRequest(
-                "attacker-google-uid-999",
-                "local.seguro@beyondtime.com.br",
-                null
-        );
+        when(firebaseTokenVerifierService.verify(eq("unverified-email-social-token")))
+                .thenReturn(new FirebaseTokenClaims(
+                        "attacker-fb-uid-999",
+                        "local.seguro@beyondtime.com.br",
+                        false,
+                        "Unverified Social",
+                        OAuthProvider.FACEBOOK
+                ));
 
-        mockMvc.perform(post("/api/v1/auth/google")
+        mockMvc.perform(post("/api/v1/auth/social")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(takeoverAttempt)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code", is("OAUTH_ACCOUNT_LINK_REQUIRES_VERIFICATION")));
+                        .content(objectMapper.writeValueAsString(new SocialLoginRequest("unverified-email-social-token", null))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("EMAIL_NOT_VERIFIED_BY_PROVIDER")));
     }
 
     @Test

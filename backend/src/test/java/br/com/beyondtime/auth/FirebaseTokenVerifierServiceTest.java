@@ -181,4 +181,25 @@ class FirebaseTokenVerifierServiceTest {
         assertThat(claims.email()).isEqualTo("carlos.fb@beyondtime.com.br");
         assertThat(claims.provider()).isEqualTo(OAuthProvider.FACEBOOK);
     }
+
+    @Test
+    void shouldThrowSocialEmailRequiredWhenFacebookTokenHasNoEmail() throws Exception {
+        JWTClaimsSet noEmailClaims = new JWTClaimsSet.Builder()
+                .subject("fb-sub-no-email")
+                .issuer("https://securetoken.google.com/" + PROJECT_ID)
+                .audience(List.of(PROJECT_ID))
+                .expirationTime(new Date(System.currentTimeMillis() + 60000))
+                .claim("firebase", Map.of("sign_in_provider", "facebook.com"))
+                .build();
+
+        when(jwtProcessor.process(eq("fb-no-email-token"), any())).thenReturn(noEmailClaims);
+
+        assertThatThrownBy(() -> verifierService.verify("fb-no-email-token"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo("SOCIAL_EMAIL_REQUIRED");
+                    assertThat(be.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                });
+    }
 }

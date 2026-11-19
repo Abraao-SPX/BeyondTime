@@ -4,6 +4,7 @@ import {
   GoogleAuthProvider,
   FacebookAuthProvider,
   signInWithPopup,
+  signOut,
   type Auth,
 } from 'firebase/auth';
 
@@ -86,5 +87,30 @@ export async function authenticateWithFirebasePopup(
     throw new Error(
       error?.message || 'Falha ao autenticar com provedor social via Firebase. Tente novamente.'
     );
+  }
+}
+
+export async function getFreshFirebaseIdToken(fallbackToken: string): Promise<string> {
+  try {
+    if (getApps().length === 0) {
+      return fallbackToken;
+    }
+    const currentUser = getAuth(getApp()).currentUser;
+    if (!currentUser) {
+      return fallbackToken;
+    }
+    return await currentUser.getIdToken(true);
+  } catch {
+    return fallbackToken;
+  }
+}
+
+export async function signOutFirebaseSilently(): Promise<void> {
+  try {
+    if (getApps().length > 0) {
+      await signOut(getAuth(getApp()));
+    }
+  } catch {
+    // Ignora falhas ao limpar sessão auxiliar do Firebase
   }
 }

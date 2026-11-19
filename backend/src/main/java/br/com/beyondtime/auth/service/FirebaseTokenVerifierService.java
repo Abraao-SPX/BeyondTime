@@ -136,9 +136,10 @@ public class FirebaseTokenVerifierService {
             if (email == null || email.isBlank()) {
                 log.warn("[FirebaseTokenVerifier] E-mail não encontrado no idToken do provedor {}", provider);
                 throw new BusinessException(
-                        "INVALID_FIREBASE_TOKEN",
-                        "Não foi possível validar sua autenticação social. Tente novamente.",
-                        HttpStatus.UNAUTHORIZED
+                        "SOCIAL_EMAIL_REQUIRED",
+                        "Sua conta " + (provider == OAuthProvider.FACEBOOK ? "do Facebook" : "do Google")
+                                + " não compartilhou um endereço de e-mail. Tente entrar com Google ou cadastre-se com seu e-mail.",
+                        HttpStatus.BAD_REQUEST
                 );
             }
 

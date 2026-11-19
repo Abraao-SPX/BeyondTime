@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError, loginWithEmail, loginWithSocial } from '../services/apiClient';
-import { authenticateWithFirebasePopup } from '../services/firebaseClient';
+import {
+  authenticateWithFirebasePopup,
+  getFreshFirebaseIdToken,
+  signOutFirebaseSilently,
+} from '../services/firebaseClient';
 import type { AuthSession, AuthViewId, SocialProvider } from '../types/auth';
 import {
   containsDangerousXss,
@@ -71,6 +75,7 @@ export function TelaLogin({
 
       try {
         const session = await loginWithSocial(authResult.idToken);
+        await signOutFirebaseSilently();
         setFeedbackMessage(`Acesso com ${provider} autorizado! Carregando seu painel...`);
         onAuthSuccess(session);
       } catch (apiErr) {
@@ -104,7 +109,9 @@ export function TelaLogin({
     setSocialModalError(null);
 
     try {
-      const session = await loginWithSocial(socialPendingToken, isoBirthDate);
+      const freshToken = await getFreshFirebaseIdToken(socialPendingToken);
+      const session = await loginWithSocial(freshToken, isoBirthDate);
+      await signOutFirebaseSilently();
       setIsBirthDateModalOpen(false);
       setSocialPendingToken(null);
       setFeedbackMessage('Cadastro social validado com sucesso! Entrando...');
@@ -121,6 +128,7 @@ export function TelaLogin({
   }
 
   function handleSocialBirthDateCancel() {
+    void signOutFirebaseSilently();
     setIsBirthDateModalOpen(false);
     setSocialPendingToken(null);
     setSocialProviderName(null);
@@ -208,7 +216,7 @@ export function TelaLogin({
         </p>
       </header>
 
-      <SocialAuthGrid onSelectProvider={handleSocialSelect} />
+      <SocialAuthGrid onSelectProvider={handleSocialSelect} disabled={isAnySubmitting} />
 
       <div className="auth-divider" aria-hidden="true">
         ou continue com e-mail

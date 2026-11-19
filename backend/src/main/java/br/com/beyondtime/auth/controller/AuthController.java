@@ -5,7 +5,6 @@ import br.com.beyondtime.auth.dto.ChangePasswordRequest;
 import br.com.beyondtime.auth.dto.DeleteAccountRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
-import br.com.beyondtime.auth.dto.GoogleLoginRequest;
 import br.com.beyondtime.auth.dto.LoginRequest;
 import br.com.beyondtime.auth.dto.LogoutRequest;
 import br.com.beyondtime.auth.dto.RefreshTokenRequest;
@@ -48,11 +47,6 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
-    }
-
-    @PostMapping("/google")
-    public ResponseEntity<AuthResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request) {
-        return ResponseEntity.ok(authService.loginWithGoogle(request));
     }
 
     @PostMapping("/social")

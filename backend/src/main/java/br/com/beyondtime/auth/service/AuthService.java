@@ -11,7 +11,6 @@ import br.com.beyondtime.auth.dto.ChangePasswordRequest;
 import br.com.beyondtime.auth.dto.DeleteAccountRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
-import br.com.beyondtime.auth.dto.GoogleLoginRequest;
 import br.com.beyondtime.auth.dto.LoginRequest;
 import br.com.beyondtime.auth.dto.LogoutRequest;
 import br.com.beyondtime.auth.dto.RefreshTokenRequest;
@@ -197,47 +196,6 @@ public class AuthService {
             user.resetLoginAttempts();
             userRepository.save(user);
         }
-        return issueTokensForUser(user);
-    }
-
-    @Transactional
-    public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
-        String providerUserId = request.googleUserId().trim();
-        String normalizedEmail = normalizeEmail(request.email());
-
-        var existingOAuth = oauthAccountRepository.findByProviderAndProviderUserId(OAuthProvider.GOOGLE, providerUserId);
-        if (existingOAuth.isPresent()) {
-            User user = existingOAuth.get().getUser();
-            ensureUserIsActive(user);
-            return issueTokensForUser(user);
-        }
-
-        User user = userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
-        if (user == null) {
-            if (request.birthDate() == null) {
-                throw new BusinessException(
-                        "BIRTH_DATE_REQUIRED_FOR_NEW_GOOGLE_ACCOUNT",
-                        "Para o primeiro acesso com Google, informe sua data de nascimento para validarmos a regra 50+."
-                );
-            }
-            AgeValidator.enforceMinimumAge50Plus(request.birthDate());
-            user = userRepository.save(new User(normalizedEmail, null, null, request.birthDate()));
-        } else {
-            ensureUserIsActive(user);
-            if (user.getPasswordHash() != null
-                    && !oauthAccountRepository.existsByUserIdAndProvider(user.getId(), OAuthProvider.GOOGLE)) {
-                throw new BusinessException(
-                        "OAUTH_ACCOUNT_LINK_REQUIRES_VERIFICATION",
-                        "Já existe uma conta cadastrada com este e-mail e senha. Por segurança, entre com sua senha.",
-                        HttpStatus.CONFLICT
-                );
-            }
-        }
-
-        if (!oauthAccountRepository.existsByUserIdAndProvider(user.getId(), OAuthProvider.GOOGLE)) {
-            oauthAccountRepository.save(new UserOAuthAccount(user, OAuthProvider.GOOGLE, providerUserId));
-        }
-
         return issueTokensForUser(user);
     }
 

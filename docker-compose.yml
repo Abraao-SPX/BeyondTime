@@ -64,6 +64,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-beyondtime-dev-secret-key-must-be-at-least-256-bits-long-2026-sergipe}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
       SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
       SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
@@ -81,6 +82,14 @@ services:
     build:
       context: ./site
       dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET:-}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
     container_name: beyondtime-site
     ports:
       - "${SITE_PORT:-8085}:80"

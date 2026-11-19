@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Filtro de limitação de taxa (Rate Limiting) por IP de origem para endpoints sensíveis de autenticação
- * (/api/v1/auth/login, /api/v1/auth/register, /api/v1/auth/google, /api/v1/auth/refresh,
+ * (/api/v1/auth/login, /api/v1/auth/register, /api/v1/auth/social, /api/v1/auth/refresh,
  * /api/v1/auth/forgot-password, /api/v1/auth/verify-reset-code, /api/v1/auth/reset-password),
  * prevenindo ataques de força bruta distribuídos e credential stuffing (RF-01).
  */
@@ -38,7 +38,7 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
     private static final Set<String> RATE_LIMITED_POST_PATHS = Set.of(
             "/api/v1/auth/login",
             "/api/v1/auth/register",
-            "/api/v1/auth/google",
+            "/api/v1/auth/social",
             "/api/v1/auth/refresh",
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/verify-reset-code",

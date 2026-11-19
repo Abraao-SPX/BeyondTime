@@ -1,7 +1,11 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError, loginWithSocial, registerAccount, upsertMyProfile } from '../services/apiClient';
-import { authenticateWithFirebasePopup } from '../services/firebaseClient';
+import {
+  authenticateWithFirebasePopup,
+  getFreshFirebaseIdToken,
+  signOutFirebaseSilently,
+} from '../services/firebaseClient';
 import { saveUserProfile } from '../services/profileStorage';
 import type {
   AuthSession,
@@ -140,7 +144,9 @@ export function CriarMinhaConta({
       let session = createdSession;
       if (!session) {
         if (socialIdToken) {
-          session = await loginWithSocial(socialIdToken, isoBirthDate);
+          const freshToken = await getFreshFirebaseIdToken(socialIdToken);
+          session = await loginWithSocial(freshToken, isoBirthDate);
+          await signOutFirebaseSilently();
         } else {
           session = await registerAccount({
             email: contact.trim(),
@@ -214,7 +220,7 @@ export function CriarMinhaConta({
             Entre ou cadastre-se para encontrar conexões reais e seguras.
           </p>
 
-          <SocialAuthGrid onSelectProvider={handleSocialSelect} />
+          <SocialAuthGrid onSelectProvider={handleSocialSelect} disabled={isSubmitting} />
 
           <div className="auth-divider" aria-hidden="true">
             ou continue com e-mail
