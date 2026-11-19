@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiError, registerAccount, upsertMyProfile } from '../services/apiClient';
+import { ApiError, loginWithSocial, registerAccount, upsertMyProfile } from '../services/apiClient';
+import { authenticateWithFirebasePopup } from '../services/firebaseClient';
 import { saveUserProfile } from '../services/profileStorage';
 import type {
   AuthSession,
@@ -48,6 +49,8 @@ export function CriarMinhaConta({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [createdSession, setCreatedSession] = useState<AuthSession | null>(null);
+  const [socialIdToken, setSocialIdToken] = useState<string | null>(null);
+  const [socialProvider, setSocialProvider] = useState<SocialProvider | null>(null);
 
   const [formData, setFormData] = useState<OnboardingFormData>({
     contact,
@@ -65,10 +68,37 @@ export function CriarMinhaConta({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  function handleSocialSelect(provider: SocialProvider) {
-    setFeedbackMessage(
-      `Cadastro com ${provider} preparado para conexão segura via OAuth 2.0.`
-    );
+  async function handleSocialSelect(provider: SocialProvider) {
+    setStep1Error(null);
+    setFeedbackMessage(`Conectando com ${provider}...`);
+    setIsSubmitting(true);
+
+    try {
+      const authResult = await authenticateWithFirebasePopup(provider);
+      setSocialIdToken(authResult.idToken);
+      setSocialProvider(provider);
+
+      if (authResult.email) {
+        onContactChange(authResult.email);
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        contact: authResult.email || prev.contact,
+        fullName: authResult.fullName || prev.fullName,
+        photoPreviewUrl: authResult.photoUrl || prev.photoPreviewUrl,
+      }));
+
+      setFeedbackMessage(
+        `Conta ${provider} conectada com sucesso! Prossiga com seus dados e data de nascimento.`
+      );
+      setStep(2);
+    } catch (err: any) {
+      setStep1Error(err?.message || `Erro ao conectar com ${provider}. Tente novamente.`);
+      setFeedbackMessage(null);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function handleStep1Submit(event: FormEvent<HTMLFormElement>) {
@@ -109,11 +139,15 @@ export function CriarMinhaConta({
       const isoBirthDate = toIsoBirthDate(formData.birthDate);
       let session = createdSession;
       if (!session) {
-        session = await registerAccount({
-          email: contact.trim(),
-          password: formData.password,
-          birthDate: isoBirthDate,
-        });
+        if (socialIdToken) {
+          session = await loginWithSocial(socialIdToken, isoBirthDate);
+        } else {
+          session = await registerAccount({
+            email: contact.trim(),
+            password: formData.password,
+            birthDate: isoBirthDate,
+          });
+        }
         setCreatedSession(session);
       }
 
@@ -291,6 +325,8 @@ export function CriarMinhaConta({
             formData={formData}
             isCompleted={isCompleted}
             isSubmitting={isSubmitting}
+            isSocialAccount={Boolean(socialIdToken)}
+            socialProvider={socialProvider}
             onPasswordChange={(value) => setFormData((prev) => ({ ...prev, password: value }))}
             onConfirmPasswordChange={(value) =>
               setFormData((prev) => ({ ...prev, confirmPassword: value }))

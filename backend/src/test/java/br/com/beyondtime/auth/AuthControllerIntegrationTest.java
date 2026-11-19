@@ -1,11 +1,14 @@
 package br.com.beyondtime.auth;
 
 import br.com.beyondtime.auth.domain.LgpdDataRequest;
+import br.com.beyondtime.auth.domain.OAuthProvider;
 import br.com.beyondtime.auth.domain.User;
+import br.com.beyondtime.auth.domain.UserOAuthAccount;
 import br.com.beyondtime.auth.domain.UserStatus;
 import br.com.beyondtime.auth.dto.AuthResponse;
 import br.com.beyondtime.auth.dto.ChangePasswordRequest;
 import br.com.beyondtime.auth.dto.DeleteAccountRequest;
+import br.com.beyondtime.auth.dto.FirebaseTokenClaims;
 import br.com.beyondtime.auth.dto.ForgotPasswordRequest;
 import br.com.beyondtime.auth.dto.ForgotPasswordResponse;
 import br.com.beyondtime.auth.dto.GoogleLoginRequest;
@@ -14,9 +17,13 @@ import br.com.beyondtime.auth.dto.LogoutRequest;
 import br.com.beyondtime.auth.dto.RefreshTokenRequest;
 import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.auth.dto.ResetPasswordRequest;
+import br.com.beyondtime.auth.dto.SocialLoginRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
 import br.com.beyondtime.auth.repository.LgpdDataRequestRepository;
+import br.com.beyondtime.auth.repository.UserOAuthAccountRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.auth.service.FirebaseTokenVerifierService;
+import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.security.LoginRateLimitFilter;
 import br.com.beyondtime.shared.util.AgeValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,7 +32,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -37,6 +46,8 @@ import java.util.Locale;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -64,7 +75,13 @@ class AuthControllerIntegrationTest {
     private LgpdDataRequestRepository lgpdDataRequestRepository;
 
     @Autowired
+    private UserOAuthAccountRepository oauthAccountRepository;
+
+    @Autowired
     private LoginRateLimitFilter loginRateLimitFilter;
+
+    @MockBean
+    private FirebaseTokenVerifierService firebaseTokenVerifierService;
 
     @BeforeEach
     void clearRateLimitBuckets() {
@@ -640,5 +657,105 @@ class AuthControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(new RefreshTokenRequest(rotatedAuth.refreshToken()))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code", is("EXPIRED_OR_REVOKED_REFRESH_TOKEN")));
+    }
+
+    @Test
+    void shouldLoginSocialWithGoogleAndFacebookForExistingUsers() throws Exception {
+        // Cria usuário 50+ existente
+        User user = new User("soc.existente@beyondtime.com.br", null, null, LocalDate.now().minusYears(55));
+        user = userRepository.save(user);
+
+        oauthAccountRepository.save(new UserOAuthAccount(user, OAuthProvider.GOOGLE, "firebase-google-uid-100"));
+        oauthAccountRepository.save(new UserOAuthAccount(user, OAuthProvider.FACEBOOK, "firebase-fb-uid-200"));
+
+        // Mock para token Google
+        when(firebaseTokenVerifierService.verify(eq("valid-google-id-token")))
+                .thenReturn(new FirebaseTokenClaims("firebase-google-uid-100", "soc.existente@beyondtime.com.br", true, "Soc Google", OAuthProvider.GOOGLE));
+
+        long startGoogle = System.currentTimeMillis();
+        mockMvc.perform(post("/api/v1/auth/social")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new SocialLoginRequest("valid-google-id-token", null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email", is("soc.existente@beyondtime.com.br")))
+                .andExpect(jsonPath("$.accessToken", notNullValue()))
+                .andExpect(jsonPath("$.refreshToken", notNullValue()));
+        long durationGoogle = System.currentTimeMillis() - startGoogle;
+        assertThat(durationGoogle).isLessThan(2000); // RF01
+
+        // Mock para token Facebook
+        when(firebaseTokenVerifierService.verify(eq("valid-facebook-id-token")))
+                .thenReturn(new FirebaseTokenClaims("firebase-fb-uid-200", "soc.existente@beyondtime.com.br", true, "Soc Facebook", OAuthProvider.FACEBOOK));
+
+        mockMvc.perform(post("/api/v1/auth/social")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new SocialLoginRequest("valid-facebook-id-token", null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email", is("soc.existente@beyondtime.com.br")))
+                .andExpect(jsonPath("$.accessToken", notNullValue()));
+    }
+
+    @Test
+    void shouldRequireBirthDateForNewSocialAccountWith428PreconditionRequired() throws Exception {
+        when(firebaseTokenVerifierService.verify(eq("new-user-id-token")))
+                .thenReturn(new FirebaseTokenClaims("new-firebase-uid-300", "novo.social@beyondtime.com.br", true, "Novo Social", OAuthProvider.GOOGLE));
+
+        mockMvc.perform(post("/api/v1/auth/social")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new SocialLoginRequest("new-user-id-token", null))))
+                .andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.code", is("BIRTH_DATE_REQUIRED_FOR_NEW_OAUTH_ACCOUNT")))
+                .andExpect(jsonPath("$.detail", is("Para concluir seu primeiro acesso com Google ou Facebook, informe sua data de nascimento para validarmos a regra 50+.")));
+    }
+
+    @Test
+    void shouldBlockNewSocialAccountWhenUnder50YearsOld() throws Exception {
+        when(firebaseTokenVerifierService.verify(eq("under-50-id-token")))
+                .thenReturn(new FirebaseTokenClaims("under-50-uid-400", "jovem.social@beyondtime.com.br", true, "Jovem Social", OAuthProvider.GOOGLE));
+
+        SocialLoginRequest under50Request = new SocialLoginRequest("under-50-id-token", LocalDate.now().minusYears(49).minusMonths(11));
+
+        mockMvc.perform(post("/api/v1/auth/social")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(under50Request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("UNDER_MINIMUM_AGE_50")));
+    }
+
+    @Test
+    void shouldRegisterNewSocialAccountWhen50PlusAndCreateOAuthAccount() throws Exception {
+        when(firebaseTokenVerifierService.verify(eq("valid-50plus-id-token")))
+                .thenReturn(new FirebaseTokenClaims("valid-50plus-uid-500", "elena.fb@beyondtime.com.br", true, "Elena FB", OAuthProvider.FACEBOOK));
+
+        SocialLoginRequest valid50PlusRequest = new SocialLoginRequest("valid-50plus-id-token", LocalDate.now().minusYears(58));
+
+        mockMvc.perform(post("/api/v1/auth/social")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(valid50PlusRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email", is("elena.fb@beyondtime.com.br")))
+                .andExpect(jsonPath("$.age", is(58)))
+                .andExpect(jsonPath("$.accessToken", notNullValue()))
+                .andExpect(jsonPath("$.refreshToken", notNullValue()));
+
+        // Verifica persistência no banco (3FN/5FN - RF04)
+        User savedUser = userRepository.findByEmailIgnoreCase("elena.fb@beyondtime.com.br").orElseThrow();
+        assertThat(savedUser.getBirthDate()).isEqualTo(LocalDate.now().minusYears(58));
+
+        boolean oauthExists = oauthAccountRepository.findByProviderAndProviderUserId(OAuthProvider.FACEBOOK, "valid-50plus-uid-500").isPresent();
+        assertThat(oauthExists).isTrue();
+    }
+
+    @Test
+    void shouldRejectInvalidOrExpiredSocialTokenWith401() throws Exception {
+        when(firebaseTokenVerifierService.verify(eq("invalid-token")))
+                .thenThrow(new BusinessException("INVALID_FIREBASE_TOKEN", "Não foi possível validar sua autenticação social. Tente novamente.", HttpStatus.UNAUTHORIZED));
+
+        mockMvc.perform(post("/api/v1/auth/social")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new SocialLoginRequest("invalid-token", null))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code", is("INVALID_FIREBASE_TOKEN")))
+                .andExpect(jsonPath("$.status", is(401)));
     }
 }

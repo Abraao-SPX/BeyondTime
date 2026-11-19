@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiError, loginWithEmail } from '../services/apiClient';
+import { ApiError, loginWithEmail, loginWithSocial } from '../services/apiClient';
+import { authenticateWithFirebasePopup } from '../services/firebaseClient';
 import type { AuthSession, AuthViewId, SocialProvider } from '../types/auth';
 import {
   containsDangerousXss,
@@ -8,6 +9,7 @@ import {
   sanitizeTextInput,
 } from '../utils/validation';
 import { SocialAuthGrid } from './SocialAuthGrid';
+import { SocialBirthDateModal } from './SocialBirthDateModal';
 
 interface TelaLoginProps {
   contact: string;
@@ -30,6 +32,13 @@ export function TelaLogin({
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockCountdownSeconds, setLockCountdownSeconds] = useState(0);
 
+  // Estados para o fluxo social 50+
+  const [isSocialSubmitting, setIsSocialSubmitting] = useState(false);
+  const [socialPendingToken, setSocialPendingToken] = useState<string | null>(null);
+  const [socialProviderName, setSocialProviderName] = useState<SocialProvider | null>(null);
+  const [isBirthDateModalOpen, setIsBirthDateModalOpen] = useState(false);
+  const [socialModalError, setSocialModalError] = useState<string | null>(null);
+
   const headingRef = useRef<HTMLHeadingElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -51,10 +60,71 @@ export function TelaLogin({
     return () => window.clearInterval(timer);
   }, [lockCountdownSeconds]);
 
-  function handleSocialSelect(provider: SocialProvider) {
-    setFeedbackMessage(
-      `Entrada com ${provider} preparada para conexão segura via OAuth 2.0.`
-    );
+  async function handleSocialSelect(provider: SocialProvider) {
+    setErrorMessage(null);
+    setFeedbackMessage(`Autenticando com ${provider}...`);
+    setIsSocialSubmitting(true);
+
+    try {
+      const authResult = await authenticateWithFirebasePopup(provider);
+      onContactChange(authResult.email);
+
+      try {
+        const session = await loginWithSocial(authResult.idToken);
+        setFeedbackMessage(`Acesso com ${provider} autorizado! Carregando seu painel...`);
+        onAuthSuccess(session);
+      } catch (apiErr) {
+        if (apiErr instanceof ApiError && apiErr.code === 'BIRTH_DATE_REQUIRED_FOR_NEW_OAUTH_ACCOUNT') {
+          // Usuário novo autenticado no Google/Facebook que ainda não cadastrou data de nascimento (RF02)
+          setSocialPendingToken(authResult.idToken);
+          setSocialProviderName(provider);
+          setSocialModalError(null);
+          setIsBirthDateModalOpen(true);
+          setFeedbackMessage(null);
+        } else if (apiErr instanceof ApiError) {
+          setErrorMessage(apiErr.message);
+          setFeedbackMessage(null);
+        } else {
+          setErrorMessage(`Não foi possível autenticar com ${provider}. Tente novamente.`);
+          setFeedbackMessage(null);
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || `Erro ao autenticar com ${provider}.`);
+      setFeedbackMessage(null);
+    } finally {
+      setIsSocialSubmitting(false);
+    }
+  }
+
+  async function handleSocialBirthDateConfirm(isoBirthDate: string) {
+    if (!socialPendingToken) return;
+
+    setIsSocialSubmitting(true);
+    setSocialModalError(null);
+
+    try {
+      const session = await loginWithSocial(socialPendingToken, isoBirthDate);
+      setIsBirthDateModalOpen(false);
+      setSocialPendingToken(null);
+      setFeedbackMessage('Cadastro social validado com sucesso! Entrando...');
+      onAuthSuccess(session);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setSocialModalError(err.message);
+      } else {
+        setSocialModalError('Não foi possível validar sua data de nascimento. Tente novamente.');
+      }
+    } finally {
+      setIsSocialSubmitting(false);
+    }
+  }
+
+  function handleSocialBirthDateCancel() {
+    setIsBirthDateModalOpen(false);
+    setSocialPendingToken(null);
+    setSocialProviderName(null);
+    setSocialModalError(null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -125,19 +195,18 @@ export function TelaLogin({
     }
   }
 
+  const isAnySubmitting = isSubmitting || isSocialSubmitting;
+
   return (
-    <section id="view-login" className="auth-view" aria-labelledby="login-title">
-      <h1
-        id="login-title"
-        ref={headingRef}
-        tabIndex={-1}
-        className="auth-card__title auth-card__title--center"
-      >
-        Conexões reais não têm idade
-      </h1>
-      <p className="auth-card__subtitle auth-card__subtitle--center">
-        Um espaço seguro para amizades, companhias e relacionamentos.
-      </p>
+    <section className="auth-step" aria-labelledby="login-title">
+      <header className="auth-step__header">
+        <h1 id="login-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
+          Entrar no BeyondTime
+        </h1>
+        <p className="auth-card__subtitle">
+          Bem-vindo de volta! Conecte-se para encontrar pessoas e grupos com afinidade em Sergipe.
+        </p>
+      </header>
 
       <SocialAuthGrid onSelectProvider={handleSocialSelect} />
 
@@ -214,18 +283,18 @@ export function TelaLogin({
         <button
           type="submit"
           className="btn btn--primary"
-          disabled={isSubmitting || lockCountdownSeconds > 0}
-          aria-busy={isSubmitting}
+          disabled={isAnySubmitting || lockCountdownSeconds > 0}
+          aria-busy={isAnySubmitting}
         >
           {lockCountdownSeconds > 0
             ? `Bloqueado temporariamente (${lockCountdownSeconds}s)`
-            : isSubmitting
+            : isAnySubmitting
               ? 'Verificando acesso...'
               : 'Entrar'}
         </button>
       </form>
 
-      {isSubmitting && (
+      {isAnySubmitting && (
         <div className="skeleton-loader" aria-hidden="true">
           <div className="skeleton-loader__bar" />
           <div className="skeleton-loader__bar skeleton-loader__bar--short" />
@@ -247,6 +316,15 @@ export function TelaLogin({
           Ainda não tem conta? <span className="underline-bold">Crie conta agora</span>
         </button>
       </div>
+
+      <SocialBirthDateModal
+        isOpen={isBirthDateModalOpen}
+        providerName={socialProviderName}
+        isSubmitting={isSocialSubmitting}
+        errorMessage={socialModalError}
+        onConfirm={handleSocialBirthDateConfirm}
+        onCancel={handleSocialBirthDateCancel}
+      />
     </section>
   );
 }

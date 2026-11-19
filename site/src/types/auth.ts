@@ -4,6 +4,8 @@ export type SocialProvider = 'Google' | 'Facebook';
 
 export type LegalDocKey = 'terms' | 'privacy';
 
+export type LegalPageId = 'privacidade' | 'exclusao' | 'termos';
+
 export type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export type ConnectionGoal = 'Amizade' | 'Relacionamento' | 'Companhia';

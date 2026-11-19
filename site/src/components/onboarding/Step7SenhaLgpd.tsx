@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { LegalDocKey, OnboardingFormData } from '../../types/auth';
+import type { LegalDocKey, OnboardingFormData, SocialProvider } from '../../types/auth';
 import {
   calculateAgeFromBirthDate,
   MIN_PASSWORD_LENGTH,
@@ -11,6 +11,8 @@ interface Step7SenhaLgpdProps {
   formData: OnboardingFormData;
   isCompleted: boolean;
   isSubmitting?: boolean;
+  isSocialAccount?: boolean;
+  socialProvider?: SocialProvider | null;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
   onToggleLgpd: (accepted: boolean) => void;
@@ -68,6 +70,8 @@ export function Step7SenhaLgpd({
   formData,
   isCompleted,
   isSubmitting = false,
+  isSocialAccount = false,
+  socialProvider = null,
   onPasswordChange,
   onConfirmPasswordChange,
   onToggleLgpd,
@@ -94,14 +98,16 @@ export function Step7SenhaLgpd({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const passwordError = validatePasswordMatch(
-      formData.password,
-      formData.confirmPassword
-    );
-    if (passwordError !== null) {
-      setFormError(passwordError);
-      passwordInputRef.current?.focus();
-      return;
+    if (!isSocialAccount || formData.password.length > 0 || formData.confirmPassword.length > 0) {
+      const passwordError = validatePasswordMatch(
+        formData.password,
+        formData.confirmPassword
+      );
+      if (passwordError !== null) {
+        setFormError(passwordError);
+        passwordInputRef.current?.focus();
+        return;
+      }
     }
 
     if (!formData.acceptedLgpd) {
@@ -182,17 +188,24 @@ export function Step7SenhaLgpd({
 
   return (
     <div>
+      {isSocialAccount && socialProvider && (
+        <p className="defensive-modal__badge" style={{ marginBottom: '8px' }}>
+          Conectado via {socialProvider}
+        </p>
+      )}
       <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-        Crie sua senha de acesso
+        {isSocialAccount ? 'Conclua seu cadastro 50+' : 'Crie sua senha de acesso'}
       </h1>
       <p className="auth-card__subtitle">
-        Escolha uma senha segura para proteger sua conta.
+        {isSocialAccount
+          ? 'Confirme o aceite dos termos para finalizar seu cadastro seguro no BeyondTime. A criação de senha local é opcional.'
+          : 'Escolha uma senha segura para proteger sua conta.'}
       </p>
 
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
         <div className="form-group">
           <label className="form-label" htmlFor="step7-password">
-            Criar senha
+            {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
           </label>
           <div className="password-row">
             <input
@@ -308,6 +321,22 @@ export function Step7SenhaLgpd({
             >
               Política de Privacidade e Segurança
             </button>
+            <a
+              href="/privacidade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-legal-outline"
+              style={{
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: 'var(--brand-primary)',
+              }}
+              title="Abre a Política de Privacidade e Proteção de Dados completa em nova aba"
+            >
+              Ler Política Completa (LGPD) ↗
+            </a>
           </div>
 
           {activeLegalDoc !== null && (

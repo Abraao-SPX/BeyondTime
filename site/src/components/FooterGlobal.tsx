@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { LegalDocKey } from '../types/auth';
+import type { LegalDocKey, LegalPageId } from '../types/auth';
 
 const LEGAL_SUMMARIES: Record<LegalDocKey, string> = {
   terms:
@@ -8,10 +8,18 @@ const LEGAL_SUMMARIES: Record<LegalDocKey, string> = {
     'Política de Privacidade: seus dados de acesso são protegidos conforme a LGPD e utilizados apenas para autenticação e segurança.',
 };
 
-export function FooterGlobal() {
+interface FooterGlobalProps {
+  onOpenLegalPage?: (page: LegalPageId) => void;
+}
+
+export function FooterGlobal({ onOpenLegalPage }: FooterGlobalProps = {}) {
   const [activeDoc, setActiveDoc] = useState<LegalDocKey | null>(null);
 
   function handleSelectDoc(docKey: LegalDocKey) {
+    if (onOpenLegalPage) {
+      onOpenLegalPage(docKey === 'terms' ? 'termos' : 'privacidade');
+      return;
+    }
     setActiveDoc((current) => (current === docKey ? null : docKey));
   }
 

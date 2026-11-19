@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AuthViewId } from '../types/auth';
+import type { AuthViewId, LegalPageId } from '../types/auth';
 
 type IntentKey = 'amizade' | 'companhia' | 'relacionamento';
 
@@ -69,9 +69,14 @@ const CONNECTIONS: Record<IntentKey, ConnectionPreview> = {
 interface LandingPageProps {
   isAuthenticated: boolean;
   onOpenAuth: (targetView: AuthViewId) => void;
+  onOpenLegalPage?: (page: LegalPageId) => void;
 }
 
-export function LandingPage({ isAuthenticated, onOpenAuth }: LandingPageProps) {
+export function LandingPage({
+  isAuthenticated,
+  onOpenAuth,
+  onOpenLegalPage,
+}: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeIntent, setActiveIntent] = useState<IntentKey>('amizade');
   const currentConnection = CONNECTIONS[activeIntent];
@@ -823,6 +828,45 @@ export function LandingPage({ isAuthenticated, onOpenAuth }: LandingPageProps) {
               <a href="#conexoes">Nossa proposta</a>
               <a href="#seguranca">Segurança</a>
               <a href="#duvidas">Dúvidas frequentes</a>
+              <a
+                href="/privacidade"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (onOpenLegalPage) {
+                    onOpenLegalPage('privacidade');
+                  } else {
+                    window.location.href = '/privacidade';
+                  }
+                }}
+              >
+                Privacidade (LGPD)
+              </a>
+              <a
+                href="/exclusao-de-dados"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (onOpenLegalPage) {
+                    onOpenLegalPage('exclusao');
+                  } else {
+                    window.location.href = '/exclusao-de-dados';
+                  }
+                }}
+              >
+                Exclusão de Dados
+              </a>
+              <a
+                href="/termos"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (onOpenLegalPage) {
+                    onOpenLegalPage('termos');
+                  } else {
+                    window.location.href = '/termos';
+                  }
+                }}
+              >
+                Termos de Uso
+              </a>
             </nav>
           </div>
           <div className="footer-bottom">

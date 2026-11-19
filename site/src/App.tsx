@@ -4,6 +4,7 @@ import { DefensiveModalRF06 } from './components/DefensiveModalRF06';
 import { FooterGlobal } from './components/FooterGlobal';
 import { HeaderGlobal } from './components/HeaderGlobal';
 import { LandingPage } from './components/LandingPage';
+import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
 import {
@@ -16,12 +17,33 @@ import {
   type ServerProfile,
 } from './services/apiClient';
 import { clearUserProfile, loadUserProfile } from './services/profileStorage';
-import type { AuthSession, AuthViewId } from './types/auth';
+import type { AuthSession, AuthViewId, LegalPageId } from './types/auth';
 import { sanitizeTextInput } from './utils/validation';
 
 const DELETE_COUNTDOWN_SECONDS = 5;
 
+export function parseLegalPageFromPath(pathname: string): LegalPageId | null {
+  const cleanPath = pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  if (cleanPath === '/privacidade' || cleanPath === '/privacy') {
+    return 'privacidade';
+  }
+  if (
+    cleanPath === '/exclusao-de-dados' ||
+    cleanPath === '/exclusao' ||
+    cleanPath === '/data-deletion'
+  ) {
+    return 'exclusao';
+  }
+  if (cleanPath === '/termos' || cleanPath === '/terms') {
+    return 'termos';
+  }
+  return null;
+}
+
 export function App() {
+  const [legalPage, setLegalPage] = useState<LegalPageId | null>(() =>
+    typeof window !== 'undefined' ? parseLegalPageFromPath(window.location.pathname) : null
+  );
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession());
   const [showLanding, setShowLanding] = useState<boolean>(() => loadAuthSession() === null);
   const [serverProfile, setServerProfile] = useState<ServerProfile | null>(null);
@@ -41,6 +63,42 @@ export function App() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handlePopState() {
+      const page = parseLegalPageFromPath(window.location.pathname);
+      setLegalPage(page);
+      if (page === null && (window.location.pathname === '/' || window.location.pathname === '')) {
+        setShowLanding(authSession === null);
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [authSession]);
+
+  function handleOpenLegalPage(page: LegalPageId) {
+    const path =
+      page === 'privacidade'
+        ? '/privacidade'
+        : page === 'exclusao'
+        ? '/exclusao-de-dados'
+        : '/termos';
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setLegalPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleBackToHomeFromLegal() {
+    window.history.pushState({}, '', '/');
+    setLegalPage(null);
+    setShowLanding(authSession === null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   function updateContact(viewId: AuthViewId, value: string) {
     setContacts((prev) => ({
@@ -111,7 +169,6 @@ export function App() {
           setAuthSession(null);
           setServerProfile(null);
         }
-        // Fallback para localStorage caso o perfil ainda não exista no banco
       });
     return () => {
       active = false;
@@ -209,11 +266,23 @@ export function App() {
     : savedProfile?.hobbies;
   const displayHobbies = rawHobbies?.map((h) => sanitizeTextInput(h)).filter(Boolean);
 
+  // Roteamento nativo para páginas legais LGPD, Meta e Termos
+  if (legalPage !== null) {
+    return (
+      <PaginasLegais
+        activeTab={legalPage}
+        onSelectTab={handleOpenLegalPage}
+        onBackToHome={handleBackToHomeFromLegal}
+      />
+    );
+  }
+
   if (showLanding) {
     return (
       <LandingPage
         isAuthenticated={authSession !== null}
         onOpenAuth={handleOpenAuthFromLanding}
+        onOpenLegalPage={handleOpenLegalPage}
       />
     );
   }
@@ -396,7 +465,7 @@ export function App() {
         onConfirmDiscard={handleConfirmDiscard}
       />
 
-      <FooterGlobal />
+      <FooterGlobal onOpenLegalPage={handleOpenLegalPage} />
     </div>
   );
 }

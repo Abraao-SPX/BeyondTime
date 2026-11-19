@@ -125,6 +125,21 @@ export async function loginWithEmail(
   return session;
 }
 
+export async function loginWithSocial(
+  idToken: string,
+  birthDate?: string
+): Promise<AuthSession> {
+  const session = await requestJson<AuthSession>('/api/v1/auth/social', {
+    method: 'POST',
+    body: JSON.stringify({
+      idToken: idToken.trim(),
+      birthDate: birthDate || null,
+    }),
+  });
+  saveAuthSession(session);
+  return session;
+}
+
 export async function registerAccount(
   payload: RegisterPayload
 ): Promise<AuthSession> {
