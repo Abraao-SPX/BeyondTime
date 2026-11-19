@@ -15,8 +15,10 @@ import br.com.beyondtime.auth.dto.LogoutRequest;
 import br.com.beyondtime.auth.dto.RefreshTokenRequest;
 import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.auth.dto.ResetPasswordRequest;
+import br.com.beyondtime.auth.dto.SocialLoginRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeResponse;
+import br.com.beyondtime.auth.dto.FirebaseTokenClaims;
 import br.com.beyondtime.auth.repository.PasswordResetTokenRepository;
 import br.com.beyondtime.auth.repository.RefreshTokenRepository;
 import br.com.beyondtime.auth.repository.UserOAuthAccountRepository;
@@ -58,6 +60,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final PasswordResetMailService passwordResetMailService;
+    private final FirebaseTokenVerifierService firebaseTokenVerifierService;
     private final long passwordResetExpirationMinutes;
     private final boolean exposeDebugResetCode;
     private final String dummyBcryptHash;
@@ -71,6 +74,7 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             PasswordResetMailService passwordResetMailService,
+            FirebaseTokenVerifierService firebaseTokenVerifierService,
             @Value("${beyondtime.security.password-reset.expiration-minutes:15}") long passwordResetExpirationMinutes,
             @Value("${beyondtime.security.password-reset.expose-debug-code:false}") boolean exposeDebugResetCode) {
         this.userRepository = userRepository;
@@ -80,6 +84,7 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetMailService = passwordResetMailService;
+        this.firebaseTokenVerifierService = firebaseTokenVerifierService;
         this.passwordResetExpirationMinutes = passwordResetExpirationMinutes;
         this.exposeDebugResetCode = exposeDebugResetCode;
         this.dummyBcryptHash = passwordEncoder.encode("BeyondTimeDummyConstantTimePassword2026!");
@@ -167,6 +172,52 @@ public class AuthService {
 
         if (!oauthAccountRepository.existsByUserIdAndProvider(user.getId(), OAuthProvider.GOOGLE)) {
             oauthAccountRepository.save(new UserOAuthAccount(user, OAuthProvider.GOOGLE, providerUserId));
+        }
+
+        return issueTokensForUser(user);
+    }
+
+    @Transactional
+    public AuthResponse loginWithSocialProvider(SocialLoginRequest request) {
+        FirebaseTokenClaims claims = firebaseTokenVerifierService.verify(request.idToken());
+
+        OAuthProvider provider = claims.provider();
+        String providerUserId = claims.uid();
+        String normalizedEmail = claims.email().trim().toLowerCase(Locale.ROOT);
+
+        var existingOAuth = oauthAccountRepository.findByProviderAndProviderUserId(provider, providerUserId);
+        if (existingOAuth.isPresent()) {
+            User user = existingOAuth.get().getUser();
+            ensureUserIsActive(user);
+            return issueTokensForUser(user);
+        }
+
+        User user = userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
+        if (user == null) {
+            if (request.birthDate() == null) {
+                throw new BusinessException(
+                        "BIRTH_DATE_REQUIRED_FOR_NEW_OAUTH_ACCOUNT",
+                        "Para concluir seu primeiro acesso com Google ou Facebook, informe sua data de nascimento para validarmos a regra 50+.",
+                        HttpStatus.PRECONDITION_REQUIRED
+                );
+            }
+            AgeValidator.enforceMinimumAge50Plus(request.birthDate());
+            user = userRepository.save(new User(normalizedEmail, null, null, request.birthDate()));
+            oauthAccountRepository.save(new UserOAuthAccount(user, provider, providerUserId));
+            return issueTokensForUser(user);
+        }
+
+        ensureUserIsActive(user);
+
+        if (!oauthAccountRepository.existsByUserIdAndProvider(user.getId(), provider)) {
+            if (!claims.emailVerified()) {
+                throw new BusinessException(
+                        "EMAIL_NOT_VERIFIED_BY_PROVIDER",
+                        "O e-mail da sua conta social não foi verificado pelo provedor. Verifique seu e-mail no Google ou Facebook.",
+                        HttpStatus.FORBIDDEN
+                );
+            }
+            oauthAccountRepository.save(new UserOAuthAccount(user, provider, providerUserId));
         }
 
         return issueTokensForUser(user);

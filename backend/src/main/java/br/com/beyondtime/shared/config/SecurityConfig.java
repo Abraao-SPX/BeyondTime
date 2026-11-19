@@ -1,6 +1,7 @@
 package br.com.beyondtime.shared.config;
 
 import br.com.beyondtime.shared.security.JwtAuthenticationFilter;
+import br.com.beyondtime.shared.security.LoginRateLimitFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,14 +35,17 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final LoginRateLimitFilter loginRateLimitFilter;
     private final ObjectMapper objectMapper;
     private final List<String> allowedOrigins;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            LoginRateLimitFilter loginRateLimitFilter,
             ObjectMapper objectMapper,
             @Value("${beyondtime.security.cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://localhost:8081,http://localhost:8085,http://127.0.0.1:8085,http://bytime.me,https://bytime.me,http://www.bytime.me,https://www.bytime.me,http://132.226.242.158:8085}") String allowedOriginsCsv) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.loginRateLimitFilter = loginRateLimitFilter;
         this.objectMapper = objectMapper;
         this.allowedOrigins = Arrays.stream(allowedOriginsCsv.split(","))
                 .map(String::trim)
@@ -62,6 +66,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/login",
+                                "/api/v1/auth/social",
                                 "/api/v1/auth/google",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/forgot-password",
@@ -98,6 +103,7 @@ public class SecurityConfig {
                             objectMapper.writeValue(response.getOutputStream(), pd);
                         })
                 )
+                .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

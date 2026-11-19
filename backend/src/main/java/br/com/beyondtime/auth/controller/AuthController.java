@@ -10,6 +10,7 @@ import br.com.beyondtime.auth.dto.LogoutRequest;
 import br.com.beyondtime.auth.dto.RefreshTokenRequest;
 import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.auth.dto.ResetPasswordRequest;
+import br.com.beyondtime.auth.dto.SocialLoginRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeRequest;
 import br.com.beyondtime.auth.dto.VerifyResetCodeResponse;
 import br.com.beyondtime.auth.service.AuthService;
@@ -50,6 +51,11 @@ public class AuthController {
     @PostMapping("/google")
     public ResponseEntity<AuthResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request) {
         return ResponseEntity.ok(authService.loginWithGoogle(request));
+    }
+
+    @PostMapping("/social")
+    public ResponseEntity<AuthResponse> loginWithSocial(@Valid @RequestBody SocialLoginRequest request) {
+        return ResponseEntity.ok(authService.loginWithSocialProvider(request));
     }
 
     @PostMapping("/refresh")
