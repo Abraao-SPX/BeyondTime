@@ -2,7 +2,9 @@ import type { ConnectionGoal } from '../types/auth';
 import { MIN_ALLOWED_AGE, sanitizeTextInput } from '../utils/validation';
 
 export const PROFILE_STORAGE_KEY = 'beyondtime_user_profile_v1';
-export const MAX_PHOTO_SIZE_BYTES = 2 * 1024 * 1024;
+export const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
+export const AVATAR_PRE_RESIZE_PX = 600;
+export const AVATAR_JPEG_QUALITY = 0.85;
 export const ALLOWED_PHOTO_MIME_TYPES = [
   'image/jpeg',
   'image/png',
@@ -67,7 +69,7 @@ export async function validateAndReadPhotoFile(
   }
 
   if (file.size > MAX_PHOTO_SIZE_BYTES) {
-    throw new Error('A imagem escolhida excede 2 MB. Selecione uma foto menor.');
+    throw new Error('A imagem escolhida excede 5 MB. Selecione uma foto menor.');
   }
 
   const validMagicBytes = await hasValidImageMagicBytes(file);
@@ -96,6 +98,61 @@ export async function validateAndReadPhotoFile(
   });
 }
 
+/**
+ * Pré-reduz e recorta (1:1 centralizado em até 600x600 JPEG) a foto no navegador
+ * antes do envio para o servidor Spring Boot (que padroniza em WebP 400x400).
+ */
+export async function resizeAndPrepareAvatarFile(
+  file: File
+): Promise<{ file: File; dataUrl: string; fileName: string }> {
+  const { dataUrl, fileName } = await validateAndReadPhotoFile(file);
+
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Falha ao decodificar imagem no navegador.'));
+      image.src = dataUrl;
+    });
+
+    const sourceSize = Math.min(img.naturalWidth || img.width, img.naturalHeight || img.height);
+    if (sourceSize <= 0) {
+      return { file, dataUrl, fileName };
+    }
+
+    const targetSize = Math.min(AVATAR_PRE_RESIZE_PX, sourceSize);
+    const sx = Math.floor(((img.naturalWidth || img.width) - sourceSize) / 2);
+    const sy = Math.floor(((img.naturalHeight || img.height) - sourceSize) / 2);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetSize;
+    canvas.height = targetSize;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return { file, dataUrl, fileName };
+    }
+
+    ctx.drawImage(img, sx, sy, sourceSize, sourceSize, 0, 0, targetSize, targetSize);
+
+    const resizedBlob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', AVATAR_JPEG_QUALITY)
+    );
+    if (!resizedBlob) {
+      return { file, dataUrl, fileName };
+    }
+
+    const resizedFile = new File([resizedBlob], 'avatar.jpg', { type: 'image/jpeg' });
+    const resizedPreview = canvas.toDataURL('image/jpeg', AVATAR_JPEG_QUALITY);
+    return {
+      file: resizedFile,
+      dataUrl: resizedPreview,
+      fileName,
+    };
+  } catch {
+    return { file, dataUrl, fileName };
+  }
+}
+
 export function saveUserProfile(profile: UserProfileData): void {
   if (profile.age < MIN_ALLOWED_AGE) {
     throw new Error('Perfil não atende ao requisito mínimo de idade (50+).');
@@ -108,11 +165,14 @@ export function saveUserProfile(profile: UserProfileData): void {
     throw new Error('Formato de foto inválido para persistência.');
   }
 
+  // SEC-MED-02: Hardening - Não persistir fotos em Base64 (até 2MB) no localStorage.
+  // Fotos de perfil devem ser mantidas em memória da sessão React ou hidratadas via API/CDN.
   const sanitizedProfile: UserProfileData = {
     ...profile,
     contact: sanitizeTextInput(profile.contact),
     fullName: sanitizeTextInput(profile.fullName),
     city: sanitizeTextInput(profile.city),
+    photoDataUrl: null,
     photoFileName: profile.photoFileName ? sanitizeTextInput(profile.photoFileName) : null,
     hobbies: profile.hobbies.map((h) => sanitizeTextInput(h)).filter((h) => h.length > 0),
   };
@@ -187,5 +247,7 @@ export function loadUserProfile(expectedUserId?: string): UserProfileData | null
 }
 
 export function clearUserProfile(): void {
+  // SEC-MED-02: Limpeza rígida em ambos os storages para evitar resíduos de sessão
   window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  window.sessionStorage.removeItem(PROFILE_STORAGE_KEY);
 }

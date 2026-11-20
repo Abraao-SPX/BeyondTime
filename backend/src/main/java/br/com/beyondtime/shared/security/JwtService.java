@@ -5,7 +5,10 @@ import br.com.beyondtime.auth.domain.UserRole;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -25,6 +28,9 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    public static final String INSECURE_DEFAULT_SECRET =
+            "beyondtime_dev_secret_key_for_local_testing_minimum_256_bits_2026_uninassau";
+
     private static final String ISSUER = "beyondtime-api";
 
     private final SecretKey secretKey;
@@ -32,16 +38,29 @@ public class JwtService {
     private final long refreshTokenExpirationDays;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    @Autowired
     public JwtService(
-            @Value("${beyondtime.security.jwt.secret}") String secret,
+            @Value("${beyondtime.security.jwt.secret:}") String secret,
             @Value("${beyondtime.security.jwt.access-token-expiration-minutes:15}") long accessTokenExpirationMinutes,
-            @Value("${beyondtime.security.jwt.refresh-token-expiration-days:365}") long refreshTokenExpirationDays) {
-        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            @Value("${beyondtime.security.jwt.refresh-token-expiration-days:365}") long refreshTokenExpirationDays,
+            Environment environment) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("JWT_SECRET_KEY é obrigatória e não pode estar vazia (fail-closed). Configure a variável de ambiente JWT_SECRET_KEY.");
+        }
+        if (secret.getBytes(StandardCharsets.UTF_8).length < 32) {
             throw new IllegalArgumentException("JWT_SECRET_KEY deve possuir no mínimo 32 bytes (256 bits).");
+        }
+        boolean isDevOrTest = environment != null && environment.acceptsProfiles(Profiles.of("test", "dev", "local"));
+        if (!isDevOrTest && INSECURE_DEFAULT_SECRET.equals(secret)) {
+            throw new IllegalStateException("JWT_SECRET_KEY insegura detectada em perfil produtivo. Defina uma chave forte única via variável de ambiente.");
         }
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTokenExpirationMinutes = accessTokenExpirationMinutes;
         this.refreshTokenExpirationDays = refreshTokenExpirationDays;
+    }
+
+    public JwtService(String secret, long accessTokenExpirationMinutes, long refreshTokenExpirationDays) {
+        this(secret, accessTokenExpirationMinutes, refreshTokenExpirationDays, null);
     }
 
     public String generateAccessToken(User user) {

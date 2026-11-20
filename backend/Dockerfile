@@ -23,12 +23,18 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
+# Hardening: cria e usa usuário não-root (SEC-BAIXA-02)
+RUN groupadd -r appgroup && useradd -r -g appgroup -u 1001 appuser \
+    && mkdir -p /app/uploads/avatars \
+    && chown -R appuser:appgroup /app
+
 # Pegamos o arquivo .jar gerado no Estágio 1 e colocamos aqui
-COPY --from=build /app/target/beyondtime-backend-0.0.1-SNAPSHOT.jar app.jar
+COPY --from=build --chown=appuser:appgroup /app/target/beyondtime-backend-0.0.1-SNAPSHOT.jar app.jar
+
+USER appuser
 
 # Liberamos a porta 8080 para o mundo externo acessar o Java
 EXPOSE 8080
 
 # Comando que liga o servidor Spring Boot
 CMD ["java", "-jar", "app.jar"]
-

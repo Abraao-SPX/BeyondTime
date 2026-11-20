@@ -1,8 +1,9 @@
-import type { AuthSession, CityOption } from '../types/auth';
+import type { AuthSession, CityOption, SocialProvider } from '../types/auth';
 import { clearUserProfile } from './profileStorage';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const AUTH_SESSION_KEY = 'beyondtime_auth_session_v1';
+const REMEMBER_ME_FLAG_KEY = 'beyondtime_remember_me_active';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -86,13 +87,27 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-export function saveAuthSession(session: AuthSession): void {
-  window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+// SEC-MED-02: Hardening de armazenamento de sessão
+// Usa sessionStorage por padrão (tokens descartados ao fechar a aba/janela)
+// e só persiste em localStorage se o usuário tiver explicitamente marcado "manter conectado".
+export function saveAuthSession(session: AuthSession, rememberMe: boolean = false): void {
+  const payload = JSON.stringify({ ...session, rememberMe });
+  if (rememberMe) {
+    window.localStorage.setItem(AUTH_SESSION_KEY, payload);
+    window.localStorage.setItem(REMEMBER_ME_FLAG_KEY, 'true');
+    window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+  } else {
+    window.sessionStorage.setItem(AUTH_SESSION_KEY, payload);
+    window.localStorage.removeItem(AUTH_SESSION_KEY);
+    window.localStorage.removeItem(REMEMBER_ME_FLAG_KEY);
+  }
 }
 
 export function loadAuthSession(): AuthSession | null {
   try {
-    const raw = window.localStorage.getItem(AUTH_SESSION_KEY);
+    const raw =
+      window.sessionStorage.getItem(AUTH_SESSION_KEY) ||
+      window.localStorage.getItem(AUTH_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<AuthSession>;
     if (!parsed.accessToken || !parsed.userId || !parsed.email) return null;
@@ -103,7 +118,10 @@ export function loadAuthSession(): AuthSession | null {
 }
 
 export function clearAuthSession(): void {
+  // SEC-MED-02: Limpeza rigorosa e completa de ambos os storages no logout / 401 / exclusão
   window.localStorage.removeItem(AUTH_SESSION_KEY);
+  window.localStorage.removeItem(REMEMBER_ME_FLAG_KEY);
+  window.sessionStorage.removeItem(AUTH_SESSION_KEY);
 }
 
 export interface RegisterPayload {
@@ -115,19 +133,24 @@ export interface RegisterPayload {
 
 export async function loginWithEmail(
   email: string,
-  password: string
+  password: string,
+  rememberMe: boolean = false
 ): Promise<AuthSession> {
   const session = await requestJson<AuthSession>('/api/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email: email.trim(), password }),
   });
-  saveAuthSession(session);
+  session.authProvider = 'email';
+  session.rememberMe = rememberMe;
+  saveAuthSession(session, rememberMe);
   return session;
 }
 
 export async function loginWithSocial(
   idToken: string,
-  birthDate?: string
+  birthDate?: string,
+  provider?: SocialProvider,
+  rememberMe: boolean = false
 ): Promise<AuthSession> {
   const session = await requestJson<AuthSession>('/api/v1/auth/social', {
     method: 'POST',
@@ -136,12 +159,15 @@ export async function loginWithSocial(
       birthDate: birthDate || null,
     }),
   });
-  saveAuthSession(session);
+  session.authProvider = provider ? (provider.toLowerCase() as 'google' | 'facebook') : 'social';
+  session.rememberMe = rememberMe;
+  saveAuthSession(session, rememberMe);
   return session;
 }
 
 export async function registerAccount(
-  payload: RegisterPayload
+  payload: RegisterPayload,
+  rememberMe: boolean = false
 ): Promise<AuthSession> {
   const session = await requestJson<AuthSession>('/api/v1/auth/register', {
     method: 'POST',
@@ -152,7 +178,9 @@ export async function registerAccount(
       birthDate: payload.birthDate,
     }),
   });
-  saveAuthSession(session);
+  session.authProvider = 'email';
+  session.rememberMe = rememberMe;
+  saveAuthSession(session, rememberMe);
   return session;
 }
 
@@ -195,11 +223,17 @@ export async function confirmPasswordReset(
 export async function refreshSession(
   refreshToken: string
 ): Promise<AuthSession> {
+  const previousSession = loadAuthSession();
   const session = await requestJson<AuthSession>('/api/v1/auth/refresh', {
     method: 'POST',
     body: JSON.stringify({ refreshToken: refreshToken.trim() }),
   });
-  saveAuthSession(session);
+  if (previousSession?.authProvider) {
+    session.authProvider = previousSession.authProvider;
+  }
+  const rememberMe = Boolean(previousSession?.rememberMe);
+  session.rememberMe = rememberMe;
+  saveAuthSession(session, rememberMe);
   return session;
 }
 
@@ -260,8 +294,22 @@ export interface ServerProfile {
   city: string;
   hobbies: string[];
   goal: string;
+  avatarUrl?: string | null;
   verificationStatus: string;
   verifiedBadge50plus: boolean;
+}
+
+export interface AvatarUploadResult {
+  avatar: string;
+  avatarUrl: string;
+}
+
+export function resolveApiAssetUrl(path?: string | null): string | null {
+  if (!path) return null;
+  if (/^(https?:|data:image\/)/i.test(path)) {
+    return path;
+  }
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 export interface UpsertProfilePayload {
@@ -294,4 +342,26 @@ export async function upsertMyProfile(
     },
     session.accessToken
   );
+}
+
+export async function uploadMyAvatar(
+  session: AuthSession,
+  file: File
+): Promise<AvatarUploadResult> {
+  const formData = new FormData();
+  formData.append('file', file, file.name || 'avatar.jpg');
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me/avatar`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+
+  return (await response.json()) as AvatarUploadResult;
 }

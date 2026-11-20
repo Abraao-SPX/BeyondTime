@@ -25,7 +25,9 @@ import br.com.beyondtime.auth.repository.PasswordResetTokenRepository;
 import br.com.beyondtime.auth.repository.RefreshTokenRepository;
 import br.com.beyondtime.auth.repository.UserOAuthAccountRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.profile.repository.ProfilePhotoRepository;
 import br.com.beyondtime.profile.repository.ProfileRepository;
+import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.security.JwtService;
 import br.com.beyondtime.shared.util.AgeValidator;
@@ -33,7 +35,10 @@ import br.com.beyondtime.shared.util.XssSanitizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,10 +69,13 @@ public class AuthService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final LgpdDataRequestRepository lgpdDataRequestRepository;
     private final ProfileRepository profileRepository;
+    private final ProfilePhotoRepository profilePhotoRepository;
+    private final AvatarService avatarService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final PasswordResetMailService passwordResetMailService;
     private final FirebaseTokenVerifierService firebaseTokenVerifierService;
+    private final JdbcTemplate jdbcTemplate;
     private final long passwordResetExpirationMinutes;
     private final boolean exposeDebugResetCode;
     private final int maxFailedLoginAttempts;
@@ -82,10 +90,14 @@ public class AuthService {
             PasswordResetTokenRepository passwordResetTokenRepository,
             LgpdDataRequestRepository lgpdDataRequestRepository,
             ProfileRepository profileRepository,
+            ProfilePhotoRepository profilePhotoRepository,
+            AvatarService avatarService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             PasswordResetMailService passwordResetMailService,
             FirebaseTokenVerifierService firebaseTokenVerifierService,
+            JdbcTemplate jdbcTemplate,
+            Environment environment,
             @Value("${beyondtime.security.password-reset.expiration-minutes:15}") long passwordResetExpirationMinutes,
             @Value("${beyondtime.security.password-reset.expose-debug-code:false}") boolean exposeDebugResetCode,
             @Value("${beyondtime.security.login.max-failed-attempts:5}") int maxFailedLoginAttempts,
@@ -96,12 +108,15 @@ public class AuthService {
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.lgpdDataRequestRepository = lgpdDataRequestRepository;
         this.profileRepository = profileRepository;
+        this.profilePhotoRepository = profilePhotoRepository;
+        this.avatarService = avatarService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetMailService = passwordResetMailService;
         this.firebaseTokenVerifierService = firebaseTokenVerifierService;
+        this.jdbcTemplate = jdbcTemplate;
         this.passwordResetExpirationMinutes = passwordResetExpirationMinutes;
-        this.exposeDebugResetCode = exposeDebugResetCode;
+        this.exposeDebugResetCode = exposeDebugResetCode && environment != null && environment.acceptsProfiles(Profiles.of("test"));
         this.maxFailedLoginAttempts = maxFailedLoginAttempts;
         this.loginLockMinutes = loginLockMinutes;
         this.dummyBcryptHash = passwordEncoder.encode("BeyondTimeDummyConstantTimePassword2026!");
@@ -444,10 +459,34 @@ public class AuthService {
 
         OffsetDateTime now = OffsetDateTime.now();
 
+        // Limpeza de tokens e credenciais
         refreshTokenRepository.deleteAllByUserId(user.getId());
         passwordResetTokenRepository.deleteAllByUserId(user.getId());
         oauthAccountRepository.deleteAllByUserId(user.getId());
+
+        // Limpeza de registros de perfil e dependências diretas (SEC-MED-07 / RF14)
+        profileRepository.findByUserId(user.getId()).ifPresent(profile -> {
+            profilePhotoRepository.findAllByProfileIdOrderByPositionAsc(profile.getId())
+                    .forEach(photo -> avatarService.deleteAvatarQuietly(photo.getObjectKey()));
+            safeDelete("DELETE FROM profile_hobbies WHERE profile_id = ?", profile.getId());
+            safeDelete("DELETE FROM profile_intents WHERE profile_id = ?", profile.getId());
+            safeDelete("DELETE FROM profile_photos WHERE profile_id = ?", profile.getId());
+            profileRepository.delete(profile);
+        });
         profileRepository.deleteByUserId(user.getId());
+
+        // Limpeza de configurações de acessibilidade e preferências de descoberta
+        safeDelete("DELETE FROM accessibility_preferences WHERE user_id = ?", user.getId());
+        safeDelete("DELETE FROM discovery_preference_intents WHERE user_id = ?", user.getId());
+        safeDelete("DELETE FROM discovery_preferences WHERE user_id = ?", user.getId());
+
+        // Limpeza de hobbies associativos 3FN (RF03 / RF04)
+        safeDelete("DELETE FROM user_hobbies WHERE user_id = ?", user.getId());
+
+        // Encerramento e limpeza consistente de matches e interações (RF05)
+        safeDelete("DELETE FROM profile_interactions WHERE from_user_id = ? OR to_user_id = ?", user.getId(), user.getId());
+        safeDelete("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?", user.getId(), user.getId());
+        safeDelete("DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?", user.getId(), user.getId());
 
         lgpdDataRequestRepository.save(
                 LgpdDataRequest.createCompletedAccountDeletion(user.getId(), true, now)
@@ -458,6 +497,16 @@ public class AuthService {
 
         log.info("[BeyondTime LGPD RF-14] Conta userId={} excluída e anonimizada definitivamente com trilha de auditoria LGPD.",
                 authenticatedUserId);
+    }
+
+    private void safeDelete(String sql, Object... params) {
+        if (jdbcTemplate != null) {
+            try {
+                jdbcTemplate.update(sql, params);
+            } catch (Exception ex) {
+                log.warn("[BeyondTime Auth] safeDelete aviso para SQL: {} - {}", sql, ex.getMessage());
+            }
+        }
     }
 
     private PasswordResetToken findValidResetTokenOrThrow(String normalizedEmail, String normalizedCode) {

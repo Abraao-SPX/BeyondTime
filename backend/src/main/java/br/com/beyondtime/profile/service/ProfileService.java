@@ -7,6 +7,8 @@ import br.com.beyondtime.profile.domain.Hobby;
 import br.com.beyondtime.profile.domain.Profile;
 import br.com.beyondtime.profile.domain.ProfileHobby;
 import br.com.beyondtime.profile.domain.ProfileIntent;
+import br.com.beyondtime.profile.domain.ProfilePhoto;
+import br.com.beyondtime.profile.dto.AvatarUploadResponse;
 import br.com.beyondtime.profile.dto.HobbyResponse;
 import br.com.beyondtime.profile.dto.ProfileResponse;
 import br.com.beyondtime.profile.dto.UpsertProfileRequest;
@@ -14,13 +16,18 @@ import br.com.beyondtime.profile.repository.ConnectionIntentRepository;
 import br.com.beyondtime.profile.repository.HobbyRepository;
 import br.com.beyondtime.profile.repository.ProfileHobbyRepository;
 import br.com.beyondtime.profile.repository.ProfileIntentRepository;
+import br.com.beyondtime.profile.repository.ProfilePhotoRepository;
 import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
 import br.com.beyondtime.shared.util.XssSanitizer;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.text.Normalizer;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -38,6 +45,8 @@ public class ProfileService {
     private final ConnectionIntentRepository connectionIntentRepository;
     private final ProfileIntentRepository profileIntentRepository;
     private final CityRepository cityRepository;
+    private final ProfilePhotoRepository profilePhotoRepository;
+    private final AvatarService avatarService;
 
     public ProfileService(
             ProfileRepository profileRepository,
@@ -46,12 +55,36 @@ public class ProfileService {
             ConnectionIntentRepository connectionIntentRepository,
             ProfileIntentRepository profileIntentRepository,
             CityRepository cityRepository) {
+        this(
+                profileRepository,
+                hobbyRepository,
+                profileHobbyRepository,
+                connectionIntentRepository,
+                profileIntentRepository,
+                cityRepository,
+                null,
+                null
+        );
+    }
+
+    @Autowired
+    public ProfileService(
+            ProfileRepository profileRepository,
+            HobbyRepository hobbyRepository,
+            ProfileHobbyRepository profileHobbyRepository,
+            ConnectionIntentRepository connectionIntentRepository,
+            ProfileIntentRepository profileIntentRepository,
+            CityRepository cityRepository,
+            ProfilePhotoRepository profilePhotoRepository,
+            AvatarService avatarService) {
         this.profileRepository = profileRepository;
         this.hobbyRepository = hobbyRepository;
         this.profileHobbyRepository = profileHobbyRepository;
         this.connectionIntentRepository = connectionIntentRepository;
         this.profileIntentRepository = profileIntentRepository;
         this.cityRepository = cityRepository;
+        this.profilePhotoRepository = profilePhotoRepository;
+        this.avatarService = avatarService;
     }
 
     @Transactional(readOnly = true)
@@ -147,6 +180,28 @@ public class ProfileService {
         return toResponse(profile);
     }
 
+    @Transactional
+    public AvatarUploadResponse updateMyAvatar(UUID userId, MultipartFile file) {
+        Profile profile = profileRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Perfil", userId));
+
+        ProfilePhoto existingPhoto = profilePhotoRepository
+                .findByProfileIdAndPosition(profile.getId(), (short) 1)
+                .orElse(null);
+
+        String avatarAntigo = existingPhoto != null ? existingPhoto.getObjectKey() : null;
+        String novoNome = avatarService.salvarAvatar(file, avatarAntigo);
+
+        if (existingPhoto == null) {
+            profilePhotoRepository.save(new ProfilePhoto(profile.getId(), novoNome, (short) 1));
+        } else {
+            existingPhoto.updateObjectKey(novoNome);
+            profilePhotoRepository.save(existingPhoto);
+        }
+
+        return new AvatarUploadResponse(novoNome, avatarService.buildAvatarUrl(novoNome));
+    }
+
     private ProfileResponse toResponse(Profile profile) {
         String cityName = cityRepository.findById(profile.getCityId())
                 .map(c -> c.getName() + " (SE)")
@@ -166,6 +221,14 @@ public class ProfileService {
                     .orElse("Amizade");
         }
 
+        String avatarUrl = null;
+        if (profilePhotoRepository != null && avatarService != null) {
+            avatarUrl = profilePhotoRepository.findByProfileIdAndPosition(profile.getId(), (short) 1)
+                    .filter(photo -> "ACTIVE".equalsIgnoreCase(photo.getStatus()))
+                    .map(photo -> avatarService.buildAvatarUrl(photo.getObjectKey()))
+                    .orElse(null);
+        }
+
         return new ProfileResponse(
                 profile.getId(),
                 profile.getUserId(),
@@ -175,6 +238,7 @@ public class ProfileService {
                 cityName,
                 hobbyNames,
                 goal,
+                avatarUrl,
                 profile.getVerificationStatus(),
                 profile.isVerifiedBadge50plus()
         );
@@ -194,21 +258,54 @@ public class ProfileService {
                 .orElse(1);
     }
 
-    private Hobby matchHobby(String input, List<Hobby> catalog) {
-        if (input == null || input.isBlank()) return null;
-        String clean = input.trim().toLowerCase(Locale.ROOT);
+    public Hobby matchHobby(String input, List<Hobby> catalog) {
+        if (input == null || input.isBlank() || catalog == null || catalog.isEmpty()) {
+            return null;
+        }
+        String clean = input.trim();
+
+        // 1. Correspondência direta por ID numérico
+        try {
+            int numericId = Integer.parseInt(clean);
+            for (Hobby h : catalog) {
+                if (h.getId() != null && h.getId() == numericId) {
+                    return h;
+                }
+            }
+        } catch (NumberFormatException ignored) {
+        }
+
+        String normalizedInput = normalizeText(clean);
+
+        // 2. Correspondência exata por código ou nome normalizado (sem acentos e case-insensitive)
         for (Hobby h : catalog) {
-            if (h.getCode().equalsIgnoreCase(clean) || h.getName().equalsIgnoreCase(clean)) {
+            if (h.getCode() != null && normalizeText(h.getCode()).equals(normalizedInput)) {
+                return h;
+            }
+            if (h.getName() != null && normalizeText(h.getName()).equals(normalizedInput)) {
                 return h;
             }
         }
+
+        // 3. Correspondência exata por slug (com traços / underscores)
+        String slugCandidate = normalizedInput.replace(' ', '-').replace('_', '-');
         for (Hobby h : catalog) {
-            String hName = h.getName().toLowerCase(Locale.ROOT);
-            if (hName.contains(clean) || clean.contains(hName.split("\\s+")[0])) {
+            if (h.getSlug() != null && normalizeText(h.getSlug()).replace('_', '-').equals(slugCandidate)) {
+                return h;
+            }
+            if (h.getCode() != null && normalizeText(h.getCode()).replace('_', '-').equals(slugCandidate)) {
                 return h;
             }
         }
+
         return null;
+    }
+
+    private static String normalizeText(String input) {
+        if (input == null) return "";
+        return Normalizer.normalize(input.trim(), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT);
     }
 
     private String mapGoalToIntentCode(String goal) {

@@ -1,6 +1,14 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiError, loginWithSocial, registerAccount, upsertMyProfile } from '../services/apiClient';
+import {
+  ApiError,
+  loginWithSocial,
+  registerAccount,
+  resolveApiAssetUrl,
+  uploadMyAvatar,
+  upsertMyProfile,
+  type ServerProfile,
+} from '../services/apiClient';
 import {
   authenticateWithFirebasePopup,
   getFreshFirebaseIdToken,
@@ -10,8 +18,10 @@ import { saveUserProfile } from '../services/profileStorage';
 import type {
   AuthSession,
   AuthViewId,
+  ConnectionGoal,
   OnboardingFormData,
   OnboardingStep,
+  SocialOnboardingDraft,
   SocialProvider,
 } from '../types/auth';
 import {
@@ -33,6 +43,13 @@ interface CriarMinhaContaProps {
   onContactChange: (value: string) => void;
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
   onAuthSuccess: (session: AuthSession) => void;
+  existingSession?: AuthSession | null;
+  orphanNotice?: string | null;
+  socialDraft?: SocialOnboardingDraft | null;
+  initialProfile?: ServerProfile | null;
+  isEditMode?: boolean;
+  onProfileSaved?: (profile: ServerProfile) => void;
+  onCancelEdit?: () => void;
 }
 
 function toIsoBirthDate(brDate: string): string {
@@ -40,34 +57,57 @@ function toIsoBirthDate(brDate: string): string {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeGoal(goal?: string | null): ConnectionGoal {
+  if (goal === 'Relacionamento' || goal === 'Companhia' || goal === 'Amizade') {
+    return goal;
+  }
+  return 'Amizade';
+}
+
 export function CriarMinhaConta({
   contact,
   onContactChange,
   onNavigate,
   onAuthSuccess,
+  existingSession = null,
+  orphanNotice = null,
+  socialDraft = null,
+  initialProfile = null,
+  isEditMode = false,
+  onProfileSaved,
+  onCancelEdit,
 }: CriarMinhaContaProps) {
-  const [step, setStep] = useState<OnboardingStep>(1);
+  // SEC-ALTA-08: Se o usuário já estiver autenticado (recuperação de perfil órfão 404 ou edição),
+  // inicia diretamente na etapa 2 (Dados Pessoais) sem forçar re-registro
+  const [step, setStep] = useState<OnboardingStep>(() => (existingSession ? 2 : 1));
   const [isCompleted, setIsCompleted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [step1Error, setStep1Error] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-  const [createdSession, setCreatedSession] = useState<AuthSession | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(orphanNotice);
+  const [createdSession, setCreatedSession] = useState<AuthSession | null>(existingSession);
   const [socialIdToken, setSocialIdToken] = useState<string | null>(null);
-  const [socialProvider, setSocialProvider] = useState<SocialProvider | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [socialProvider, setSocialProvider] = useState<SocialProvider | null>(() => {
+    if (socialDraft?.provider) return socialDraft.provider;
+    if (existingSession?.authProvider === 'google') return 'Google';
+    if (existingSession?.authProvider === 'facebook') return 'Facebook';
+    return null;
+  });
 
   const [formData, setFormData] = useState<OnboardingFormData>({
-    contact,
-    fullName: '',
-    birthDate: '',
-    city: 'Aracaju (SE)',
-    photoPreviewUrl: null,
+    contact: existingSession?.email || contact,
+    fullName: initialProfile?.fullName || socialDraft?.fullName || '',
+    birthDate: socialDraft?.birthDate || '',
+    city: initialProfile?.city || 'Aracaju (SE)',
+    photoPreviewUrl:
+      resolveApiAssetUrl(initialProfile?.avatarUrl) || socialDraft?.photoUrl || null,
     photoFileName: null,
-    hobbies: [],
-    goal: 'Amizade',
+    hobbies: initialProfile?.hobbies ? [...initialProfile.hobbies] : [],
+    goal: normalizeGoal(initialProfile?.goal),
     password: '',
     confirmPassword: '',
-    acceptedLgpd: false,
+    acceptedLgpd: Boolean(existingSession),
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -145,11 +185,11 @@ export function CriarMinhaConta({
       if (!session) {
         if (socialIdToken) {
           const freshToken = await getFreshFirebaseIdToken(socialIdToken);
-          session = await loginWithSocial(freshToken, isoBirthDate);
+          session = await loginWithSocial(freshToken, isoBirthDate, socialProvider || undefined);
           await signOutFirebaseSilently();
         } else {
           session = await registerAccount({
-            email: contact.trim(),
+            email: (formData.contact || contact).trim(),
             password: formData.password,
             birthDate: isoBirthDate,
           });
@@ -164,22 +204,37 @@ export function CriarMinhaConta({
         .filter((h) => h.length > 0);
       const sanitizedGoal = sanitizeTextInput(formData.goal) as typeof formData.goal;
 
-      await upsertMyProfile(session, {
+      const savedServerProfile = await upsertMyProfile(session, {
         fullName: sanitizedFullName,
         city: sanitizedCity,
         hobbies: sanitizedHobbies,
         goal: sanitizedGoal,
       });
 
+      let finalServerProfile: ServerProfile = savedServerProfile;
+      if (photoFile !== null) {
+        const uploaded = await uploadMyAvatar(session, photoFile);
+        finalServerProfile = {
+          ...savedServerProfile,
+          avatarUrl: uploaded.avatarUrl,
+        };
+        setFormData((prev) => ({
+          ...prev,
+          photoPreviewUrl: resolveApiAssetUrl(uploaded.avatarUrl) || prev.photoPreviewUrl,
+        }));
+      }
+
+      onProfileSaved?.(finalServerProfile);
+
       const age = calculateAgeFromBirthDate(formData.birthDate) ?? 50;
       saveUserProfile({
         userId: session.userId,
-        contact: sanitizeTextInput(contact),
+        contact: sanitizeTextInput(formData.contact || contact),
         fullName: sanitizedFullName,
         birthDate: formData.birthDate,
         age,
         city: sanitizedCity,
-        photoDataUrl: formData.photoPreviewUrl,
+        photoDataUrl: null,
         photoFileName: formData.photoFileName ? sanitizeTextInput(formData.photoFileName) : null,
         hobbies: sanitizedHobbies,
         goal: sanitizedGoal,
@@ -199,17 +254,30 @@ export function CriarMinhaConta({
   }
 
   function handleBack() {
-    if (step > 1 && !isCompleted) {
+    if (isEditMode && step === 2 && !isCompleted && onCancelEdit) {
+      onCancelEdit();
+      return;
+    }
+    const minStep: OnboardingStep = existingSession ? 2 : 1;
+    if (step > minStep && !isCompleted) {
       setStep((prev) => (prev - 1) as OnboardingStep);
     }
   }
+
+  const canGoBack = !isCompleted && (isEditMode ? step >= 2 : step > (existingSession ? 2 : 1));
 
   return (
     <section id="view-register" className="auth-view" aria-labelledby="register-title">
       <OnboardingStepHeader
         step={step}
-        onBack={step > 1 && !isCompleted ? handleBack : undefined}
+        onBack={canGoBack ? handleBack : undefined}
       />
+
+      {feedbackMessage !== null && step > 1 && (
+        <div className="callout-amber" role="status" style={{ marginBottom: '16px' }}>
+          {feedbackMessage}
+        </div>
+      )}
 
       {step === 1 && (
         <>
@@ -280,6 +348,7 @@ export function CriarMinhaConta({
         <Step2DadosPessoais
           fullName={formData.fullName}
           birthDate={formData.birthDate}
+          birthDateAlreadyVerified={Boolean(existingSession)}
           onFullNameChange={(value) => setFormData((prev) => ({ ...prev, fullName: value }))}
           onBirthDateChange={(value) => setFormData((prev) => ({ ...prev, birthDate: value }))}
           onNext={() => setStep(3)}
@@ -298,13 +367,14 @@ export function CriarMinhaConta({
         <Step4FotoPerfil
           photoPreviewUrl={formData.photoPreviewUrl}
           photoFileName={formData.photoFileName}
-          onPhotoSelect={(previewUrl, fileName) =>
+          onPhotoSelect={(previewUrl, fileName, file) => {
+            setPhotoFile(file);
             setFormData((prev) => ({
               ...prev,
               photoPreviewUrl: previewUrl,
               photoFileName: fileName,
-            }))
-          }
+            }));
+          }}
           onNext={() => setStep(5)}
         />
       )}
@@ -331,7 +401,8 @@ export function CriarMinhaConta({
             formData={formData}
             isCompleted={isCompleted}
             isSubmitting={isSubmitting}
-            isSocialAccount={Boolean(socialIdToken)}
+            isSocialAccount={Boolean(socialIdToken) || Boolean(existingSession)}
+            isEditMode={isEditMode}
             socialProvider={socialProvider}
             onPasswordChange={(value) => setFormData((prev) => ({ ...prev, password: value }))}
             onConfirmPasswordChange={(value) =>
@@ -346,8 +417,9 @@ export function CriarMinhaConta({
               setStep(2);
             }}
             onFinishToLogin={() => {
-              if (createdSession) {
-                onAuthSuccess(createdSession);
+              const finalSession = createdSession || existingSession;
+              if (finalSession) {
+                onAuthSuccess({ ...finalSession });
               }
             }}
           />

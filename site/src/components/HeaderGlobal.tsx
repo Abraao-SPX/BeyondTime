@@ -5,9 +5,14 @@ import type { AuthViewId } from '../types/auth';
 interface HeaderGlobalProps {
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
   onBackToLanding?: () => void;
+  onToggleAccessibility?: () => void;
 }
 
-export function HeaderGlobal({ onNavigate, onBackToLanding }: HeaderGlobalProps) {
+export function HeaderGlobal({
+  onNavigate,
+  onBackToLanding,
+  onToggleAccessibility,
+}: HeaderGlobalProps) {
   function handleBrandClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
     if (onBackToLanding) {
@@ -37,6 +42,25 @@ export function HeaderGlobal({ onNavigate, onBackToLanding }: HeaderGlobalProps)
         </a>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <p className="site-header__tagline">Um novo tempo para se conectar.</p>
+          {onToggleAccessibility && (
+            <button
+              type="button"
+              className="btn--secondary"
+              style={{
+                marginBottom: 0,
+                minHeight: '48px',
+                padding: '8px 16px',
+                fontSize: '15px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+              onClick={onToggleAccessibility}
+              aria-label="Abrir Painel de Acessibilidade Dinâmica (RF-09)"
+            >
+              <span aria-hidden="true">👁️</span> Acessibilidade (RF09)
+            </button>
+          )}
           {onBackToLanding && (
             <button
               type="button"

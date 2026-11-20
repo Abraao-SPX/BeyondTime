@@ -56,7 +56,7 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
             ObjectMapper objectMapper,
             @Value("${beyondtime.security.login.ip-max-requests-per-minute:15}") int maxRequestsPerMinute,
             @Value("${beyondtime.security.login.ip-window-seconds:60}") long windowSeconds,
-            @Value("${beyondtime.security.login.trust-forwarded-headers:false}") boolean trustForwardedHeaders) {
+            @Value("${beyondtime.security.login.trust-forwarded-headers:true}") boolean trustForwardedHeaders) {
         this.objectMapper = objectMapper;
         this.maxRequestsPerMinute = maxRequestsPerMinute;
         this.windowMillis = Math.max(1L, windowSeconds) * 1000L;
@@ -180,8 +180,8 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
             String forwardedFor = request.getHeader("X-Forwarded-For");
             if (forwardedFor != null && !forwardedFor.isBlank()) {
                 String[] parts = forwardedFor.split(",");
-                for (int i = parts.length - 1; i >= 0; i--) {
-                    String candidate = parts[i].trim();
+                for (String part : parts) {
+                    String candidate = part.trim();
                     if (!candidate.isEmpty()) {
                         return candidate;
                     }

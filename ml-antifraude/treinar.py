@@ -1,3 +1,5 @@
+import os
+import hashlib
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -6,6 +8,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import joblib
 import re
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATASET_PATH = os.path.join(BASE_DIR, 'dataset.csv') if os.path.exists(os.path.join(BASE_DIR, 'dataset.csv')) else 'dataset.csv'
+MODELO_PATH = os.path.join(BASE_DIR, 'modelo_anjo.joblib')
+HASH_PATH = os.path.join(BASE_DIR, 'modelo_anjo.joblib.sha256')
 
 def limpar_texto(texto):
     t = str(texto).lower()
@@ -17,8 +24,8 @@ def limpar_texto(texto):
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
-print("1. Carregando o dataset de 15.000 frases e 13 classes...")
-df = pd.read_csv('dataset.csv')
+print(f"1. Carregando o dataset de 15.000 frases e 13 classes de '{DATASET_PATH}'...")
+df = pd.read_csv(DATASET_PATH)
 print(f"Total carregado: {len(df)} linhas.")
 
 # Higieniza mantendo símbolos essenciais para detecção de ofuscação
@@ -79,6 +86,18 @@ for frase, previsao, prob in zip(frases_teste, previsoes, probabilidades):
     print(f"\nMensagem: '{frase}'")
     print(f"-> Intenção: {previsao} (Certeza: {chance:.1f}%)")
 
-print("\n6. Salvando o cérebro da IA no arquivo 'modelo_anjo.joblib'...")
-joblib.dump(modelo, 'modelo_anjo.joblib')
+print(f"\n6. Salvando o cérebro da IA no arquivo '{MODELO_PATH}'...")
+joblib.dump(modelo, MODELO_PATH)
+
+print("7. Gerando hash de integridade SHA-256 (SEC-CRIT-03, SEC-MED-03)...")
+hasher = hashlib.sha256()
+with open(MODELO_PATH, 'rb') as f:
+    while chunk := f.read(65536):
+        hasher.update(chunk)
+digest = hasher.hexdigest()
+
+with open(HASH_PATH, 'w', encoding='utf-8') as f:
+    f.write(f"{digest}\n")
+
+print(f"Checksum SHA-256 gravado com sucesso em '{HASH_PATH}':\n-> {digest}")
 print("Treinamento e exportação concluídos com sucesso!")

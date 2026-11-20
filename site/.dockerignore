@@ -1,6 +1,8 @@
 node_modules
 dist
 .git
-.env
-.env.local
+.gitignore
+.env*
 *.log
+coverage
+npm-debug.log*

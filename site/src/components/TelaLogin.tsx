@@ -6,7 +6,12 @@ import {
   getFreshFirebaseIdToken,
   signOutFirebaseSilently,
 } from '../services/firebaseClient';
-import type { AuthSession, AuthViewId, SocialProvider } from '../types/auth';
+import type {
+  AuthSession,
+  AuthViewId,
+  SocialOnboardingDraft,
+  SocialProvider,
+} from '../types/auth';
 import {
   containsDangerousXss,
   MAX_LOGIN_ATTEMPTS,
@@ -15,11 +20,18 @@ import {
 import { SocialAuthGrid } from './SocialAuthGrid';
 import { SocialBirthDateModal } from './SocialBirthDateModal';
 
+function fromIsoBirthDateToBr(isoDate: string): string {
+  const parts = isoDate.trim().split('-');
+  if (parts.length !== 3) return '';
+  const [year, month, day] = parts;
+  return `${day}/${month}/${year}`;
+}
+
 interface TelaLoginProps {
   contact: string;
   onContactChange: (value: string) => void;
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
-  onAuthSuccess: (session: AuthSession) => void;
+  onAuthSuccess: (session: AuthSession, socialDraft?: SocialOnboardingDraft) => void;
 }
 
 export function TelaLogin({
@@ -30,6 +42,7 @@ export function TelaLogin({
 }: TelaLoginProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,6 +53,8 @@ export function TelaLogin({
   const [isSocialSubmitting, setIsSocialSubmitting] = useState(false);
   const [socialPendingToken, setSocialPendingToken] = useState<string | null>(null);
   const [socialProviderName, setSocialProviderName] = useState<SocialProvider | null>(null);
+  const [socialPendingFullName, setSocialPendingFullName] = useState<string | undefined>(undefined);
+  const [socialPendingPhotoUrl, setSocialPendingPhotoUrl] = useState<string | undefined>(undefined);
   const [isBirthDateModalOpen, setIsBirthDateModalOpen] = useState(false);
   const [socialModalError, setSocialModalError] = useState<string | null>(null);
 
@@ -74,15 +89,21 @@ export function TelaLogin({
       onContactChange(authResult.email);
 
       try {
-        const session = await loginWithSocial(authResult.idToken);
+        const session = await loginWithSocial(authResult.idToken, undefined, provider, rememberMe);
         await signOutFirebaseSilently();
         setFeedbackMessage(`Acesso com ${provider} autorizado! Carregando seu painel...`);
-        onAuthSuccess(session);
+        onAuthSuccess(session, {
+          fullName: authResult.fullName || undefined,
+          photoUrl: authResult.photoUrl || undefined,
+          provider,
+        });
       } catch (apiErr) {
         if (apiErr instanceof ApiError && apiErr.code === 'BIRTH_DATE_REQUIRED_FOR_NEW_OAUTH_ACCOUNT') {
           // Usuário novo autenticado no Google/Facebook que ainda não cadastrou data de nascimento (RF02)
           setSocialPendingToken(authResult.idToken);
           setSocialProviderName(provider);
+          setSocialPendingFullName(authResult.fullName || undefined);
+          setSocialPendingPhotoUrl(authResult.photoUrl || undefined);
           setSocialModalError(null);
           setIsBirthDateModalOpen(true);
           setFeedbackMessage(null);
@@ -110,12 +131,25 @@ export function TelaLogin({
 
     try {
       const freshToken = await getFreshFirebaseIdToken(socialPendingToken);
-      const session = await loginWithSocial(freshToken, isoBirthDate);
+      const session = await loginWithSocial(
+        freshToken,
+        isoBirthDate,
+        socialProviderName || undefined,
+        rememberMe
+      );
       await signOutFirebaseSilently();
+      const draft: SocialOnboardingDraft = {
+        fullName: socialPendingFullName,
+        birthDate: fromIsoBirthDateToBr(isoBirthDate),
+        photoUrl: socialPendingPhotoUrl,
+        provider: socialProviderName || undefined,
+      };
       setIsBirthDateModalOpen(false);
       setSocialPendingToken(null);
-      setFeedbackMessage('Cadastro social validado com sucesso! Entrando...');
-      onAuthSuccess(session);
+      setSocialPendingFullName(undefined);
+      setSocialPendingPhotoUrl(undefined);
+      setFeedbackMessage('Cadastro social validado com sucesso! Carregando seu perfil...');
+      onAuthSuccess(session, draft);
     } catch (err) {
       if (err instanceof ApiError) {
         setSocialModalError(err.message);
@@ -132,6 +166,8 @@ export function TelaLogin({
     setIsBirthDateModalOpen(false);
     setSocialPendingToken(null);
     setSocialProviderName(null);
+    setSocialPendingFullName(undefined);
+    setSocialPendingPhotoUrl(undefined);
     setSocialModalError(null);
   }
 
@@ -167,7 +203,7 @@ export function TelaLogin({
 
     setIsSubmitting(true);
     try {
-      const session = await loginWithEmail(trimmedEmail, password);
+      const session = await loginWithEmail(trimmedEmail, password, rememberMe);
       setFailedAttempts(0);
       setLockCountdownSeconds(0);
       setFeedbackMessage('Acesso confirmado. Carregando sua conta...');
@@ -286,6 +322,38 @@ export function TelaLogin({
               {errorMessage}
             </p>
           )}
+        </div>
+
+        <div className="form-group" style={{ marginTop: '4px', marginBottom: '16px' }}>
+          <label
+            htmlFor="login-remember-me"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '12px',
+              minHeight: '48px',
+              cursor: 'pointer',
+              fontSize: '15px',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <input
+              id="login-remember-me"
+              name="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              style={{
+                width: '22px',
+                height: '22px',
+                minWidth: '22px',
+                minHeight: '22px',
+                accentColor: 'var(--brand-primary)',
+                cursor: 'pointer',
+              }}
+            />
+            <span>Manter conectado neste dispositivo</span>
+          </label>
         </div>
 
         <button

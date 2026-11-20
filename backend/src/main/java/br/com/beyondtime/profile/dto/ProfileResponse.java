@@ -12,6 +12,7 @@ public record ProfileResponse(
         String city,
         List<String> hobbies,
         String goal,
+        String avatarUrl,
         String verificationStatus,
         boolean verifiedBadge50plus
 ) {

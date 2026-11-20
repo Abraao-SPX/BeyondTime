@@ -472,8 +472,8 @@
 }
 
 .landing-root .floating-conversation div > span {
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  font-size: 14px;
+  letter-spacing: 0.08em;
   font-weight: 600;
   color: #686957;
   display: block;
@@ -496,7 +496,7 @@
   position: absolute;
   bottom: 4%;
   right: 10%;
-  font-size: 11px;
+  font-size: 14px;
   color: #626c5b;
   letter-spacing: 0.015em;
 }
@@ -508,9 +508,9 @@
   display: flex;
   align-items: center;
   gap: 20px;
-  font-size: 9px;
+  font-size: 14px;
   font-weight: 650;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   color: #677363;
 }
 
@@ -646,8 +646,8 @@
 }
 
 .landing-root .panel-number {
-  font-size: 10px;
-  letter-spacing: 0.15em;
+  font-size: 14px;
+  letter-spacing: 0.12em;
   color: #4b5443;
   font-weight: 600;
 }
@@ -721,9 +721,9 @@
   left: 10px;
   border-radius: 3px;
   background: #fffdf0f0;
-  font-size: 8px;
+  font-size: 14px;
   padding: 4px 7px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   font-weight: 600;
 }
 
@@ -743,7 +743,7 @@
 }
 
 .landing-root .profile-summary p {
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
   margin-top: 3px;
   color: var(--muted);
@@ -765,7 +765,7 @@
   padding: 4px 8px;
   border-radius: 20px;
   background: #f0f1e7;
-  font-size: 10px;
+  font-size: 14px;
   color: #3f5844;
 }
 
@@ -1101,9 +1101,9 @@
 }
 
 .landing-root .manifesto p {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.12em;
   margin-top: 25px;
   color: #6c6554;
 }
@@ -1197,9 +1197,9 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 9px;
+  font-size: 14px;
   font-weight: 650;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   color: #d9e2c6;
 }
 
@@ -1243,7 +1243,7 @@
 
 .landing-root .launch-hint {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   color: #d0d9c6;
   margin-top: 12px;
 }
@@ -1304,8 +1304,8 @@
 }
 
 .landing-root .app-stamp > span {
-  font-size: 7px;
-  letter-spacing: 0.11em;
+  font-size: 14px;
+  letter-spacing: 0.08em;
 }
 
 .landing-root .app-stamp .icon {

@@ -10,6 +10,7 @@ import {
 interface Step2DadosPessoaisProps {
   fullName: string;
   birthDate: string;
+  birthDateAlreadyVerified?: boolean;
   onFullNameChange: (value: string) => void;
   onBirthDateChange: (value: string) => void;
   onNext: () => void;
@@ -18,6 +19,7 @@ interface Step2DadosPessoaisProps {
 export function Step2DadosPessoais({
   fullName,
   birthDate,
+  birthDateAlreadyVerified = false,
   onFullNameChange,
   onBirthDateChange,
   onNext,
@@ -58,11 +60,13 @@ export function Step2DadosPessoais({
     }
     setNameError(null);
 
-    const ageValidationError = validateBirthDate50Plus(birthDate);
-    if (ageValidationError !== null) {
-      setBirthDateError(ageValidationError);
-      birthDateInputRef.current?.focus();
-      return;
+    if (!birthDateAlreadyVerified) {
+      const ageValidationError = validateBirthDate50Plus(birthDate);
+      if (ageValidationError !== null) {
+        setBirthDateError(ageValidationError);
+        birthDateInputRef.current?.focus();
+        return;
+      }
     }
 
     setBirthDateError(null);
@@ -106,38 +110,47 @@ export function Step2DadosPessoais({
           )}
         </div>
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="step2-birthdate">
-            Data de nascimento
-          </label>
-          <input
-            ref={birthDateInputRef}
-            id="step2-birthdate"
-            name="birthDate"
-            type="text"
-            inputMode="numeric"
-            maxLength={10}
-            className="form-input"
-            autoComplete="bday"
-            placeholder="DD/MM/AAAA"
-            value={birthDate}
-            onChange={(event) => {
-              onBirthDateChange(formatBirthDateInput(event.target.value));
-              if (birthDateError !== null) setBirthDateError(null);
-            }}
-            aria-invalid={birthDateError !== null ? 'true' : undefined}
-            aria-describedby="step2-birthdate-error"
-          />
-          {birthDateError !== null && (
-            <div
-              id="step2-birthdate-error"
-              className="callout-danger-amber"
-              role="alert"
-            >
-              {birthDateError}
-            </div>
-          )}
-        </div>
+        {birthDateAlreadyVerified ? (
+          <div className="callout-amber-lgpd" role="status">
+            <p className="callout-amber-lgpd__text">
+              <strong>Elegibilidade 50+ já confirmada</strong>
+              {birthDate ? ` (${birthDate})` : ''}. Você não precisa informar sua data de nascimento novamente.
+            </p>
+          </div>
+        ) : (
+          <div className="form-group">
+            <label className="form-label" htmlFor="step2-birthdate">
+              Data de nascimento
+            </label>
+            <input
+              ref={birthDateInputRef}
+              id="step2-birthdate"
+              name="birthDate"
+              type="text"
+              inputMode="numeric"
+              maxLength={10}
+              className="form-input"
+              autoComplete="bday"
+              placeholder="DD/MM/AAAA"
+              value={birthDate}
+              onChange={(event) => {
+                onBirthDateChange(formatBirthDateInput(event.target.value));
+                if (birthDateError !== null) setBirthDateError(null);
+              }}
+              aria-invalid={birthDateError !== null ? 'true' : undefined}
+              aria-describedby="step2-birthdate-error"
+            />
+            {birthDateError !== null && (
+              <div
+                id="step2-birthdate-error"
+                className="callout-danger-amber"
+                role="alert"
+              >
+                {birthDateError}
+              </div>
+            )}
+          </div>
+        )}
 
         <button type="submit" className="btn btn--primary">
           Avançar

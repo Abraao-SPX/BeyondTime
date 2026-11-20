@@ -12,6 +12,7 @@ interface Step7SenhaLgpdProps {
   isCompleted: boolean;
   isSubmitting?: boolean;
   isSocialAccount?: boolean;
+  isEditMode?: boolean;
   socialProvider?: SocialProvider | null;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
@@ -71,6 +72,7 @@ export function Step7SenhaLgpd({
   isCompleted,
   isSubmitting = false,
   isSocialAccount = false,
+  isEditMode = false,
   socialProvider = null,
   onPasswordChange,
   onConfirmPasswordChange,
@@ -98,7 +100,7 @@ export function Step7SenhaLgpd({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!isSocialAccount || formData.password.length > 0 || formData.confirmPassword.length > 0) {
+    if (!isEditMode && (!isSocialAccount || formData.password.length > 0 || formData.confirmPassword.length > 0)) {
       const passwordError = validatePasswordMatch(
         formData.password,
         formData.confirmPassword
@@ -151,10 +153,12 @@ export function Step7SenhaLgpd({
           <p>
             <strong>Nome:</strong> {formData.fullName || 'Não informado'}
           </p>
-          <p>
-            <strong>Idade:</strong>{' '}
-            {calculatedAge !== null ? `${calculatedAge} anos` : formData.birthDate}
-          </p>
+          {(calculatedAge !== null || formData.birthDate) && (
+            <p>
+              <strong>Idade:</strong>{' '}
+              {calculatedAge !== null ? `${calculatedAge} anos` : formData.birthDate}
+            </p>
+          )}
           <p>
             <strong>Cidade:</strong> {formData.city}
           </p>
@@ -194,84 +198,94 @@ export function Step7SenhaLgpd({
         </p>
       )}
       <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-        {isSocialAccount ? 'Conclua seu cadastro 50+' : 'Crie sua senha de acesso'}
+        {isEditMode
+          ? 'Revisar e salvar alterações'
+          : isSocialAccount
+            ? 'Conclua seu cadastro 50+'
+            : 'Crie sua senha de acesso'}
       </h1>
       <p className="auth-card__subtitle">
-        {isSocialAccount
-          ? 'Confirme o aceite dos termos para finalizar seu cadastro seguro no BeyondTime. A criação de senha local é opcional.'
-          : 'Escolha uma senha segura para proteger sua conta.'}
+        {isEditMode
+          ? 'Confira o aceite de privacidade e clique abaixo para atualizar seu perfil, foto e hobbies no servidor.'
+          : isSocialAccount
+            ? 'Confirme o aceite dos termos para finalizar seu cadastro seguro no BeyondTime. A criação de senha local é opcional.'
+            : 'Escolha uma senha segura para proteger sua conta.'}
       </p>
 
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
-        <div className="form-group">
-          <label className="form-label" htmlFor="step7-password">
-            {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
-          </label>
-          <div className="password-row">
-            <input
-              ref={passwordInputRef}
-              id="step7-password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              className="form-input form-input--password"
-              autoComplete="new-password"
-              placeholder="Digite sua senha"
-              value={formData.password}
-              onChange={(event) => {
-                onPasswordChange(event.target.value);
-                if (formError !== null) setFormError(null);
-              }}
-              aria-describedby="step7-password-help"
-            />
-            <button
-              type="button"
-              className="btn-eye"
-              aria-label="Mostrar ou ocultar senha"
-              aria-pressed={showPassword}
-              onClick={() => setShowPassword((prev) => !prev)}
-            >
-              <EyeIcon visible={showPassword} />
-            </button>
-          </div>
-          <p id="step7-password-help" className="form-helper">
-            Mínimo de {MIN_PASSWORD_LENGTH} caracteres, com letra maiúscula, minúscula, número e caractere especial (ex.: . , @ ! #).
-          </p>
-        </div>
+        {!isEditMode && (
+          <>
+            <div className="form-group">
+              <label className="form-label" htmlFor="step7-password">
+                {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
+              </label>
+              <div className="password-row">
+                <input
+                  ref={passwordInputRef}
+                  id="step7-password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="form-input form-input--password"
+                  autoComplete="new-password"
+                  placeholder="Digite sua senha"
+                  value={formData.password}
+                  onChange={(event) => {
+                    onPasswordChange(event.target.value);
+                    if (formError !== null) setFormError(null);
+                  }}
+                  aria-describedby="step7-password-help"
+                />
+                <button
+                  type="button"
+                  className="btn-eye"
+                  aria-label="Mostrar ou ocultar senha"
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                >
+                  <EyeIcon visible={showPassword} />
+                </button>
+              </div>
+              <p id="step7-password-help" className="form-helper">
+                Mínimo de {MIN_PASSWORD_LENGTH} caracteres, com letra maiúscula, minúscula, número e caractere especial (ex.: . , @ ! #).
+              </p>
+            </div>
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="step7-confirm-password">
-            Confirmar senha
-          </label>
-          <div className="password-row">
-            <input
-              id="step7-confirm-password"
-              name="confirmPassword"
-              type={showConfirm ? 'text' : 'password'}
-              className="form-input form-input--password"
-              autoComplete="new-password"
-              placeholder="Digite a senha novamente"
-              value={formData.confirmPassword}
-              onChange={(event) => {
-                onConfirmPasswordChange(event.target.value);
-                if (formError !== null) setFormError(null);
-              }}
-            />
-            <button
-              type="button"
-              className="btn-eye"
-              aria-label="Mostrar ou ocultar confirmação de senha"
-              aria-pressed={showConfirm}
-              onClick={() => setShowConfirm((prev) => !prev)}
-            >
-              <EyeIcon visible={showConfirm} />
-            </button>
-          </div>
-          {passwordsMatch && (
-            <p className="password-match" aria-live="polite">
-              As senhas coincidem
-            </p>
-          )}
-        </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="step7-confirm-password">
+                Confirmar senha
+              </label>
+              <div className="password-row">
+                <input
+                  id="step7-confirm-password"
+                  name="confirmPassword"
+                  type={showConfirm ? 'text' : 'password'}
+                  className="form-input form-input--password"
+                  autoComplete="new-password"
+                  placeholder="Digite a senha novamente"
+                  value={formData.confirmPassword}
+                  onChange={(event) => {
+                    onConfirmPasswordChange(event.target.value);
+                    if (formError !== null) setFormError(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn-eye"
+                  aria-label="Mostrar ou ocultar confirmação de senha"
+                  aria-pressed={showConfirm}
+                  onClick={() => setShowConfirm((prev) => !prev)}
+                >
+                  <EyeIcon visible={showConfirm} />
+                </button>
+              </div>
+              {passwordsMatch && (
+                <p className="password-match" aria-live="polite">
+                  As senhas coincidem
+                </p>
+              )}
+            </div>
+          </>
+        )}
 
         <div className="lgpd-consent">
           <label className="lgpd-checkbox-row" htmlFor="step7-lgpd">
@@ -358,7 +372,11 @@ export function Step7SenhaLgpd({
           disabled={isSubmitting}
           aria-busy={isSubmitting}
         >
-          {isSubmitting ? 'Salvando seu cadastro...' : 'Concluir cadastro'}
+          {isSubmitting
+            ? 'Salvando no servidor...'
+            : isEditMode
+              ? 'Salvar alterações do perfil'
+              : 'Concluir cadastro'}
         </button>
       </form>
     </div>

@@ -1368,4 +1368,271 @@ button {
   align-items: center;
   gap: 10px;
 }
+
+/* ==========================================================================
+   SEC-MED-08: Painel de Acessibilidade Dinâmica (RF-09) & Temas 50+
+   ========================================================================== */
+
+/* Modo de Alto Contraste (WCAG AAA - Catarata e Baixa Visão) */
+html.high-contrast-mode,
+.high-contrast-mode {
+  --bg-page: #000000 !important;
+  --bg-surface: #000000 !important;
+  --bg-surface-hover: #1A1A1A !important;
+  --bg-input: #000000 !important;
+  --bg-callout-amber: #1A1A00 !important;
+  --bg-overlay: rgba(0, 0, 0, 0.95) !important;
+
+  --text-primary: #FFFF00 !important;
+  --text-secondary: #FFFFFF !important;
+  --text-muted: #FFFF00 !important;
+  --text-on-brand: #000000 !important;
+
+  --brand-primary: #FFFF00 !important;
+  --brand-primary-hover: #FFFFAA !important;
+  --danger-text: #FF5555 !important;
+
+  --border-header: #FFFFFF !important;
+  --border-card: #FFFFFF !important;
+  --border-input: #FFFFFF !important;
+  --border-input-strong: #FFFF00 !important;
+  --border-secondary: #FFFFFF !important;
+  --border-secondary-strong: #FFFF00 !important;
+  --border-amber: #FFFF00 !important;
+  --border-strong: #FFFFFF !important;
+}
+
+html.high-contrast-mode body,
+html.high-contrast-mode .auth-card,
+html.high-contrast-mode .site-header,
+html.high-contrast-mode .landing-root {
+  background-color: #000000 !important;
+  color: #FFFF00 !important;
+}
+
+html.high-contrast-mode .btn--primary {
+  background-color: #FFFF00 !important;
+  color: #000000 !important;
+  border: 3px solid #FFFFFF !important;
+  font-weight: 800 !important;
+}
+
+html.high-contrast-mode .btn--secondary,
+html.high-contrast-mode .btn--back,
+html.high-contrast-mode .form-input {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+  border: 2px solid #FFFFFF !important;
+}
+
+html.high-contrast-mode a {
+  color: #00FFFF !important;
+  text-decoration: underline !important;
+}
+
+/* Modo Noturno (Dark Mode) */
+html.dark-mode:not(.high-contrast-mode),
+.dark-mode:not(.high-contrast-mode) {
+  --bg-page: #121212 !important;
+  --bg-surface: #1E1E1E !important;
+  --bg-surface-hover: #2A2A2A !important;
+  --bg-input: #1E1E1E !important;
+  --bg-callout-amber: #332608 !important;
+  --bg-overlay: rgba(0, 0, 0, 0.85) !important;
+
+  --text-primary: #F3F4F6 !important;
+  --text-secondary: #E5E7EB !important;
+  --text-muted: #9CA3AF !important;
+  --text-on-brand: #FFFFFF !important;
+
+  --brand-primary: #A31C28 !important;
+  --brand-primary-hover: #BD2A37 !important;
+  --danger-text: #F87171 !important;
+
+  --border-header: #374151 !important;
+  --border-card: #374151 !important;
+  --border-input: #4B5563 !important;
+  --border-input-strong: #9CA3AF !important;
+  --border-secondary: #4B5563 !important;
+  --border-secondary-strong: #6B7280 !important;
+  --border-amber: #D97706 !important;
+  --border-strong: #F3F4F6 !important;
+}
+
+html.dark-mode:not(.high-contrast-mode) body,
+html.dark-mode:not(.high-contrast-mode) .auth-card,
+html.dark-mode:not(.high-contrast-mode) .site-header,
+html.dark-mode:not(.high-contrast-mode) .landing-root {
+  background-color: #121212 !important;
+  color: #F3F4F6 !important;
+}
+
+/* Botão Flutuante de Acessibilidade 50+ (RF-06 e RF-09) */
+.accessibility-floating-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9990;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 10px 18px;
+  background-color: var(--brand-primary);
+  color: var(--text-on-brand);
+  border: 2px solid #FFFFFF;
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.accessibility-floating-btn:hover {
+  transform: translateY(-2px);
+  background-color: var(--brand-primary-hover);
+}
+
+.accessibility-floating-btn:focus-visible {
+  outline: 3px solid #FFFF00;
+  outline-offset: 3px;
+}
+
+/* Modal do Painel de Acessibilidade */
+.accessibility-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  backdrop-filter: blur(3px);
+}
+
+.accessibility-modal-card {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  border: 2px solid var(--border-card);
+  border-radius: var(--radius-card);
+  max-width: 540px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.accessibility-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-card);
+  padding-bottom: 16px;
+}
+
+.accessibility-modal-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.accessibility-btn-close {
+  min-height: 48px;
+  min-width: 48px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 2px solid var(--border-secondary);
+  border-radius: var(--radius-control);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.accessibility-section {
+  margin-bottom: 22px;
+}
+
+.accessibility-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+
+.accessibility-stepper-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.accessibility-stepper-btn {
+  min-height: 48px;
+  min-width: 48px;
+  padding: 10px 16px;
+  border: 2px solid var(--border-card);
+  border-radius: var(--radius-control);
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.accessibility-stepper-btn--active {
+  background-color: var(--brand-primary);
+  color: var(--text-on-brand);
+  border-color: var(--brand-primary);
+}
+
+.accessibility-toggle-btn {
+  min-height: 48px;
+  width: 100%;
+  padding: 12px 18px;
+  border: 2px solid var(--border-card);
+  border-radius: var(--radius-control);
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.accessibility-toggle-btn--active {
+  border-color: var(--brand-primary);
+  background-color: var(--bg-surface-hover);
+}
+
+.accessibility-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.accessibility-badge--on {
+  background-color: #15803D;
+  color: #FFFFFF;
+}
+
+.accessibility-badge--off {
+  background-color: var(--border-secondary);
+  color: var(--text-muted);
 }

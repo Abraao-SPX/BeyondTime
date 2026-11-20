@@ -32,6 +32,15 @@ export interface AuthSession {
   userId: string;
   email: string;
   role: string;
+  authProvider?: 'email' | 'google' | 'facebook' | 'social';
+  rememberMe?: boolean;
+}
+
+export interface SocialOnboardingDraft {
+  fullName?: string;
+  birthDate?: string; // DD/MM/YYYY
+  photoUrl?: string;
+  provider?: SocialProvider;
 }
 
 export interface CityOption {
