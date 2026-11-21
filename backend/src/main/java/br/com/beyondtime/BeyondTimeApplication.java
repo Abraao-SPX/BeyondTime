@@ -2,10 +2,11 @@ package br.com.beyondtime;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@SpringBootApplication
+@SpringBootApplication(exclude = {UserDetailsServiceAutoConfiguration.class})
 @RestController
 public class BeyondTimeApplication {
 
@@ -19,4 +20,3 @@ public class BeyondTimeApplication {
         return "BeyondTime API (Monolito Modular) está online e pronta!";
     }
 }
-

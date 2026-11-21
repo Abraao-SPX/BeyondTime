@@ -17,4 +17,6 @@ public interface CityRepository extends JpaRepository<City, Integer> {
 
     @EntityGraph(attributePaths = "state")
     Optional<City> findWithStateById(Integer id);
+
+    Optional<City> findFirstByNameIgnoreCase(String name);
 }
