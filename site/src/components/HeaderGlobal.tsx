@@ -4,11 +4,21 @@ import type { AuthViewId } from '../types/auth';
 
 interface HeaderGlobalProps {
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
+  onBackToLanding?: () => void;
+  onToggleAccessibility?: () => void;
 }
 
-export function HeaderGlobal({ onNavigate }: HeaderGlobalProps) {
+export function HeaderGlobal({
+  onNavigate,
+  onBackToLanding,
+  onToggleAccessibility,
+}: HeaderGlobalProps) {
   function handleBrandClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
+    if (onBackToLanding) {
+      onBackToLanding();
+      return;
+    }
     onNavigate('login', event.currentTarget);
   }
 
@@ -17,9 +27,9 @@ export function HeaderGlobal({ onNavigate }: HeaderGlobalProps) {
       <div className="site-header__inner">
         <a
           className="brand"
-          href="#view-login"
+          href="#inicio"
           onClick={handleBrandClick}
-          aria-label="BeyondTime, voltar para a tela de entrada"
+          aria-label="BeyondTime, voltar para a página inicial"
         >
           <img
             className="brand__logo"
@@ -30,7 +40,38 @@ export function HeaderGlobal({ onNavigate }: HeaderGlobalProps) {
           />
           <span className="brand__name">BeyondTime</span>
         </a>
-        <p className="site-header__tagline">Um novo tempo para se conectar.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <p className="site-header__tagline">Um novo tempo para se conectar.</p>
+          {onToggleAccessibility && (
+            <button
+              type="button"
+              className="btn--secondary"
+              style={{
+                marginBottom: 0,
+                minHeight: '48px',
+                padding: '8px 16px',
+                fontSize: '15px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+              onClick={onToggleAccessibility}
+              aria-label="Abrir Painel de Acessibilidade Dinâmica (RF-09)"
+            >
+              <span aria-hidden="true">👁️</span> Acessibilidade (RF09)
+            </button>
+          )}
+          {onBackToLanding && (
+            <button
+              type="button"
+              className="btn--back"
+              style={{ marginBottom: 0, padding: '8px 14px', fontSize: '15px' }}
+              onClick={onBackToLanding}
+            >
+              ← Página inicial
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );
