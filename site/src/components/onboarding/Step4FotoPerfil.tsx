@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { validateAndReadPhotoFile } from '../../services/profileStorage';
+import { resizeAndPrepareAvatarFile } from '../../services/profileStorage';
 
 interface Step4FotoPerfilProps {
   photoPreviewUrl: string | null;
   photoFileName: string | null;
-  onPhotoSelect: (previewUrl: string | null, fileName: string | null) => void;
+  onPhotoSelect: (previewUrl: string | null, fileName: string | null, file: File | null) => void;
   onNext: () => void;
 }
 
@@ -16,6 +16,7 @@ export function Step4FotoPerfil({
   onNext,
 }: Step4FotoPerfilProps) {
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -27,22 +28,25 @@ export function Step4FotoPerfil({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setIsProcessingPhoto(true);
     try {
-      const result = await validateAndReadPhotoFile(file);
+      const result = await resizeAndPrepareAvatarFile(file);
       setPhotoError(null);
-      onPhotoSelect(result.dataUrl, result.fileName);
+      onPhotoSelect(result.dataUrl, result.fileName, result.file);
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : 'Não foi possível validar a imagem selecionada.';
       setPhotoError(message);
+    } finally {
+      setIsProcessingPhoto(false);
     }
   }
 
   function handleSkipPhoto() {
     setPhotoError(null);
-    onPhotoSelect(null, null);
+    onPhotoSelect(null, null, null);
     onNext();
   }
 
@@ -91,6 +95,7 @@ export function Step4FotoPerfil({
       <button
         type="button"
         className="btn btn--upload"
+        disabled={isProcessingPhoto}
         onClick={() => fileInputRef.current?.click()}
       >
         <svg
@@ -106,7 +111,9 @@ export function Step4FotoPerfil({
           <path d="M4 8h3l2-3h6l2 3h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />
           <circle cx="12" cy="14" r="3.5" />
         </svg>
-        <span>Selecionar foto do computador</span>
+        <span>
+          {isProcessingPhoto ? 'Otimizando imagem...' : 'Selecionar foto do dispositivo'}
+        </span>
       </button>
 
       {photoFileName !== null && photoError === null && (

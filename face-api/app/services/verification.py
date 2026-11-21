@@ -94,11 +94,11 @@ class VerificationPipeline:
         
         t2 = time.time()
         
-        # 3. Verificação de Liveness (Anti-Spoofing MiniFASNet)
+        # 3. Verificação de Liveness (Anti-Spoofing MiniFASNet) — Fail-Closed
         liveness_result = self.liveness_service.check_liveness(selfie_img, selfie_face)
-        if liveness_result.available and not liveness_result.passed:
+        if not liveness_result.available or not liveness_result.passed:
             return VerifyResponse(
-                status="LIVENESS_FAILED",
+                status="FAILED",
                 face_detected=True,
                 similarity_score=None,
                 face_match_threshold=settings.FACE_MATCH_THRESHOLD,
@@ -125,8 +125,12 @@ class VerificationPipeline:
         recognition_time = (t4 - t3) * 1000
         total_time = (t4 - t0) * 1000
         
-        # Determinar match
-        is_match = bool(score >= settings.FACE_MATCH_THRESHOLD)
+        # Determinar match (garantindo Fail-Closed para liveness)
+        is_match = bool(
+            score >= settings.FACE_MATCH_THRESHOLD
+            and liveness_result.available
+            and liveness_result.passed
+        )
         status = "VERIFIED" if is_match else "NOT_MATCH"
         
         # Gravar métricas em CSV de resultados

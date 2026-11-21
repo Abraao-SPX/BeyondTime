@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { fetchSergipeCities } from '../../services/apiClient';
 
-const SERGIPE_CITIES = [
+const FALLBACK_SERGIPE_CITIES = [
   'Aracaju (SE)',
   'Nossa Senhora do Socorro (SE)',
   'São Cristóvão (SE)',
@@ -9,7 +10,7 @@ const SERGIPE_CITIES = [
   'Lagarto (SE)',
   'Itabaiana (SE)',
   'Estância (SE)',
-  "Itaporanga d'Ajuda (SE)",
+  'Propriá (SE)',
 ] as const;
 
 interface Step3LocalizacaoProps {
@@ -23,10 +24,27 @@ export function Step3Localizacao({
   onCityChange,
   onNext,
 }: Step3LocalizacaoProps) {
+  const [cities, setCities] = useState<string[]>([...FALLBACK_SERGIPE_CITIES]);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     headingRef.current?.focus();
+    let active = true;
+    fetchSergipeCities()
+      .then((list) => {
+        if (!active || list.length === 0) return;
+        const formatted = list.map((c) => `${c.name} (SE)`);
+        setCities(formatted);
+        if (!formatted.includes(city)) {
+          onCityChange(formatted[0]);
+        }
+      })
+      .catch(() => {
+        // Mantém fallback local caso o backend esteja indisponível
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -55,7 +73,7 @@ export function Step3Localizacao({
             value={city}
             onChange={(event) => onCityChange(event.target.value)}
           >
-            {SERGIPE_CITIES.map((cityName) => (
+            {cities.map((cityName) => (
               <option key={cityName} value={cityName}>
                 {cityName}
               </option>

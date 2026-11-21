@@ -2,14 +2,17 @@ import type { SocialProvider } from '../types/auth';
 
 interface SocialAuthGridProps {
   onSelectProvider: (provider: SocialProvider) => void;
+  disabled?: boolean;
 }
 
-export function SocialAuthGrid({ onSelectProvider }: SocialAuthGridProps) {
+export function SocialAuthGrid({ onSelectProvider, disabled = false }: SocialAuthGridProps) {
   return (
     <div className="social-grid">
       <button
         type="button"
         className="btn-social"
+        disabled={disabled}
+        aria-busy={disabled}
         onClick={() => onSelectProvider('Google')}
       >
         <svg className="btn-social__icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -36,6 +39,8 @@ export function SocialAuthGrid({ onSelectProvider }: SocialAuthGridProps) {
       <button
         type="button"
         className="btn-social"
+        disabled={disabled}
+        aria-busy={disabled}
         onClick={() => onSelectProvider('Facebook')}
       >
         <svg className="btn-social__icon" viewBox="0 0 24 24" aria-hidden="true">

@@ -1,73 +1,124 @@
-# BeyondTime — Governança Front-End, UX Defensiva ([RF-06]) e Clean Code
+---
+name: beyondtime-git-flow
+description: >-
+  Guia normativo e automatizado para criação correta de branches, padronização de commits (Conventional Commits),
+  gestão ágil no Kanban e abertura de Pull Requests no projeto BeyondTime (Edital nº 02/2026 - UNINASSAU Aracaju).
+  Use esta skill sempre que qualquer integrante da equipe for criar branches, commitar código, vincular Issues ou abrir PRs.
+---
 
-## 1. Rastreabilidade e Contexto
-- **Requisito:** `[RF-06]` — UX Defensiva e Ergonomia 50+ (WCAG 2.1 AAA)
-- **Release / Onda:** `Onda 2 (MVP)`
-- **Módulo Técnico:** `UI Components`
-- **Alvo de Produção:** `BeyondTime/site/`
+# 🚀 BeyondTime — Skill Oficial de Commits, GitFlow e Kanban
+
+Esta skill padroniza o fluxo de trabalho de versionamento no repositório do **BeyondTime**, garantindo cumprimento estrito da **Política de Governança, Gestão de Código e Fidelidade ao Planejamento v1.0** e da **Matriz de Rastreabilidade (RF01 a RF14)** exigidas no Edital nº 02/2026 da UNINASSAU Aracaju.
 
 ---
 
-## 2. Git Flow e Governança de Commits (Tabela 1)
-- **Branch de Trabalho:** `feature/rf-06-ux-defensiva`, criada exclusivamente a partir de `develop`:
-  ```bash
-  git checkout develop
-  git pull origin develop
-  git checkout -b feature/rf-06-ux-defensiva
-  ```
-- **Trava Git e Regra de Merge:** É proibido realizar commit, push ou merge direto em `main` ou `develop`. A integração na `develop` ocorre exclusivamente via **Pull Request (PR)** aprovado por **Peer Review**, validando os critérios de aceite do `[RF-06]`.
-- **Padrão de Commits Obrigatório (com tag `[RF-06]`):**
-  - `docs(rf-06): [RF-06] adiciona SKILL.md com governanca de UX defensiva e GitFlow`
-  - `feat(rf-06): [RF-06] estrutura React 18 + Vite com design tokens 50+ WCAG AAA`
-  - `feat(rf-06): [RF-06] implementa componentes TelaLogin, CriarMinhaConta e RecuperarSenha`
-  - `feat(rf-06): [RF-06] implementa modal de confirmacao dupla com temporizador defensivo de 3s`
+## 🎯 Regras de Ouro (Invioláveis)
+
+1. **`main` é SAGRADA:** Apenas código estável de releases homologadas. **PROIBIDO commit ou push direto.**
+2. **`develop` é o tronco de integração:** Toda feature deve nascer e ser mesclada na `develop` via Pull Request (PR) com revisão.
+3. **Nomenclatura Obrigatória de Branch:** Toda branch de trabalho **DEVE** conter o código do Requisito Funcional:
+   - Formato: `feature/rf-XX-<descricao-curta>` ou `bugfix/rf-XX-<descricao-curta>`
+   - Exemplo: `feature/rf-01-autenticacao-jwt`, `feature/rf-06-ux-defensiva`.
+4. **Padrão Obrigatório de Commit (Conventional Commits):**
+   - Formato: `<tipo>(<escopo>): <descrição em tom imperativo>`
+   - Exemplo: `feat(rf-01): implementa autenticacao jwt e refresh token`
+5. **Vínculo com o Kanban (GitHub Projects):**
+   - Todo cartão/issue no Kanban possui a tag `[RF-XX]`.
+   - Limite de WIP: **Máximo de 2 tarefas simultâneas** por desenvolvedor na raia *In Progress*.
 
 ---
 
-## 3. Arquitetura do Monorepo e Stack Homologada
-- **Escopo Permitido:** `BeyondTime/site/`
-- **Diretórios Protegidos (proibido modificar nesta entrega):** `backend/`, `ml-antifraude/`, `Reconhecimeto_Facil/`, `mobile/`.
-- **Stack Web Homologada (Roadmap & Política de Governança):**
-  - **React 18 + Vite + TypeScript** (`src/components/`, `src/styles.css`, `src/App.tsx`, `src/main.tsx`).
-  - **Infraestrutura Docker Preservada:** `Dockerfile` com build multi-stage (`node:20-alpine` -> `nginx:stable-alpine`), preservando `compose.yml`, `nginx.conf` e todos os SVGs em `assets/`.
-- **Componentização Obrigatória (`src/components/`):**
-  - `HeaderGlobal.tsx`
-  - `FooterGlobal.tsx`
-  - `TelaLogin.tsx`
-  - `CriarMinhaConta.tsx`
-  - `RecuperarSenha.tsx`
-  - `DefensiveModalRF06.tsx`
+## 🧭 Passo a Passo do Desenvolvedor (Do Início ao Merge)
+
+### 1️⃣ Antes de Começar
+1. Acesse o quadro **Gestão Ágil (GitHub Projects)**.
+2. Escolha o cartão da funcionalidade em `Todo` (ex: `[RF-06] UX Defensiva 50+`).
+3. Mova o cartão para **`In Progress`** e atribua a você (respeitando o limite de máx. 2 tarefas).
+4. No terminal ou GitHub Desktop, atualize sua base local a partir da `develop`:
+   ```bash
+   git checkout develop
+   git pull origin develop
+   ```
+
+### 2️⃣ Criar a Branch da Feature
+Crie a branch sempre a partir da `develop` atualizada:
+```bash
+git checkout -b feature/rf-XX-nome-da-tarefa
+# Exemplo real:
+git checkout -b feature/rf-06-ux-defensiva
+```
 
 ---
 
-## 4. Regras de Clean Code e Acessibilidade (WCAG 2.1 AAA)
-- **HTML Semântico em JSX:** `<header>`, `<main>`, `<section>`, `<form>`, `<dialog>` e `<footer>`.
-- **Zero CSS inline** (`style={{...}}`) e **zero handlers globais**.
-- **Formulários Acessíveis:** Todo `<input>` associado explicitamente ao `<label htmlFor="...">`, com `aria-invalid` e `aria-describedby` vinculados ao erro inline (`role="alert"`).
-- **CSS Modular (`src/styles.css`):** Design Tokens semânticos em `:root`, nomenclatura BEM, `box-sizing: border-box` universal e `width: 100%` nos grupos de formulário e inputs.
-- **TypeScript Limpo:** Tipagem estrita, funções puras com Responsabilidade Única (SRP), limpeza adequada de timers (`clearInterval` no `useEffect`) e ausência de `console.log` ou `dangerouslySetInnerHTML`.
+## ✍️ Guia de Commits (Conventional Commits)
+
+### Estrutura
+```text
+<tipo>(<escopo-rf>): <mensagem curta no imperativo>
+```
+
+### Tipos Permitidos:
+- **`feat`**: Nova funcionalidade ou requisito de negócio.
+  - Ex: `feat(rf-06): adiciona modal de confirmacao dupla em acoes de curtida`
+  - Ex: `feat(rf-01): implementa login social via google oauth2`
+- **`fix`**: Correção de bug no código existente.
+  - Ex: `fix(rf-01): corrige expiracao incorreta de refresh token jwt`
+  - Ex: `fix(rf-06): ajusta tamanho minimo de toque para 48x48dp no botao voltar`
+- **`docs`**: Alterações em documentações técnicas, markdown ou PDFs acadêmicos.
+  - Ex: `docs(rf-10): atualiza especificacao de fallback local no roadmap`
+- **`style`**: Ajustes de layout, CSS/Tailwind, alto contraste ou formatação sem alterar regras de negócio.
+  - Ex: `style(rf-09): aplica paleta de alto contraste wcag aaa no tema escuro`
+- **`refactor`**: Refatoração estrutural de código sem alterar funcionalidade ou criar novo requisito.
+  - Ex: `refactor(rf-05): otimiza calculo de similaridade de matriz de hobbies`
+- **`chore`**: Tarefas de manutenção, build, dependências ou docker.
+  - Ex: `chore(docker): atualiza compose com variaveis de ambiente seguras`
+
+### Boas Práticas de Mensagem:
+- ✅ **Certo:** `feat(rf-02): valida bloqueio automatico de cadastro para menores de 50 anos`
+- ❌ **Errado:** `subindo alteracoes`, `ajustes`, `codigo pronto`, `feat: perfil`.
 
 ---
 
-## 5. UX Defensiva ([RF-06]) e Temporizador de 3 Segundos
-- **Alvos de Toque (`>= 48x48dp`):** Todos os controles interativos possuem altura mínima de `48px` (`52px`–`54px` em inputs e CTAs) e espaçamento de `12px`–`14px`.
-- **Confirmação em Duas Etapas com Temporizador Defensivo (Onda 2 do Roadmap):**
-  - Ao tentar navegar ou acionar `< Voltar ao login` com dados digitados no formulário, o `DefensiveModalRF06` é aberto via `showModal()`.
-  - Bloqueio total de fechamento acidental: sem botão `"X"`, sem fechamento por clique no backdrop e sem fechamento pela tecla `ESC`.
-  - **Botão Seguro Padrão:** `"Continuar preenchendo meu cadastro"` permanece habilitado e recebe foco automático imediato (`t = 0`).
-  - **Botão Destrutivo com Temporizador de 3s:** `"Sim, voltar e apagar dados"` inicia `disabled` por **3 segundos** com contagem regressiva visível no próprio rótulo (`"Aguarde 3s para confirmar descarte..."` -> `"Aguarde 2s para confirmar descarte..."` -> `"Aguarde 1s para confirmar descarte..."`), habilitando `"Sim, voltar e apagar dados"` somente após zerar o temporizador.
+## 🗺️ Tabela Rápida de Rastreabilidade (RF01 a RF14)
+
+Consulte o código correto para usar na branch e no commit:
+
+| Código | Requisito Oficial | Exemplo de Branch | Exemplo de Commit |
+| :---: | :--- | :--- | :--- |
+| **RF01** | Autenticação JWT / OAuth2 Google e Logout | `feature/rf-01-auth-jwt` | `feat(rf-01): implementa login google e emissao jwt` |
+| **RF02** | Cadastro/Edição de Perfil 50+ | `feature/rf-02-perfil-50plus` | `feat(rf-02): implementa bloqueio para idade menor que 50` |
+| **RF03** | Taxonomia de Hobbies (mín 3 e máx 10) | `feature/rf-03-taxonomia-hobbies` | `feat(rf-03): cria catalogo visual com limite de 10 hobbies` |
+| **RF04** | Banco Relacional Normalizado (3FN a 5FN) | `feature/rf-04-persistencia-3fn` | `feat(rf-04): adiciona migrations flyway do schema 5fn` |
+| **RF05** | Match por Afinidade e Proximidade em Sergipe | `feature/rf-05-match-afinidade` | `feat(rf-05): calcula compatibilidade ordenando feed por score` |
+| **RF06** | UX Defensiva 50+ (Toque $\ge 48\text{dp}$ e Confirmação Dupla) | `feature/rf-06-ux-defensiva` | `feat(rf-06): cria confirmacao dupla para desinteresse` |
+| **RF07** | Chat Simplificado em Tempo Real (STOMP) | `feature/rf-07-chat-stomp` | `feat(rf-07): integra mensageria websocket com latencia sub-100ms` |
+| **RF08** | Bloqueio e Desbloqueio Instantâneo | `feature/rf-08-bloqueio-contatos` | `feat(rf-08): implementa ocultacao mutua imediata de contatos` |
+| **RF09** | Painel de Acessibilidade (Fonte 100-160% e WCAG AAA) | `feature/rf-09-acessibilidade` | `feat(rf-09): adiciona seletor dinamico de escala de fonte` |
+| **RF10** | Assistente Quebra-Gelo (`BeyondAssistant` / Fallback) | `feature/rf-10-assistente-ia` | `feat(rf-10): integra spring ai com fallback local de 50ms` |
+| **RF11** | Biometria Facial e Selo de Verificado 50+ | `feature/rf-11-biometria-facial` | `feat(rf-11): concede selo verificado apos prova de vida` |
+| **RF12** | Denúncia Rápida e Congelamento Cautelar | `feature/rf-12-denuncia-moderacao` | `feat(rf-12): aciona suspensao preventiva e chamado de auditoria` |
+| **RF13** | Portal de Privacidade LGPD (Exportação JSON) | `feature/rf-13-exportacao-lgpd` | `feat(rf-13): disponibiliza download completo de dados em json` |
+| **RF14** | Exclusão Definitiva de Conta e Dados (48h) | `feature/rf-14-exclusao-conta` | `feat(rf-14): programa delecao logica e fisica em ate 48h` |
 
 ---
 
-## 6. Fluxo de Onboarding 50+ (Passos 1 a 7 — `[RF-01]`, `[RF-02]`, `[RF-03]`, `[RF-05]`, `[RF-06]`)
-- **Persistência Validada (`[RF-02]` — `src/services/profileStorage.ts`):** Serviço puro que valida idade mínima (`MIN_ALLOWED_AGE = 50`) e foto Base64 (`image/jpeg`, `image/png`, `image/webp` até `2 MB`), persistindo e recuperando o perfil (`beyondtime_user_profile_v1`) para criação e edição.
-- **Catálogo Master Data (`[RF-03]` — `src/data/hobbiesTaxonomy.ts`):** Exporta `MIN_HOBBIES_SELECTION = 3`, `MAX_HOBBIES_SELECTION = 10`, categorias (`Arte e Cultura`, `Lazer e Bem-estar`, `Gastronomia`) e os 12 hobbies parametrizados.
-- **Orquestração DRY (`src/hooks/useOnboardingWizard.ts`):** Gerencia o passo atual (`1` a `7`), o estado tipado `OnboardingFormData`, carregamento/salvamento em `profileStorage`, modo de edição (`startEditingProfile`) e detecção de formulário sujo (`hasUnsavedChanges`) integrada ao `DefensiveModalRF06`.
-- **Componentização SRP (`src/components/onboarding/`):**
-  - `OnboardingStepHeader.tsx`: exibe `"Boas-vindas"` no Passo 1 e `"← Voltar"` (`min-height: 48px`) nos Passos 2 a 7, além de `"Passo X de 7 (Y%)"` e barra de progresso (`#991B1B`).
-  - `Step2DadosPessoais.tsx` (`[RF-02]`): nome e data de nascimento (`DD/MM/AAAA`) com trava automática para idade `< 50 anos` (`MIN_ALLOWED_AGE = 50`).
-  - `Step3Localizacao.tsx` (`[RF-02]` / `[RF-05]`): seletor de cidades de Sergipe (padrão `Aracaju (SE)`) e callout âmbar de privacidade LGPD.
-  - `Step4FotoPerfil.tsx` (`[RF-02]`): preview circular âmbar `120x120px`, upload local de imagem e opção `"Adicionar foto mais tarde"`.
-  - `Step5Interesses.tsx` (`[RF-03]`): categorias e grade de 12 hobbies com mínimo de `3` (`MIN_HOBBIES_COUNT`) e máximo de `10` (`MAX_HOBBIES_COUNT`).
-  - `Step6Objetivo.tsx` (`[RF-02]` / `[RF-05]`): cards acessíveis de seleção (`Amizade`, `Relacionamento`, `Companhia`).
-  - `Step7SenhaLgpd.tsx` (`[RF-01]`): criação e confirmação de senha (`MIN_PASSWORD_LENGTH = 8`) com botões de visualização isolados `50x50px`, aceite LGPD explícito e resumo final de cadastro concluído.
+## 🚀 Finalizando a Tarefa e Abrindo o Pull Request (PR)
+
+1. **Self-Review Local:** Garanta que seu código compila e não quebra testes:
+   ```bash
+   git status
+   git diff
+   ```
+2. **Envio da Branch para o GitHub:**
+   ```bash
+   git push -u origin feature/rf-XX-sua-tarefa
+   ```
+3. **No GitHub:**
+   - Abra um Pull Request com destino para a branch **`develop`** (nunca para a `main`).
+   - Título do PR: `[RF-XX] Breve descrição da funcionalidade` (ex: `[RF-06] Implementa confirmação dupla e botões defensivos 50+`).
+   - Descrição: Liste o que foi feito, como testar e mencione a Issue (ex: `Closes #10`).
+   - Mova o cartão no Kanban para a raia **`QA / Code Review`**.
+4. **Peer Review:**
+   - Solicite a revisão de pelo menos 1 integrante da equipe.
+   - O merge deve ser feito **sem fast-forward (`--no-ff`)** para manter a árvore limpa e auditável pela banca examinadora.
+5. **Finalização:** Após o merge na `develop`, o cartão vai para **`Done`**! 🎉

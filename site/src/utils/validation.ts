@@ -2,14 +2,81 @@ export const MIN_ALLOWED_AGE = 50;
 export const MIN_HOBBIES_COUNT = 3;
 export const MAX_HOBBIES_COUNT = 10;
 export const MIN_PASSWORD_LENGTH = 8;
+export const MAX_PASSWORD_LENGTH = 72;
+export const MAX_LOGIN_ATTEMPTS = 5;
+export const LOGIN_LOCK_SECONDS = 15 * 60;
 
 const MIN_BIRTH_YEAR = 1900;
 
-export function validateHobbiesSelection(hobbies: readonly string[]): string | null {
-  if (hobbies.length < MIN_HOBBIES_COUNT) {
-    return `Selecione pelo menos ${MIN_HOBBIES_COUNT} interesses para continuar.`;
+const MAX_SANITIZE_PASSES = 5;
+
+const XSS_DANGEROUS_PATTERN =
+  /<\s*\/?\s*[a-z!]|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html|\bon[a-z]{2,30}\s*=|expression\s*\(|eval\s*\(|&lt;\s*\/?\s*[a-z!]|&#/i;
+
+const SCRIPT_BLOCK_PATTERN =
+  /<\s*(script|iframe|object|embed|svg|math|style|link|meta|base|form)\b[^<>]{0,512}>[\s\S]{0,10000}?<\s*\/\s*\1\s*>/gi;
+
+const ANY_TAG_PATTERN = /<[^<>]{0,1024}>/g;
+
+function decodeDangerousHtmlEntities(input: string): string {
+  return input
+    .replace(/&amp;(?=(?:lt|gt|quot|apos|colon|#))/gi, '&')
+    .replace(/&#x([0-9a-f]{1,6});?/gi, (_, hex: string) => {
+      const cp = Number.parseInt(hex, 16);
+      return cp >= 32 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+    })
+    .replace(/&#([0-9]{1,7});?/g, (_, dec: string) => {
+      const cp = Number.parseInt(dec, 10);
+      return cp >= 32 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+    })
+    .replace(/&lt(?:;|(?![a-z0-9]))/gi, '<')
+    .replace(/&gt(?:;|(?![a-z0-9]))/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&colon;/gi, ':');
+}
+
+export function containsDangerousXss(value: string): boolean {
+  if (!value) return false;
+  let normalized = value.normalize('NFKC').replace(/\u0000/g, '');
+  for (let pass = 0; pass < MAX_SANITIZE_PASSES; pass += 1) {
+    if (XSS_DANGEROUS_PATTERN.test(normalized)) {
+      return true;
+    }
+    const decoded = decodeDangerousHtmlEntities(normalized);
+    if (decoded === normalized) break;
+    normalized = decoded;
   }
-  if (hobbies.length > MAX_HOBBIES_COUNT) {
+  return XSS_DANGEROUS_PATTERN.test(normalized);
+}
+
+export function sanitizeTextInput(value: string): string {
+  if (!value) return '';
+  let clean = value.normalize('NFKC').replace(/[\u0000-\u001F\u007F]/g, '');
+  let pass = 0;
+  while (pass < MAX_SANITIZE_PASSES) {
+    const prev = clean;
+    clean = decodeDangerousHtmlEntities(clean)
+      .replace(SCRIPT_BLOCK_PATTERN, '')
+      .replace(ANY_TAG_PATTERN, '')
+      .replace(/javascript\s*:|vbscript\s*:|data\s*:\s*text\/html/gi, '')
+      .replace(/\bon[a-z]{2,30}\s*=/gi, '')
+      .replace(/(?:expression|eval)\s*\(/gi, '')
+      .replace(/[<>]/g, '');
+    if (clean === prev) break;
+    pass += 1;
+  }
+  return clean.trim();
+}
+
+export function validateHobbiesSelection(hobbies: readonly string[]): string | null {
+  const uniqueHobbies = new Set(
+    hobbies.map((h) => h.trim().toLowerCase()).filter((h) => h.length > 0)
+  );
+  if (uniqueHobbies.size < MIN_HOBBIES_COUNT) {
+    return `Selecione pelo menos ${MIN_HOBBIES_COUNT} interesses distintos para continuar.`;
+  }
+  if (uniqueHobbies.size > MAX_HOBBIES_COUNT) {
     return `Você pode selecionar no máximo ${MAX_HOBBIES_COUNT} interesses.`;
   }
   return null;
@@ -104,12 +171,45 @@ export function validateBirthDate50Plus(birthDate: string): string | null {
   return null;
 }
 
+export function validateStrongPassword(password: string): string | null {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`;
+  }
+
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    return `A senha deve ter no máximo ${MAX_PASSWORD_LENGTH} caracteres.`;
+  }
+
+  if (/\s/.test(password)) {
+    return 'A senha não pode conter espaços em branco.';
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return 'A senha deve conter pelo menos uma letra maiúscula (A-Z).';
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return 'A senha deve conter pelo menos uma letra minúscula (a-z).';
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return 'A senha deve conter pelo menos um número (0-9).';
+  }
+
+  if (!/[^A-Za-z0-9\s]/.test(password)) {
+    return 'A senha deve conter pelo menos um caractere especial (ex.: . , @ ! # $ % & *).';
+  }
+
+  return null;
+}
+
 export function validatePasswordMatch(
   password: string,
   confirmPassword: string
 ): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`;
+  const strengthError = validateStrongPassword(password);
+  if (strengthError !== null) {
+    return strengthError;
   }
 
   if (password !== confirmPassword) {
