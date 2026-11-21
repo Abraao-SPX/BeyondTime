@@ -1,12 +1,12 @@
 package br.com.beyondtime.biometrics;
 
-import br.com.beyondtime.biometrics.domain.Profile;
-import br.com.beyondtime.biometrics.domain.VerificationStatus;
+import br.com.beyondtime.auth.dto.AuthResponse;
+import br.com.beyondtime.auth.dto.RegisterRequest;
 import br.com.beyondtime.biometrics.dto.VerifyBiometricsRequest;
-import br.com.beyondtime.biometrics.dto.VerifyBiometricsResponse;
-import br.com.beyondtime.biometrics.repository.ProfileRepository;
 import br.com.beyondtime.biometrics.repository.VerificationAttemptRepository;
-import br.com.beyondtime.biometrics.service.BiometricsVerificationService;
+import br.com.beyondtime.profile.domain.Profile;
+import br.com.beyondtime.profile.repository.ProfileRepository;
+import br.com.beyondtime.shared.util.AgeValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,14 +14,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
@@ -33,6 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 @TestPropertySource(properties = {
         "beyondtime.biometrics.jwt.secret=test_biometric_secret_key_32_bytes_long_12345"
 })
@@ -52,18 +57,32 @@ class BiometricsVerificationIntegrationTest {
     @Autowired
     private VerificationAttemptRepository verificationAttemptRepository;
 
-    @Autowired
-    private BiometricsVerificationService verificationService;
-
     private UUID userId;
-    private Profile testProfile;
+    private String accessToken;
 
     @BeforeEach
-    void setUp() {
-        userId = UUID.randomUUID();
+    void setUp() throws Exception {
+        String email = "maria.biometria." + UUID.randomUUID() + "@beyondtime.com.br";
+        RegisterRequest registerRequest = new RegisterRequest(
+                email,
+                "79998887766",
+                "SenhaForte50+.2026@",
+                LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(62)
+        );
+
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        AuthResponse auth = objectMapper.readValue(result.getResponse().getContentAsString(), AuthResponse.class);
+        userId = auth.userId();
+        accessToken = auth.accessToken();
+
         // Cria perfil para o usuário (city_id = 1 da seed de Sergipe / Aracaju)
-        testProfile = new Profile(userId, "Maria Santos", "Maria", 1);
-        testProfile = profileRepository.save(testProfile);
+        Profile testProfile = new Profile(userId, "Maria Santos", "Maria", 1, "Bio de teste 50+");
+        profileRepository.save(testProfile);
     }
 
     private String generateBiometricToken(String sub, boolean verified, Double distance, long expEpoch) throws Exception {
@@ -98,7 +117,7 @@ class BiometricsVerificationIntegrationTest {
         VerifyBiometricsRequest request = new VerifyBiometricsRequest(validToken);
 
         mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
-                        .header("X-User-Id", userId.toString())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -108,7 +127,7 @@ class BiometricsVerificationIntegrationTest {
 
         Profile updated = profileRepository.findByUserId(userId).orElseThrow();
         assertThat(updated.isVerifiedBadge50plus()).isTrue();
-        assertThat(updated.getVerificationStatus()).isEqualTo(VerificationStatus.VERIFIED);
+        assertThat(updated.getVerificationStatus()).isEqualTo("VERIFIED");
         assertThat(updated.getVerifiedAt()).isNotNull();
 
         assertThat(verificationAttemptRepository.findByUserIdOrderByCreatedAtDesc(userId)).isNotEmpty();
@@ -124,7 +143,7 @@ class BiometricsVerificationIntegrationTest {
         VerifyBiometricsRequest request = new VerifyBiometricsRequest(tokenOfOther);
 
         mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
-                        .header("X-User-Id", userId.toString())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
@@ -140,7 +159,7 @@ class BiometricsVerificationIntegrationTest {
         VerifyBiometricsRequest request = new VerifyBiometricsRequest(tamperedToken);
 
         mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
-                        .header("X-User-Id", userId.toString())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized());

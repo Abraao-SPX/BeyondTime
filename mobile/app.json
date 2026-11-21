@@ -23,7 +23,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.vanytas.beyondtime"
+      "package": "br.com.beyondtime",
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       [

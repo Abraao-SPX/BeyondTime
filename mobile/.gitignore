@@ -16,3 +16,12 @@ yarn-error.*
 # macOS
 .DS_Store
 Thumbs.db
+
+# Firebase & Environment Credentials (Protocolo de Vazamento Zero)
+google-services.json
+GoogleService-Info.plist
+*firebase-adminsdk*.json
+service-account*.json
+.env
+.env.local
+.env.*.local

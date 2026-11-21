@@ -1,9 +1,7 @@
-package br.com.beyondtime.biometrics.domain;
+package br.com.beyondtime.profile.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -43,9 +41,8 @@ public class Profile {
     @Column(name = "audio_intro_key", length = 255)
     private String audioIntroKey;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "verification_status", nullable = false, length = 30)
-    private VerificationStatus verificationStatus = VerificationStatus.PENDING;
+    private String verificationStatus = "PENDING";
 
     @Column(name = "verified_badge_50plus", nullable = false)
     private boolean verifiedBadge50plus = false;
@@ -62,12 +59,13 @@ public class Profile {
     protected Profile() {
     }
 
-    public Profile(UUID userId, String displayName, String firstName, Integer cityId) {
+    public Profile(UUID userId, String displayName, String firstName, Integer cityId, String bio) {
         this.userId = userId;
         this.displayName = displayName;
         this.firstName = firstName;
         this.cityId = cityId;
-        this.verificationStatus = VerificationStatus.PENDING;
+        this.bio = bio;
+        this.verificationStatus = "PENDING";
         this.verifiedBadge50plus = false;
     }
 
@@ -85,15 +83,18 @@ public class Profile {
         this.updatedAt = OffsetDateTime.now();
     }
 
-    public void grantVerifiedBadge50Plus() {
-        this.verifiedBadge50plus = true;
-        this.verificationStatus = VerificationStatus.VERIFIED;
-        this.verifiedAt = OffsetDateTime.now();
+    public void updateProfileInfo(String displayName, String firstName, Integer cityId, String bio) {
+        this.displayName = displayName;
+        this.firstName = firstName;
+        this.cityId = cityId;
+        this.bio = bio;
         this.updatedAt = OffsetDateTime.now();
     }
 
-    public void markVerificationFailed() {
-        this.verificationStatus = VerificationStatus.FAILED;
+    public void grantVerifiedBadge50Plus() {
+        this.verifiedBadge50plus = true;
+        this.verificationStatus = "VERIFIED";
+        this.verifiedAt = OffsetDateTime.now();
         this.updatedAt = OffsetDateTime.now();
     }
 
@@ -129,7 +130,7 @@ public class Profile {
         return audioIntroKey;
     }
 
-    public VerificationStatus getVerificationStatus() {
+    public String getVerificationStatus() {
         return verificationStatus;
     }
 

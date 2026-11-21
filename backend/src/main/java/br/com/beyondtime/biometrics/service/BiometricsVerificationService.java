@@ -1,13 +1,13 @@
 package br.com.beyondtime.biometrics.service;
 
-import br.com.beyondtime.biometrics.domain.Profile;
 import br.com.beyondtime.biometrics.domain.VerificationAttempt;
 import br.com.beyondtime.biometrics.domain.VerificationStatus;
 import br.com.beyondtime.biometrics.domain.VerificationType;
 import br.com.beyondtime.biometrics.dto.VerifyBiometricsRequest;
 import br.com.beyondtime.biometrics.dto.VerifyBiometricsResponse;
-import br.com.beyondtime.biometrics.repository.ProfileRepository;
 import br.com.beyondtime.biometrics.repository.VerificationAttemptRepository;
+import br.com.beyondtime.profile.domain.Profile;
+import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
 import org.slf4j.Logger;
@@ -109,7 +109,7 @@ public class BiometricsVerificationService {
                 profile.getId(),
                 authenticatedUserId,
                 profile.isVerifiedBadge50plus(),
-                profile.getVerificationStatus(),
+                VerificationStatus.valueOf(profile.getVerificationStatus()),
                 profile.getVerifiedAt(),
                 distance,
                 true
