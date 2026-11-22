@@ -42,7 +42,7 @@ export function TelaLogin({
 }: TelaLoginProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const rememberMe = false;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -294,7 +294,7 @@ export function TelaLogin({
           <label className="form-label" htmlFor="login-password">
             Senha
           </label>
-          <div className="password-field">
+          <div className="input-with-action">
             <input
               id="login-password"
               name="password"
@@ -310,11 +310,42 @@ export function TelaLogin({
             />
             <button
               type="button"
-              className="btn-eye"
+              className="btn-eye-icon"
               onClick={() => setShowPassword((prev) => !prev)}
               aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              title={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
             >
-              {showPassword ? 'Ocultar' : 'Mostrar'}
+              {showPassword ? (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="btn-eye__icon"
+                  aria-hidden="true"
+                >
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              ) : (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="btn-eye__icon"
+                  aria-hidden="true"
+                >
+                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                  <path d="M1 1l22 22" />
+                </svg>
+              )}
             </button>
           </div>
           {errorMessage !== null && (
@@ -322,38 +353,6 @@ export function TelaLogin({
               {errorMessage}
             </p>
           )}
-        </div>
-
-        <div className="form-group" style={{ marginTop: '4px', marginBottom: '16px' }}>
-          <label
-            htmlFor="login-remember-me"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '12px',
-              minHeight: '48px',
-              cursor: 'pointer',
-              fontSize: '15px',
-              color: 'var(--text-primary)',
-            }}
-          >
-            <input
-              id="login-remember-me"
-              name="rememberMe"
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              style={{
-                width: '22px',
-                height: '22px',
-                minWidth: '22px',
-                minHeight: '22px',
-                accentColor: 'var(--brand-primary)',
-                cursor: 'pointer',
-              }}
-            />
-            <span>Manter conectado neste dispositivo</span>
-          </label>
         </div>
 
         <button

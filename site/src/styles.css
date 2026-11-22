@@ -3007,6 +3007,35 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   color: var(--brand-burgundy);
 }
 
+.input-with-action .btn-eye-icon {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: var(--radius-control);
+  padding: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.input-with-action .btn-eye-icon:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-surface-hover);
+}
+
+.input-with-action .btn-eye-icon .btn-eye__icon {
+  width: 22px;
+  height: 22px;
+}
+
 .text-link {
   background: transparent;
   border: none;
