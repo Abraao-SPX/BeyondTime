@@ -4227,3 +4227,14 @@ html.high-contrast .btn-theme-toggle:focus-visible {
   background-color: var(--border-secondary);
   color: var(--text-muted);
 }
+
+.accessibility-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+

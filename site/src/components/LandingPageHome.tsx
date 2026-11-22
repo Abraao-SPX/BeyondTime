@@ -530,7 +530,7 @@ export function LandingPageHome({
               <div className="home-hero__trust-points">
                 <span>✓ Cadastro 100% gratuito</span>
                 <span>✓ Sem deslizes acidentais</span>
-                <span>✓ Suporte por telefone e WhatsApp</span>
+                <span>✓ Suporte humanizado por e-mail</span>
               </div>
             </div>
 
@@ -698,7 +698,7 @@ export function LandingPageHome({
             <div className="home-security-footer-note">
               <HomeIcon name="shield-check" className="home-icon home-icon--wine" />
               <span>
-                Central de atendimento com ligação gratuita e suporte humanizado por WhatsApp para qualquer situação.
+                Central de atendimento e suporte humanizado por e-mail para qualquer dúvida ou situação.
               </span>
             </div>
           </div>

@@ -130,6 +130,9 @@ export function App() {
   }
 
   function hasUnsavedData(viewId: AuthViewId): boolean {
+    if (viewId === 'register' && isRegisterDirty) {
+      return true;
+    }
     return contacts[viewId].trim().length > 0;
   }
 
@@ -146,7 +149,7 @@ export function App() {
   }
 
   function handleBackToLanding() {
-    if (hasUnsavedData(activeView) || (activeView === 'register' && isRegisterDirty)) {
+    if (hasUnsavedData(activeView)) {
       setPendingBackToLanding(true);
       return;
     }
