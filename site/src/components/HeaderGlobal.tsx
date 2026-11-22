@@ -1,15 +1,20 @@
 import type { MouseEvent } from 'react';
-import beyondLogo from '../../assets/beyondlogoicon.svg';
-import type { AuthViewId } from '../types/auth';
+import type { AppViewId } from '../types/auth';
 
 interface HeaderGlobalProps {
-  onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
+  onNavigate: (targetView: AppViewId, triggerEl: HTMLElement) => void;
+  highContrast: boolean;
+  onToggleHighContrast: () => void;
 }
 
-export function HeaderGlobal({ onNavigate }: HeaderGlobalProps) {
+export function HeaderGlobal({
+  onNavigate,
+  highContrast,
+  onToggleHighContrast,
+}: HeaderGlobalProps) {
   function handleBrandClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
-    onNavigate('login', event.currentTarget);
+    onNavigate('home', event.currentTarget);
   }
 
   return (
@@ -17,20 +22,57 @@ export function HeaderGlobal({ onNavigate }: HeaderGlobalProps) {
       <div className="site-header__inner">
         <a
           className="brand"
-          href="#view-login"
+          href="#inicio"
           onClick={handleBrandClick}
-          aria-label="BeyondTime, voltar para a tela de entrada"
+          aria-label="BeyondTime, voltar para a página inicial"
         >
           <img
-            className="brand__logo"
-            src={beyondLogo}
-            width={42}
-            height={26}
-            alt=""
+            className="brand__logo-img"
+            src={highContrast ? '/assets/beyondtime-brand-dark.png' : '/assets/beyondtime-brand-light.png'}
+            alt="BeyondTime"
           />
-          <span className="brand__name">BeyondTime</span>
         </a>
-        <p className="site-header__tagline">Um novo tempo para se conectar.</p>
+
+        <div className="site-header__right">
+          <p className="site-header__tagline">Um novo tempo para se conectar.</p>
+
+          <button
+            type="button"
+            className="btn-theme-toggle"
+            aria-pressed={highContrast}
+            aria-label={highContrast ? 'Ativar modo claro' : 'Ativar modo noturno'}
+            title={highContrast ? 'Modo claro' : 'Modo noturno'}
+            onClick={onToggleHighContrast}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="home-icon"
+              aria-hidden="true"
+            >
+              {highContrast ? (
+                <>
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2m-15.66 4.93 1.41-1.41m11.32-11.32 1.41-1.41" />
+                </>
+              ) : (
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+              )}
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            className="site-header__home-btn"
+            onClick={(event) => onNavigate('home', event.currentTarget)}
+          >
+            ← Voltar
+          </button>
+        </div>
       </div>
     </header>
   );

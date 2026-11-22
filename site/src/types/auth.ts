@@ -1,5 +1,7 @@
 export type AuthViewId = 'login' | 'register' | 'recover';
 
+export type AppViewId = 'home' | AuthViewId;
+
 export type SocialProvider = 'Google' | 'Facebook';
 
 export type LegalDocKey = 'terms' | 'privacy';
@@ -17,6 +19,7 @@ export type HobbyCategory =
 export interface OnboardingFormData {
   contact: string;
   fullName: string;
+  preferredName?: string;
   birthDate: string;
   city: string;
   photoPreviewUrl: string | null;

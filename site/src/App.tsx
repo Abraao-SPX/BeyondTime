@@ -3,21 +3,28 @@ import { CriarMinhaConta } from './components/CriarMinhaConta';
 import { DefensiveModalRF06 } from './components/DefensiveModalRF06';
 import { FooterGlobal } from './components/FooterGlobal';
 import { HeaderGlobal } from './components/HeaderGlobal';
+import { HumanSupportBanner } from './components/HumanSupportBanner';
+import { LandingPageHome } from './components/LandingPageHome';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
+import { useHighContrast } from './hooks/useHighContrast';
 import { useOnboardingWizard } from './hooks/useOnboardingWizard';
-import type { AuthViewId } from './types/auth';
+import type { AppViewId, AuthViewId } from './types/auth';
 
 export function App() {
-  const [activeView, setActiveView] = useState<AuthViewId>('login');
+  const [activeView, setActiveView] = useState<AppViewId>('home');
   const [loginContact, setLoginContact] = useState('');
   const [recoverContact, setRecoverContact] = useState('');
-  const [pendingView, setPendingView] = useState<AuthViewId | null>(null);
+  const [pendingView, setPendingView] = useState<AppViewId | null>(null);
   const lastTriggerRef = useRef<HTMLElement | null>(null);
 
+  const { highContrast, toggleHighContrast } = useHighContrast();
   const wizard = useOnboardingWizard();
 
-  function hasUnsavedData(viewId: AuthViewId): boolean {
+  function hasUnsavedData(viewId: AppViewId): boolean {
+    if (viewId === 'home') {
+      return false;
+    }
     if (viewId === 'login') {
       return loginContact.trim().length > 0;
     }
@@ -27,7 +34,12 @@ export function App() {
     return wizard.hasUnsavedChanges;
   }
 
-  function handleNavigate(targetView: AuthViewId, triggerEl: HTMLElement) {
+  function switchView(targetView: AppViewId) {
+    setActiveView(targetView);
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  function handleNavigate(targetView: AppViewId, triggerEl: HTMLElement) {
     if (targetView === activeView) return;
 
     if (hasUnsavedData(activeView)) {
@@ -36,7 +48,11 @@ export function App() {
       return;
     }
 
-    setActiveView(targetView);
+    switchView(targetView);
+  }
+
+  function handleOpenAuthFromHome(targetView: AuthViewId) {
+    switchView(targetView);
   }
 
   function handleKeepEditing() {
@@ -51,60 +67,76 @@ export function App() {
       setLoginContact('');
     } else if (activeView === 'recover') {
       setRecoverContact('');
-    } else {
+    } else if (activeView === 'register') {
       wizard.resetWizard();
     }
 
     setPendingView(null);
     lastTriggerRef.current = null;
     if (target !== null) {
-      setActiveView(target);
+      switchView(target);
     }
   }
 
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#conteudo">
-        Pular para o conteúdo
-      </a>
+    <>
+      {activeView === 'home' ? (
+        <LandingPageHome
+          highContrast={highContrast}
+          onToggleHighContrast={toggleHighContrast}
+          onOpenAuth={handleOpenAuthFromHome}
+        />
+      ) : (
+        <div className="app-shell">
+          <a className="skip-link" href="#conteudo">
+            Pular para o conteúdo
+          </a>
 
-      <HeaderGlobal onNavigate={handleNavigate} />
+          <HeaderGlobal
+            onNavigate={handleNavigate}
+            highContrast={highContrast}
+            onToggleHighContrast={toggleHighContrast}
+          />
 
-      <main className="auth-main" id="conteudo">
-        <div className="auth-card">
-          {activeView === 'login' && (
-            <TelaLogin
-              contact={loginContact}
-              onContactChange={setLoginContact}
-              onNavigate={handleNavigate}
-            />
-          )}
+          <HumanSupportBanner />
 
-          {activeView === 'register' && (
-            <CriarMinhaConta
-              wizard={wizard}
-              onNavigate={handleNavigate}
-            />
-          )}
+          <main className="auth-main" id="conteudo">
+            <div className="auth-content-container">
+              {activeView === 'login' && (
+                <TelaLogin
+                  contact={loginContact}
+                  onContactChange={setLoginContact}
+                  onNavigate={handleNavigate}
+                />
+              )}
 
-          {activeView === 'recover' && (
-            <RecuperarSenha
-              contact={recoverContact}
-              onContactChange={setRecoverContact}
-              onNavigate={handleNavigate}
-            />
-          )}
+              {activeView === 'register' && (
+                <CriarMinhaConta
+                  wizard={wizard}
+                  onNavigate={handleNavigate}
+                />
+              )}
+
+              {activeView === 'recover' && (
+                <RecuperarSenha
+                  contact={recoverContact}
+                  onContactChange={setRecoverContact}
+                  onNavigate={handleNavigate}
+                />
+              )}
+            </div>
+          </main>
+
+          <FooterGlobal />
         </div>
-      </main>
+      )}
 
       <DefensiveModalRF06
         isOpen={pendingView !== null}
         onKeepEditing={handleKeepEditing}
         onConfirmDiscard={handleConfirmDiscard}
       />
-
-      <FooterGlobal />
-    </div>
+    </>
   );
 }
 

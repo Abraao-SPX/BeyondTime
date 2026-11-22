@@ -52,7 +52,7 @@ export function Step4FotoPerfil({
         Uma foto sua
       </h1>
       <p className="auth-card__subtitle">
-        Perfis com foto recebem mais conexões e demonstram confiança.
+        Escolha uma foto onde você esteja bem à vontade. Perfis com foto geram mais carinho e confiança.
       </p>
 
       <div className="photo-preview">
@@ -88,6 +88,23 @@ export function Step4FotoPerfil({
         onChange={handleFileChange}
       />
 
+      <div className="photo-guidelines-box">
+        <ul className="photo-checklist">
+          <li>
+            <span className="photo-checklist__icon" aria-hidden="true">✓</span>
+            Mostre bem seu rosto de frente
+          </li>
+          <li>
+            <span className="photo-checklist__icon" aria-hidden="true">✓</span>
+            Sem óculos escuros ou chapéu
+          </li>
+          <li>
+            <span className="photo-checklist__icon" aria-hidden="true">✓</span>
+            Boa luz, de preferência de dia
+          </li>
+        </ul>
+      </div>
+
       <button
         type="button"
         className="btn btn--upload"
@@ -106,12 +123,12 @@ export function Step4FotoPerfil({
           <path d="M4 8h3l2-3h6l2 3h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />
           <circle cx="12" cy="14" r="3.5" />
         </svg>
-        <span>Selecionar foto do computador</span>
+        <span>{photoPreviewUrl ? 'Trocar foto escolhida' : 'Escolher foto'}</span>
       </button>
 
       {photoFileName !== null && photoError === null && (
         <p className="photo-selected-name" aria-live="polite">
-          Arquivo selecionado: {photoFileName}
+          Arquivo: {photoFileName}
         </p>
       )}
 
@@ -120,12 +137,6 @@ export function Step4FotoPerfil({
           {photoError}
         </p>
       )}
-
-      <div className="photo-guidelines">
-        <p>Escolha uma foto recente e sorrindo.</p>
-        <p>Evite óculos escuros ou chapéus que cubram o rosto.</p>
-        <p>Garanta uma boa iluminação no ambiente.</p>
-      </div>
 
       <div className="action-stack action-stack--compact">
         <button type="button" className="btn btn--primary" onClick={onNext}>
