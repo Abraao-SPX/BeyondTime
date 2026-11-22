@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
   Easing,
   Linking,
@@ -47,61 +48,84 @@ export function SplashWelcomeScreen({
   const contentTranslateY = useRef(new Animated.Value(16)).current;
 
   useEffect(() => {
-    Animated.sequence([
-      // 1. Símbolo entra sozinho com calma
-      Animated.parallel([
-        Animated.timing(symbolOpacity, {
-          toValue: 1,
-          duration: 450,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(symbolScale, {
-          toValue: 1,
-          duration: 450,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]),
-      // 2. Símbolo desliza para a posição esquerda antes do texto surgir (sem sobreposição)
-      Animated.timing(symbolTranslateX, {
-        toValue: 0,
-        duration: 420,
-        delay: 140,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      // 3. Wordmark "BeyondTime" surge suavemente ao lado
-      Animated.parallel([
-        Animated.timing(wordmarkOpacity, {
-          toValue: 1,
-          duration: 380,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(wordmarkTranslateX, {
+    let active = true;
+
+    const runAnimation = async () => {
+      const reduceMotion = await AccessibilityInfo.isReduceMotionEnabled().catch(() => false);
+      if (!active) return;
+
+      if (reduceMotion) {
+        symbolOpacity.setValue(1);
+        symbolScale.setValue(1);
+        symbolTranslateX.setValue(0);
+        wordmarkOpacity.setValue(1);
+        wordmarkTranslateX.setValue(0);
+        contentOpacity.setValue(1);
+        contentTranslateY.setValue(0);
+        return;
+      }
+
+      Animated.sequence([
+        // 1. Símbolo entra sozinho com calma
+        Animated.parallel([
+          Animated.timing(symbolOpacity, {
+            toValue: 1,
+            duration: 450,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(symbolScale, {
+            toValue: 1,
+            duration: 450,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+        // 2. Símbolo desliza para a posição esquerda antes do texto surgir (sem sobreposição)
+        Animated.timing(symbolTranslateX, {
           toValue: 0,
-          duration: 380,
-          easing: Easing.out(Easing.cubic),
+          duration: 420,
+          delay: 140,
+          easing: Easing.inOut(Easing.cubic),
           useNativeDriver: true,
         }),
-      ]),
-      // 4. Conteúdo de boas-vindas e botões aparecem
-      Animated.parallel([
-        Animated.timing(contentOpacity, {
-          toValue: 1,
-          duration: 400,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(contentTranslateY, {
-          toValue: 0,
-          duration: 400,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
+        // 3. Wordmark "BeyondTime" surge suavemente ao lado
+        Animated.parallel([
+          Animated.timing(wordmarkOpacity, {
+            toValue: 1,
+            duration: 380,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(wordmarkTranslateX, {
+            toValue: 0,
+            duration: 380,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+        // 4. Conteúdo de boas-vindas e botões aparecem
+        Animated.parallel([
+          Animated.timing(contentOpacity, {
+            toValue: 1,
+            duration: 400,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(contentTranslateY, {
+            toValue: 0,
+            duration: 400,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start();
+    };
+
+    runAnimation();
+    return () => {
+      active = false;
+    };
   }, [
     contentOpacity,
     contentTranslateY,
@@ -181,12 +205,12 @@ export function SplashWelcomeScreen({
               style={[
                 styles.brandTitle,
                 {
-                  color: palette.isDark ? '#FFFFFF' : palette.textPrimary,
+                  color: palette.textPrimary,
                   fontSize: fs(30),
                 },
               ]}
             >
-              Beyond<Text style={{ color: palette.primary }}>Time</Text>
+              Beyond<Text style={{ color: palette.primaryText }}>Time</Text>
             </Text>
           </Animated.View>
         </View>
@@ -291,7 +315,7 @@ export function SplashWelcomeScreen({
               label="Já tenho conta · Entrar"
               variant="outline"
               onPress={onLogin}
-              iconLeft={<LogInIcon size={20} color={palette.primary} />}
+              iconLeft={<LogInIcon size={20} color={palette.primaryText} />}
               accessibilityHint="Abre a tela de acesso para quem já possui cadastro"
             />
           </View>
@@ -303,7 +327,7 @@ export function SplashWelcomeScreen({
             accessibilityLabel={`Precisa de ajuda? Enviar e-mail para ${SUPPORT_EMAIL}`}
             style={styles.supportLink}
           >
-            <MailIcon size={18} color={palette.primary} />
+            <MailIcon size={18} color={palette.primaryText} />
             <Text
               style={[
                 styles.supportText,
@@ -311,7 +335,7 @@ export function SplashWelcomeScreen({
               ]}
             >
               Precisa de ajuda?{' '}
-              <Text style={{ color: palette.primary, fontWeight: '700', textDecorationLine: 'underline' }}>
+              <Text style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}>
                 {SUPPORT_EMAIL}
               </Text>
             </Text>

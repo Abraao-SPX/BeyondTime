@@ -41,16 +41,18 @@ export function LoginScreen({
   const [contact, setContact] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [recoverySent, setRecoverySent] = useState(false);
 
   const handleSubmitLogin = () => {
     setErrorMessage(null);
+    setSocialNotice(null);
     if (!contact.trim()) {
-      setErrorMessage('Por favor, informe seu e-mail ou telefone.');
+      setErrorMessage('Por favor, informe seu e-mail ou telefone para continuar.');
       return;
     }
     if (password.trim().length < 6) {
-      setErrorMessage('Digite sua senha com pelo menos 6 caracteres.');
+      setErrorMessage('Sua senha precisa ter pelo menos 6 caracteres sem contar espaços.');
       return;
     }
     onLoginSuccess(contact.trim());
@@ -58,7 +60,9 @@ export function LoginScreen({
 
   const handleSocialLogin = (provider: 'Google' | 'Facebook') => {
     setErrorMessage(null);
-    onLoginSuccess(`conta.${provider.toLowerCase()}@beyondtime.app`);
+    setSocialNotice(
+      `O acesso direto com ${provider} está em fase final de integração neste aplicativo. Por enquanto, você pode entrar com seu e-mail e senha acima.`
+    );
   };
 
   const handleSendRecovery = () => {
@@ -153,8 +157,8 @@ export function LoginScreen({
               accessibilityLabel="Esqueci minha senha"
               style={styles.forgotLink}
             >
-              <LockIcon size={16} color={palette.primary} />
-              <Text style={[styles.forgotText, { color: palette.primary, fontSize: fs(15) }]}>
+              <LockIcon size={16} color={palette.primaryText} />
+              <Text style={[styles.forgotText, { color: palette.primaryText, fontSize: fs(15) }]}>
                 Esqueci minha senha
               </Text>
             </TouchableOpacity>
@@ -168,6 +172,19 @@ export function LoginScreen({
               >
                 <Text style={[styles.errorText, { color: palette.errorText, fontSize: fs(15) }]}>
                   {errorMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            {socialNotice ? (
+              <View
+                style={[
+                  styles.errorBox,
+                  { backgroundColor: palette.primarySoft, borderColor: palette.borderStrong },
+                ]}
+              >
+                <Text style={[styles.errorText, { color: palette.textPrimary, fontSize: fs(15) }]}>
+                  {socialNotice}
                 </Text>
               </View>
             ) : null}
@@ -208,7 +225,7 @@ export function LoginScreen({
                 label="Criar minha conta"
                 variant="secondary"
                 onPress={onGoToRegister}
-                iconLeft={<UserPlusIcon size={20} color={palette.primary} />}
+                iconLeft={<UserPlusIcon size={20} color={palette.primaryText} />}
               />
             </View>
           </View>
@@ -295,7 +312,7 @@ export function LoginScreen({
               <Text
                 style={[
                   styles.cleanBackLoginText,
-                  { color: palette.primary, fontSize: fs(16) },
+                  { color: palette.primaryText, fontSize: fs(16) },
                 ]}
               >
                 Voltar ao login
@@ -309,10 +326,10 @@ export function LoginScreen({
           accessibilityRole="link"
           style={styles.supportRow}
         >
-          <MailIcon size={18} color={palette.primary} />
+          <MailIcon size={18} color={palette.primaryText} />
           <Text style={[styles.supportText, { color: palette.textSecondary, fontSize: fs(14) }]}>
             Dúvidas no acesso?{' '}
-            <Text style={{ color: palette.primary, fontWeight: '700', textDecorationLine: 'underline' }}>
+            <Text style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}>
               {SUPPORT_EMAIL}
             </Text>
           </Text>

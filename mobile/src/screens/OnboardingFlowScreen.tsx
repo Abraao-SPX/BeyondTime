@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -96,6 +97,7 @@ export function OnboardingFlowScreen({
   const [step, setStep] = useState<number>(1);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [exitTarget, setExitTarget] = useState<'splash' | 'login' | null>(null);
   const [legalModal, setLegalModal] = useState<'termos' | 'privacidade' | null>(null);
   const [photoSelectedDemo, setPhotoSelectedDemo] = useState(Boolean(data.profilePhotoUri));
@@ -112,26 +114,47 @@ export function OnboardingFlowScreen({
 
   const updateField = <K extends keyof OnboardingData>(key: K, value: OnboardingData[K]) => {
     setErrorMessage(null);
+    setSocialNotice(null);
     onChangeData({ ...data, [key]: value });
   };
 
-  const requestLeave = (target: 'splash' | 'login') => {
-    if (isDirty) {
-      setExitTarget(target);
-      return;
-    }
-    if (target === 'login') onSwitchToLogin();
-    else onExitToSplash();
-  };
+  const requestLeave = useCallback(
+    (target: 'splash' | 'login') => {
+      if (isDirty) {
+        setExitTarget(target);
+        return;
+      }
+      if (target === 'login') onSwitchToLogin();
+      else onExitToSplash();
+    },
+    [isDirty, onExitToSplash, onSwitchToLogin]
+  );
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     setErrorMessage(null);
+    setSocialNotice(null);
     if (step === 1) {
       requestLeave('splash');
       return;
     }
     setStep((prev) => prev - 1);
-  };
+  }, [requestLeave, step]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (legalModal !== null) {
+        setLegalModal(null);
+        return true;
+      }
+      if (exitTarget !== null) {
+        setExitTarget(null);
+        return true;
+      }
+      handleBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [exitTarget, handleBack, legalModal]);
 
   const handleNext = () => {
     setErrorMessage(null);
@@ -196,12 +219,20 @@ export function OnboardingFlowScreen({
     }
 
     if (step === 7) {
-      if (data.password.length < 8) {
-        setErrorMessage('Crie uma senha segura com pelo menos 8 caracteres.');
+      if (!data.password || data.password.trim().length === 0) {
+        setErrorMessage('Por favor, escolha uma senha para proteger sua conta.');
+        return;
+      }
+      if (data.password !== data.password.trim()) {
+        setErrorMessage('Evite deixar espaços no início ou no final da senha.');
+        return;
+      }
+      if (data.password.trim().length < 8) {
+        setErrorMessage('Para sua segurança, escolha uma senha com pelo menos 8 caracteres.');
         return;
       }
       if (data.password !== confirmPassword) {
-        setErrorMessage('As duas senhas precisam ser iguais. Verifique com calma.');
+        setErrorMessage('As duas senhas ficaram diferentes. Vamos conferir com calma.');
         return;
       }
       if (!data.acceptedTerms) {
@@ -230,9 +261,14 @@ export function OnboardingFlowScreen({
   };
 
   const handleSocialStart = (provider: 'Google' | 'Facebook') => {
-    updateField('contact', `usuario.${provider.toLowerCase()}@beyondtime.app`);
-    setStep(2);
+    setErrorMessage(null);
+    setSocialNotice(
+      `O cadastro direto com ${provider} está em fase final de integração neste aplicativo. Por enquanto, informe seu e-mail ou telefone acima para continuar.`
+    );
   };
+
+  const isNextDisabled =
+    step === 5 && data.selectedHobbies.length < MIN_HOBBIES_SELECTION;
 
   return (
     <KeyboardAvoidingView
@@ -242,8 +278,8 @@ export function OnboardingFlowScreen({
       <OnboardingHeader
         onBack={handleBack}
         backLabel="Voltar"
-        stepCurrent={step > 1 ? step - 1 : undefined}
-        stepTotal={step > 1 ? 6 : undefined}
+        stepCurrent={step}
+        stepTotal={7}
         showThemeToggle={step === 1}
       />
 
@@ -259,7 +295,7 @@ export function OnboardingFlowScreen({
               <BeyondTimeSymbol size={42} />
             </View>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(28) }]}>
-              Vamos criar sua <Text style={{ color: palette.primary }}>conta</Text>
+              Vamos criar sua <Text style={{ color: palette.primaryText }}>conta</Text>
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Enviaremos um código para confirmar. Seus dados nunca ficam públicos.
@@ -317,6 +353,19 @@ export function OnboardingFlowScreen({
               />
             </View>
 
+            {socialNotice ? (
+              <View
+                style={[
+                  styles.errorBox,
+                  { backgroundColor: palette.primarySoft, borderColor: palette.borderStrong },
+                ]}
+              >
+                <Text style={[styles.errorText, { color: palette.textPrimary, fontSize: fs(15) }]}>
+                  {socialNotice}
+                </Text>
+              </View>
+            ) : null}
+
             <TouchableOpacity
               onPress={() => requestLeave('login')}
               accessibilityRole="button"
@@ -325,7 +374,7 @@ export function OnboardingFlowScreen({
             >
               <Text style={[styles.inlineLinkText, { color: palette.textSecondary, fontSize: fs(16) }]}>
                 Já tem conta?{' '}
-                <Text style={{ color: palette.primary, fontWeight: '700', textDecorationLine: 'underline' }}>
+                <Text style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}>
                   Entrar
                 </Text>
               </Text>
@@ -337,7 +386,7 @@ export function OnboardingFlowScreen({
         {step === 2 && (
           <View style={styles.stepBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Como podemos <Text style={{ color: palette.primary }}>chamar</Text> você?
+              Como podemos <Text style={{ color: palette.primaryText }}>chamar</Text> você?
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Vamos conhecer você um pouquinho. O BeyondTime é feito para quem tem 50 anos ou mais.
@@ -396,7 +445,7 @@ export function OnboardingFlowScreen({
                 { backgroundColor: palette.primarySoft, borderColor: palette.border },
               ]}
             >
-              <ShieldCheckIcon size={20} color={palette.primary} />
+              <ShieldCheckIcon size={20} color={palette.primaryText} />
               <Text style={[styles.infoCardText, { color: palette.textSecondary, fontSize: fs(15) }]}>
                 Usamos sua data apenas para confirmar que você tem 50+. A sua data exata nunca aparece no perfil.
               </Text>
@@ -408,7 +457,7 @@ export function OnboardingFlowScreen({
         {step === 3 && (
           <View style={styles.stepBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Onde você <Text style={{ color: palette.primary }}>mora</Text>?
+              Onde você <Text style={{ color: palette.primaryText }}>mora</Text>?
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Assim mostramos pessoas que moram perto de você.
@@ -457,12 +506,12 @@ export function OnboardingFlowScreen({
                       },
                     ]}
                   >
-                    {selected ? <CheckIcon size={16} color={palette.primary} /> : null}
+                    {selected ? <CheckIcon size={16} color={palette.primaryText} /> : null}
                     <Text
                       style={[
                         styles.chipText,
                         {
-                          color: selected ? palette.primary : palette.textPrimary,
+                          color: selected ? palette.primaryText : palette.textPrimary,
                           fontSize: fs(15),
                         },
                       ]}
@@ -480,7 +529,7 @@ export function OnboardingFlowScreen({
                 { backgroundColor: palette.primarySoft, borderColor: palette.border },
               ]}
             >
-              <ShieldCheckIcon size={20} color={palette.primary} />
+              <ShieldCheckIcon size={20} color={palette.primaryText} />
               <Text style={[styles.infoCardText, { color: palette.textSecondary, fontSize: fs(15) }]}>
                 Usamos apenas a sua cidade. Seu endereço ou bairro exato nunca aparece para ninguém.
               </Text>
@@ -492,7 +541,7 @@ export function OnboardingFlowScreen({
         {step === 4 && (
           <View style={styles.stepBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Escolha uma <Text style={{ color: palette.primary }}>foto</Text> sua
+              Escolha uma <Text style={{ color: palette.primaryText }}>foto</Text> sua
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Um sorriso natural ajuda as outras pessoas a sentirem confiança.
@@ -518,7 +567,7 @@ export function OnboardingFlowScreen({
                 {photoSelectedDemo ? (
                   <CheckIcon size={34} color={palette.verifiedText} />
                 ) : (
-                  <CameraIcon size={34} color={palette.primary} />
+                  <CameraIcon size={34} color={palette.primaryText} />
                 )}
               </View>
 
@@ -529,7 +578,7 @@ export function OnboardingFlowScreen({
                 ]}
               >
                 {photoSelectedDemo
-                  ? 'Foto selecionada com sucesso!'
+                  ? 'Foto selecionada com sucesso.'
                   : 'Nenhuma foto escolhida ainda'}
               </Text>
 
@@ -540,7 +589,7 @@ export function OnboardingFlowScreen({
                   setPhotoSelectedDemo(true);
                   updateField('profilePhotoUri', 'local://avatar-selecionado');
                 }}
-                iconLeft={<CameraIcon size={20} color={palette.primary} />}
+                iconLeft={<CameraIcon size={20} color={palette.primaryText} />}
               />
             </View>
 
@@ -559,14 +608,14 @@ export function OnboardingFlowScreen({
         {step === 5 && (
           <View style={styles.stepBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Do que você <Text style={{ color: palette.primary }}>gosta</Text>?
+              Do que você <Text style={{ color: palette.primaryText }}>gosta</Text>?
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Escolha de {MIN_HOBBIES_SELECTION} a {MAX_HOBBIES_SELECTION} assuntos para
               encontrar pessoas com gostos parecidos.
             </Text>
 
-            <Text style={[styles.counterText, { color: palette.primary, fontSize: fs(15) }]}>
+            <Text style={[styles.counterText, { color: palette.primaryText, fontSize: fs(15) }]}>
               {data.selectedHobbies.length} escolhidos de {MAX_HOBBIES_SELECTION} (mínimo{' '}
               {MIN_HOBBIES_SELECTION})
             </Text>
@@ -603,12 +652,12 @@ export function OnboardingFlowScreen({
                             },
                           ]}
                         >
-                          {selected ? <CheckIcon size={16} color={palette.primary} /> : null}
+                          {selected ? <CheckIcon size={16} color={palette.primaryText} /> : null}
                           <Text
                             style={[
                               styles.chipText,
                               {
-                                color: selected ? palette.primary : palette.textPrimary,
+                                color: selected ? palette.primaryText : palette.textPrimary,
                                 fontSize: fs(15),
                               },
                             ]}
@@ -629,7 +678,7 @@ export function OnboardingFlowScreen({
         {step === 6 && (
           <View style={styles.stepBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              O que você <Text style={{ color: palette.primary }}>procura</Text> hoje?
+              O que você <Text style={{ color: palette.primaryText }}>procura</Text> hoje?
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Você pode mudar sua escolha quando quiser.
@@ -657,7 +706,7 @@ export function OnboardingFlowScreen({
                         style={[
                           styles.radioTitle,
                           {
-                            color: selected ? palette.primary : palette.textPrimary,
+                            color: selected ? palette.primaryText : palette.textPrimary,
                             fontSize: fs(18),
                           },
                         ]}
@@ -695,7 +744,7 @@ export function OnboardingFlowScreen({
         {step === 7 && (
           <View style={styles.stepBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Crie sua <Text style={{ color: palette.primary }}>senha</Text> de acesso
+              Crie sua <Text style={{ color: palette.primaryText }}>senha</Text> de acesso
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Escolha uma senha fácil para você lembrar, com pelo menos 8 caracteres.
@@ -741,14 +790,14 @@ export function OnboardingFlowScreen({
                 Li e concordo com os{' '}
                 <Text
                   onPress={() => setLegalModal('termos')}
-                  style={{ color: palette.primary, fontWeight: '700', textDecorationLine: 'underline' }}
+                  style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}
                 >
                   Termos de Uso
                 </Text>{' '}
                 e a{' '}
                 <Text
                   onPress={() => setLegalModal('privacidade')}
-                  style={{ color: palette.primary, fontWeight: '700', textDecorationLine: 'underline' }}
+                  style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}
                 >
                   Política de Privacidade (LGPD)
                 </Text>
@@ -784,6 +833,7 @@ export function OnboardingFlowScreen({
           <AccessibleButton
             label={step === 7 ? 'Concluir cadastro' : 'Continuar'}
             variant="primary"
+            disabled={isNextDisabled}
             onPress={handleNext}
             iconRight={<ArrowRightIcon size={20} color={palette.textOnPrimary} />}
           />
