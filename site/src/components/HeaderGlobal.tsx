@@ -1,19 +1,31 @@
 import type { MouseEvent } from 'react';
-import beyondLogo from '../../assets/beyondlogoicon.svg';
 import type { AuthViewId } from '../types/auth';
 
 interface HeaderGlobalProps {
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
   onBackToLanding?: () => void;
   onToggleAccessibility?: () => void;
+  highContrast?: boolean;
+  onToggleHighContrast?: () => void;
 }
 
 export function HeaderGlobal({
   onNavigate,
   onBackToLanding,
   onToggleAccessibility,
+  highContrast = false,
+  onToggleHighContrast,
 }: HeaderGlobalProps) {
   function handleBrandClick(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    if (onBackToLanding) {
+      onBackToLanding();
+      return;
+    }
+    onNavigate('login', event.currentTarget);
+  }
+
+  function handleBackClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     if (onBackToLanding) {
       onBackToLanding();
@@ -32,45 +44,70 @@ export function HeaderGlobal({
           aria-label="BeyondTime, voltar para a página inicial"
         >
           <img
-            className="brand__logo"
-            src={beyondLogo}
-            width={42}
-            height={26}
-            alt=""
+            className="brand__logo-img"
+            src={highContrast ? '/assets/beyondtime-brand-dark.png' : '/assets/beyondtime-brand-light.png'}
+            alt="BeyondTime"
           />
-          <span className="brand__name">BeyondTime</span>
         </a>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <p className="site-header__tagline">Um novo tempo para se conectar.</p>
+
+        <div className="site-header__right">
           {onToggleAccessibility && (
             <button
               type="button"
-              className="btn--secondary"
-              style={{
-                marginBottom: 0,
-                minHeight: '48px',
-                padding: '8px 16px',
-                fontSize: '15px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}
+              className="btn-theme-toggle"
+              aria-label="Abrir preferências de acessibilidade 50+"
+              title="Acessibilidade 50+"
               onClick={onToggleAccessibility}
-              aria-label="Abrir Painel de Acessibilidade Dinâmica (RF-09)"
             >
-              <span aria-hidden="true">👁️</span> Acessibilidade (RF09)
+              <span aria-hidden="true" style={{ fontSize: '18px', display: 'flex', alignItems: 'center' }}>👁️</span>
             </button>
           )}
-          {onBackToLanding && (
+
+          {onToggleHighContrast && (
             <button
               type="button"
-              className="btn--back"
-              style={{ marginBottom: 0, padding: '8px 14px', fontSize: '15px' }}
-              onClick={onBackToLanding}
+              className="btn-theme-toggle"
+              aria-pressed={highContrast}
+              aria-label={highContrast ? 'Ativar modo claro' : 'Ativar modo noturno'}
+              title={highContrast ? 'Modo claro' : 'Modo noturno'}
+              onClick={onToggleHighContrast}
             >
-              ← Página inicial
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="home-icon"
+                aria-hidden="true"
+              >
+                {highContrast ? (
+                  <>
+                    <circle cx="12" cy="12" r="4" />
+                    <path d="M12 2v2" />
+                    <path d="M12 20v2" />
+                    <path d="m4.93 4.93 1.41 1.41" />
+                    <path d="m17.66 17.66 1.41 1.41" />
+                    <path d="M2 12h2" />
+                    <path d="M20 12h2" />
+                    <path d="m6.34 17.66-1.41 1.41" />
+                    <path d="m19.07 4.93-1.41 1.41" />
+                  </>
+                ) : (
+                  <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                )}
+              </svg>
             </button>
           )}
+
+          <button
+            type="button"
+            className="site-header__home-btn"
+            onClick={handleBackClick}
+          >
+            Voltar
+          </button>
         </div>
       </div>
     </header>

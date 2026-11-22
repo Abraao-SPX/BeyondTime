@@ -3,21 +3,25 @@ import type { ConnectionGoal } from '../../types/auth';
 
 interface GoalOption {
   value: ConnectionGoal;
+  title: string;
   description: string;
 }
 
 const GOAL_OPTIONS: readonly GoalOption[] = [
   {
     value: 'Amizade',
-    description: 'Para conversar, trocar ideias e criar novos laços sinceros.',
+    title: 'Amizade e boas conversas',
+    description: 'Para rir, trocar ideias e criar laços sinceros e acolhedores.',
   },
   {
     value: 'Relacionamento',
-    description: 'Para encontrar um novo amor e viver momentos especiais juntos.',
+    title: 'Relacionamento sério',
+    description: 'Para construir uma história a dois com respeito, parceria e calma.',
   },
   {
     value: 'Companhia',
-    description: 'Para passear, tomar um café, ir a eventos ou viajar acompanhado(a).',
+    title: 'Companhia para passeios e atividades',
+    description: 'Para caminhadas, teatro, feiras, café na praia ou viagens.',
   },
 ];
 
@@ -44,7 +48,7 @@ export function Step6Objetivo({
         O que você procura hoje?
       </h1>
       <p className="auth-card__subtitle">
-        Selecione o tipo de conexão que você deseja encontrar no BeyondTime.
+        Você pode mudar isso quando quiser. Escolha o que combina com o seu momento de vida.
       </p>
 
       <div className="goal-list" role="radiogroup" aria-label="Tipo de conexão desejada">
@@ -60,7 +64,7 @@ export function Step6Objetivo({
               onClick={() => onSelectGoal(option.value)}
             >
               <span className="goal-card__content">
-                <strong className="goal-card__title">{option.value}</strong>
+                <strong className="goal-card__title">{option.title}</strong>
                 <span className="goal-card__desc">{option.description}</span>
               </span>
               <span

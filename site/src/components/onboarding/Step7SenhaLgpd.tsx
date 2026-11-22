@@ -6,6 +6,7 @@ import {
   MIN_PASSWORD_LENGTH,
   validatePasswordMatch,
 } from '../../utils/validation';
+import { PasswordInput } from '../PasswordInput';
 
 interface Step7SenhaLgpdProps {
   formData: OnboardingFormData;
@@ -29,44 +30,6 @@ const LEGAL_PREVIEWS: Record<LegalDocKey, string> = {
     'Política de Privacidade e Segurança: seus dados pessoais e preferências são tratados conforme a LGPD, sem exibição pública de endereço ou telefone.',
 };
 
-function EyeIcon({ visible }: { visible: boolean }) {
-  if (visible) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="btn-eye__icon"
-        aria-hidden="true"
-      >
-        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94" />
-        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19" />
-        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-        <path d="M1 1l22 22" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="btn-eye__icon"
-      aria-hidden="true"
-    >
-      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
 export function Step7SenhaLgpd({
   formData,
   isCompleted,
@@ -81,8 +44,6 @@ export function Step7SenhaLgpd({
   onEditProfile,
   onFinishToLogin,
 }: Step7SenhaLgpdProps) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
 
@@ -219,32 +180,19 @@ export function Step7SenhaLgpd({
               <label className="form-label" htmlFor="step7-password">
                 {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
               </label>
-              <div className="password-row">
-                <input
-                  ref={passwordInputRef}
-                  id="step7-password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  className="form-input form-input--password"
-                  autoComplete="new-password"
-                  placeholder="Digite sua senha"
-                  value={formData.password}
-                  onChange={(event) => {
-                    onPasswordChange(event.target.value);
-                    if (formError !== null) setFormError(null);
-                  }}
-                  aria-describedby="step7-password-help"
-                />
-                <button
-                  type="button"
-                  className="btn-eye"
-                  aria-label="Mostrar ou ocultar senha"
-                  aria-pressed={showPassword}
-                  onClick={() => setShowPassword((prev) => !prev)}
-                >
-                  <EyeIcon visible={showPassword} />
-                </button>
-              </div>
+              <PasswordInput
+                ref={passwordInputRef}
+                id="step7-password"
+                name="password"
+                autoComplete="new-password"
+                placeholder="Digite sua senha"
+                value={formData.password}
+                onChange={(event) => {
+                  onPasswordChange(event.target.value);
+                  if (formError !== null) setFormError(null);
+                }}
+                aria-describedby="step7-password-help"
+              />
               <p id="step7-password-help" className="form-helper">
                 Mínimo de {MIN_PASSWORD_LENGTH} caracteres, com letra maiúscula, minúscula, número e caractere especial (ex.: . , @ ! #).
               </p>
@@ -254,30 +202,17 @@ export function Step7SenhaLgpd({
               <label className="form-label" htmlFor="step7-confirm-password">
                 Confirmar senha
               </label>
-              <div className="password-row">
-                <input
-                  id="step7-confirm-password"
-                  name="confirmPassword"
-                  type={showConfirm ? 'text' : 'password'}
-                  className="form-input form-input--password"
-                  autoComplete="new-password"
-                  placeholder="Digite a senha novamente"
-                  value={formData.confirmPassword}
-                  onChange={(event) => {
-                    onConfirmPasswordChange(event.target.value);
-                    if (formError !== null) setFormError(null);
-                  }}
-                />
-                <button
-                  type="button"
-                  className="btn-eye"
-                  aria-label="Mostrar ou ocultar confirmação de senha"
-                  aria-pressed={showConfirm}
-                  onClick={() => setShowConfirm((prev) => !prev)}
-                >
-                  <EyeIcon visible={showConfirm} />
-                </button>
-              </div>
+              <PasswordInput
+                id="step7-confirm-password"
+                name="confirmPassword"
+                autoComplete="new-password"
+                placeholder="Digite a senha novamente"
+                value={formData.confirmPassword}
+                onChange={(event) => {
+                  onConfirmPasswordChange(event.target.value);
+                  if (formError !== null) setFormError(null);
+                }}
+              />
               {passwordsMatch && (
                 <p className="password-match" aria-live="polite">
                   As senhas coincidem
