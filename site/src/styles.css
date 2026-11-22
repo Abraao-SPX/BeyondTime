@@ -1811,21 +1811,26 @@ html.high-contrast .site-header__home-btn:hover {
 .btn--back {
   width: auto;
   min-height: var(--touch-min);
-  padding: 10px 18px;
+  padding: 6px 0;
   margin-bottom: 20px;
-  background-color: var(--bg-input);
-  border: 1.5px solid var(--border-strong);
-  border-radius: var(--radius-control);
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.15s ease;
 }
 
 .btn--back:hover {
-  background-color: var(--bg-surface-hover);
+  background: transparent;
+  color: var(--text-primary);
+  text-decoration: underline;
 }
 
 .btn--danger-outline {

@@ -135,7 +135,7 @@ export function RecuperarSenha({
         className="btn--back"
         onClick={(event) => onNavigate('login', event.currentTarget)}
       >
-        &lt; Voltar ao login
+        Voltar ao login
       </button>
 
       <h1 id="recover-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
