@@ -1928,23 +1928,27 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
 
 .site-footer__link {
   min-height: var(--touch-min);
-  padding: 10px 16px;
+  padding: 6px 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--bg-input);
-  border: 1.5px solid var(--border-secondary);
-  border-radius: var(--radius-control);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
   text-decoration: underline;
-  text-underline-offset: 3px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+  transition: color 0.15s ease;
 }
 
 .site-footer__link:hover {
-  background-color: var(--bg-surface-hover);
-  border-color: var(--border-secondary-strong);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-decoration: underline;
 }
 
 /* Defensive Modal (RF-06) */

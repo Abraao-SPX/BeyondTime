@@ -164,7 +164,7 @@ export function AccessibilityPanelRF09({
             <header className="accessibility-modal-header">
               <div>
                 <p className="defensive-modal__badge" style={{ marginBottom: '6px' }}>
-                  Acessibilidade Dinâmica (RF-09)
+                  Acessibilidade
                 </p>
                 <h2 id="accessibility-panel-title" className="accessibility-modal-title">
                   Preferências de Visualização 50+

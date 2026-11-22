@@ -12,7 +12,6 @@ interface HeaderGlobalProps {
 export function HeaderGlobal({
   onNavigate,
   onBackToLanding,
-  onToggleAccessibility,
   highContrast = false,
   onToggleHighContrast,
 }: HeaderGlobalProps) {
@@ -84,23 +83,12 @@ export function HeaderGlobal({
             </button>
           )}
 
-          {onToggleAccessibility && (
-            <button
-              type="button"
-              className="btn-contrast btn-contrast--compact"
-              onClick={onToggleAccessibility}
-              aria-label="Abrir Painel de Acessibilidade Dinâmica (RF-09)"
-            >
-              Acessibilidade
-            </button>
-          )}
-
           <button
             type="button"
             className="site-header__home-btn"
             onClick={handleBackClick}
           >
-            ← Voltar
+            Voltar
           </button>
         </div>
       </div>
