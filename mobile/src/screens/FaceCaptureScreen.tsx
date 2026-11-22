@@ -270,10 +270,30 @@ export default function FaceCaptureScreen({
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>Acesso à câmera necessário para biometria.</Text>
-        <TouchableOpacity style={styles.btnPrimary} onPress={requestPermission}>
+        <Text style={[styles.mainTitle, { marginBottom: 10 }]}>
+          Precisamos da câmera para confirmar que é você
+        </Text>
+        <Text style={styles.text}>
+          Sua selfie serve apenas para manter a comunidade mais segura e nunca aparece no seu perfil.
+        </Text>
+        <TouchableOpacity
+          style={[styles.btnPrimary, { minHeight: 56, justifyContent: 'center', marginBottom: 12 }]}
+          onPress={requestPermission}
+          accessibilityRole="button"
+          accessibilityLabel="Conceder permissão da câmera"
+        >
           <Text style={styles.btnText}>Conceder Permissão</Text>
         </TouchableOpacity>
+        {onCancel ? (
+          <TouchableOpacity
+            style={[styles.btnRestart, { width: '75%', minHeight: 52, justifyContent: 'center', marginTop: 4 }]}
+            onPress={onCancel}
+            accessibilityRole="button"
+            accessibilityLabel="Voltar para a tela anterior"
+          >
+            <Text style={styles.btnRestartText}>Voltar</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -479,12 +499,14 @@ export default function FaceCaptureScreen({
 
       {/* Botão Flutuante de Configurações do Servidor */}
       <TouchableOpacity
-        style={styles.settingsBtnFloating}
+        style={[styles.settingsBtnFloating, { minWidth: 48, minHeight: 48, width: 48, height: 48, borderRadius: 24 }]}
         onPress={() => {
           setTestResult(null);
           setShowSettings(true);
         }}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Configurar servidor de verificação"
       >
         <Text style={styles.settingsBtnText}>⚙️</Text>
       </TouchableOpacity>

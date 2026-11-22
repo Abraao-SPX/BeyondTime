@@ -74,7 +74,7 @@ export function FacialVerificationFlowScreen({
         {stage === 'intro' && (
           <View style={styles.stageBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Vamos confirmar que é <Text style={{ color: palette.primary }}>você</Text>
+              Vamos confirmar que é <Text style={{ color: palette.primaryText }}>você</Text>
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Uma selfie rápida ajuda a manter o BeyondTime mais seguro para todos.
@@ -83,12 +83,12 @@ export function FacialVerificationFlowScreen({
             <View
               style={[
                 styles.ovalPreviewBox,
-                { backgroundColor: '#1E1519', borderColor: palette.border },
+                { backgroundColor: palette.cameraPreviewBg, borderColor: palette.border },
               ]}
             >
-              <View style={styles.dashedOval} />
-              <View style={styles.ovalHintPill}>
-                <Text style={[styles.ovalHintText, { fontSize: fs(14) }]}>
+              <View style={[styles.dashedOval, { borderColor: palette.textOnPrimary }]} />
+              <View style={[styles.ovalHintPill, { backgroundColor: palette.surface }]}>
+                <Text style={[styles.ovalHintText, { color: palette.textPrimary, fontSize: fs(14) }]}>
                   Olhe para a câmera com boa luz
                 </Text>
               </View>
@@ -123,7 +123,7 @@ export function FacialVerificationFlowScreen({
         {stage === 'review' && (
           <View style={styles.stageBlock}>
             <Text style={[styles.title, { color: palette.textPrimary, fontSize: fs(26) }]}>
-              Ficou <Text style={{ color: palette.primary }}>boa</Text> assim?
+              Ficou <Text style={{ color: palette.primaryText }}>boa</Text> assim?
             </Text>
             <Text style={[styles.subtitle, { color: palette.textSecondary, fontSize: fs(16) }]}>
               Confira se o seu rosto aparece com clareza antes de confirmar.
@@ -148,7 +148,7 @@ export function FacialVerificationFlowScreen({
                     { backgroundColor: palette.primarySoft },
                   ]}
                 >
-                  <ShieldCheckIcon size={44} color={palette.primary} />
+                  <ShieldCheckIcon size={44} color={palette.primaryText} />
                 </View>
               )}
 
@@ -176,7 +176,7 @@ export function FacialVerificationFlowScreen({
                 { backgroundColor: palette.primarySoft, borderColor: palette.border },
               ]}
             >
-              <ShieldCheckIcon size={20} color={palette.primary} />
+              <ShieldCheckIcon size={20} color={palette.primaryText} />
               <Text style={[styles.privacyText, { color: palette.textSecondary, fontSize: fs(15) }]}>
                 Esta foto serve só para confirmação e nunca aparece no seu perfil.
               </Text>
@@ -193,7 +193,7 @@ export function FacialVerificationFlowScreen({
                 label="Tirar outra foto"
                 variant="outline"
                 onPress={() => setStage('camera')}
-                iconLeft={<RefreshIcon size={20} color={palette.primary} />}
+                iconLeft={<RefreshIcon size={20} color={palette.primaryText} />}
               />
             </View>
           </View>
@@ -316,16 +316,13 @@ const styles = StyleSheet.create({
     borderRadius: 65,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: '#FFFFFF',
   },
   ovalHintPill: {
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
   },
   ovalHintText: {
-    color: '#2A1A20',
     fontWeight: '700',
   },
   tipsList: {
