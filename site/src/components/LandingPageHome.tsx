@@ -301,10 +301,10 @@ const SAFETY_PILLARS = [
 ];
 
 const TEAM_MEMBERS = [
-  { name: 'José Guilherme', role: 'Líder Técnico & Full Stack' },
-  { name: 'Abraão Silva', role: 'Segurança & Backend' },
-  { name: 'Paulo Rafael', role: 'Arquitetura & Dados' },
-  { name: 'Brigitte Lara', role: 'UX Research & Acessibilidade' },
+  { name: 'José Guilherme', role: 'Líder Técnico e Desenvolvedor' },
+  { name: 'Abraão Silva', role: 'Desenvolvedor' },
+  { name: 'Paulo Rafael', role: 'Desenvolvedor' },
+  { name: 'Brigitte Lara', role: 'Desenvolvedor' },
 ];
 
 const TECH_STACK = [
@@ -853,7 +853,7 @@ export function LandingPageHome({
             <p className="home-footer__desc">
               UNINASSAU Aracaju · ADS 2026.
             </p>
-            <p className="home-footer__team-title">Coordenação</p>
+            <p className="home-footer__team-title">Equipe de Desenvolvimento</p>
             <p className="home-footer__desc">
               José Guilherme, Abraão Silva, Paulo Rafael e Brigitte Lara.
             </p>
