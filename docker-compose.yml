@@ -9,9 +9,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-beyondtime_db}
       POSTGRES_USER: ${POSTGRES_USER:-beyondtime_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +45,7 @@ services:
       dockerfile: Dockerfile
     container_name: beyondtime-ia
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     restart: unless-stopped
 
   # ==========================================
@@ -62,14 +62,47 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beyondtime_db}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-beyondtime_dev_pass}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env}
+      LOGIN_TRUST_FORWARDED_HEADERS: "${LOGIN_TRUST_FORWARDED_HEADERS:-true}"
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      BEYONDTIME_MAIL_FROM: ${BEYONDTIME_MAIL_FROM:-nao-responda@beyondtime.com.br}
+      PASSWORD_RESET_EXPOSE_DEBUG_CODE: ${PASSWORD_RESET_EXPOSE_DEBUG_CODE:-false}
+      AVATARS_UPLOAD_DIR: /app/uploads/avatars
+    volumes:
+      - avatars_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
-      anjo-da-guarda:
-        condition: service_started
-      face-api:
-        condition: service_started
+
+  # ==========================================
+  # 4. Site Web & Aplicação React 18 (Nginx)
+  # ==========================================
+  site:
+    build:
+      context: ./site
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET:-}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
+    container_name: beyondtime-site
+    ports:
+      - "${SITE_PORT:-8085}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:
+  avatars_data:

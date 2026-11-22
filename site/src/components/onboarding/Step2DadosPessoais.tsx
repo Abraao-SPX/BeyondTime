@@ -1,28 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
-  calculateAgeFromBirthDate,
+  containsDangerousXss,
   formatBirthDateInput,
-  MIN_ALLOWED_AGE,
+  sanitizeTextInput,
   validateBirthDate50Plus,
 } from '../../utils/validation';
 
 interface Step2DadosPessoaisProps {
   fullName: string;
-  preferredName?: string;
   birthDate: string;
+  birthDateAlreadyVerified?: boolean;
   onFullNameChange: (value: string) => void;
-  onPreferredNameChange?: (value: string) => void;
   onBirthDateChange: (value: string) => void;
   onNext: () => void;
 }
 
 export function Step2DadosPessoais({
   fullName,
-  preferredName = '',
   birthDate,
+  birthDateAlreadyVerified = false,
   onFullNameChange,
-  onPreferredNameChange,
   onBirthDateChange,
   onNext,
 }: Step2DadosPessoaisProps) {
@@ -37,24 +35,38 @@ export function Step2DadosPessoais({
     headingRef.current?.focus();
   }, []);
 
-  const calculatedAge = calculateAgeFromBirthDate(birthDate);
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const trimmedName = fullName.trim();
-    if (trimmedName.length < 2) {
-      setNameError('Informe seu nome completo com pelo menos 2 letras.');
+    if (containsDangerousXss(fullName)) {
+      setNameError('Scripts ou tags HTML não são permitidos no nome.');
       nameInputRef.current?.focus();
       return;
     }
+
+    const trimmedName = sanitizeTextInput(fullName);
+    if (trimmedName.length < 2) {
+      setNameError('Informe como você gosta de ser chamado(a) com pelo menos 2 letras.');
+      nameInputRef.current?.focus();
+      return;
+    }
+    if (!/^[\p{L}\p{N}\s'.-]+$/u.test(trimmedName)) {
+      setNameError('Use apenas letras, números e espaços no seu nome.');
+      nameInputRef.current?.focus();
+      return;
+    }
+    if (trimmedName !== fullName) {
+      onFullNameChange(trimmedName);
+    }
     setNameError(null);
 
-    const ageValidationError = validateBirthDate50Plus(birthDate);
-    if (ageValidationError !== null) {
-      setBirthDateError(ageValidationError);
-      birthDateInputRef.current?.focus();
-      return;
+    if (!birthDateAlreadyVerified) {
+      const ageValidationError = validateBirthDate50Plus(birthDate);
+      if (ageValidationError !== null) {
+        setBirthDateError(ageValidationError);
+        birthDateInputRef.current?.focus();
+        return;
+      }
     }
 
     setBirthDateError(null);
@@ -64,94 +76,81 @@ export function Step2DadosPessoais({
   return (
     <div>
       <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-        Conta um pouco sobre você
+        Seus dados pessoais
       </h1>
       <p className="auth-card__subtitle">
-        Queremos conhecer você melhor. O BeyondTime é um espaço seguro e exclusivo para pessoas com 50 anos ou mais.
+        O BeyondTime é uma comunidade exclusiva para pessoas com 50 anos ou mais.
       </p>
 
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
         <div className="form-group">
-          <label className="form-label" htmlFor="step2-fullname">
-            Nome completo
+          <label className="form-label" htmlFor="step2-name">
+            Como você gosta de ser chamado(a)?
           </label>
           <input
             ref={nameInputRef}
-            id="step2-fullname"
+            id="step2-name"
             name="fullName"
             type="text"
             className="form-input"
             autoComplete="name"
-            placeholder="Ex.: Maria de Fátima Santos"
+            placeholder="Digite seu nome e sobrenome"
             value={fullName}
             onChange={(event) => {
               onFullNameChange(event.target.value);
               if (nameError !== null) setNameError(null);
             }}
             aria-invalid={nameError !== null ? 'true' : undefined}
-            aria-describedby="step2-fullname-error"
+            aria-describedby="step2-name-error"
           />
           {nameError !== null && (
-            <p id="step2-fullname-error" className="form-error" role="alert">
+            <p id="step2-name-error" className="form-error" role="alert">
               {nameError}
             </p>
           )}
         </div>
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="step2-preferred-name">
-            Como gostaria de ser chamado(a)? <span className="form-label__hint">(opcional)</span>
-          </label>
-          <input
-            id="step2-preferred-name"
-            name="preferredName"
-            type="text"
-            className="form-input"
-            placeholder="Ex.: Fátima"
-            value={preferredName}
-            onChange={(event) => onPreferredNameChange?.(event.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label" htmlFor="step2-birthdate">
-            Data de nascimento
-          </label>
-          <input
-            ref={birthDateInputRef}
-            id="step2-birthdate"
-            name="birthDate"
-            type="text"
-            inputMode="numeric"
-            maxLength={10}
-            className="form-input"
-            autoComplete="bday"
-            placeholder="DD/MM/AAAA"
-            value={birthDate}
-            onChange={(event) => {
-              onBirthDateChange(formatBirthDateInput(event.target.value));
-              if (birthDateError !== null) setBirthDateError(null);
-            }}
-            aria-invalid={birthDateError !== null ? 'true' : undefined}
-            aria-describedby="step2-birthdate-error"
-          />
-
-          {calculatedAge !== null && calculatedAge >= MIN_ALLOWED_AGE && (
-            <p className="age-confirmation-badge" role="status">
-              ✓ {calculatedAge} anos confirmados. Seja muito bem-vindo(a)!
+        {birthDateAlreadyVerified ? (
+          <div className="callout-amber-lgpd" role="status">
+            <p className="callout-amber-lgpd__text">
+              <strong>Elegibilidade 50+ já confirmada</strong>
+              {birthDate ? ` (${birthDate})` : ''}. Você não precisa informar sua data de nascimento novamente.
             </p>
-          )}
-
-          {birthDateError !== null && (
-            <div
-              id="step2-birthdate-error"
-              className="callout-danger-amber"
-              role="alert"
-            >
-              {birthDateError}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="form-group">
+            <label className="form-label" htmlFor="step2-birthdate">
+              Data de nascimento
+            </label>
+            <input
+              ref={birthDateInputRef}
+              id="step2-birthdate"
+              name="birthDate"
+              type="text"
+              inputMode="numeric"
+              maxLength={10}
+              className="form-input"
+              autoComplete="bday"
+              placeholder="DD/MM/AAAA"
+              value={birthDate}
+              onChange={(event) => {
+                onBirthDateChange(formatBirthDateInput(event.target.value));
+                if (birthDateError !== null) setBirthDateError(null);
+              }}
+              aria-invalid={birthDateError !== null ? 'true' : undefined}
+              aria-describedby="step2-birthdate-error"
+            />
+            {birthDateError !== null && (
+              <div
+                id="step2-birthdate-error"
+                className="callout-danger-amber"
+                role="alert"
+              >
+                {birthDateError}
+              </div>
+            )}
+          </div>
+        )}
 
         <button type="submit" className="btn btn--primary">
           Avançar

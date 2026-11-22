@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { LegalDocKey, OnboardingFormData, OnboardingStep } from '../../types/auth';
+import type { LegalDocKey, OnboardingFormData, SocialProvider } from '../../types/auth';
 import {
   calculateAgeFromBirthDate,
   MIN_PASSWORD_LENGTH,
@@ -10,13 +10,16 @@ import {
 interface Step7SenhaLgpdProps {
   formData: OnboardingFormData;
   isCompleted: boolean;
+  isSubmitting?: boolean;
+  isSocialAccount?: boolean;
+  isEditMode?: boolean;
+  socialProvider?: SocialProvider | null;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
   onToggleLgpd: (accepted: boolean) => void;
   onComplete: () => void;
   onEditProfile: () => void;
   onFinishToLogin: () => void;
-  onEditStep?: (step: OnboardingStep) => void;
 }
 
 const LEGAL_PREVIEWS: Record<LegalDocKey, string> = {
@@ -58,7 +61,7 @@ function EyeIcon({ visible }: { visible: boolean }) {
       className="btn-eye__icon"
       aria-hidden="true"
     >
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
       <circle cx="12" cy="12" r="3" />
     </svg>
   );
@@ -67,37 +70,46 @@ function EyeIcon({ visible }: { visible: boolean }) {
 export function Step7SenhaLgpd({
   formData,
   isCompleted,
+  isSubmitting = false,
+  isSocialAccount = false,
+  isEditMode = false,
+  socialProvider = null,
   onPasswordChange,
   onConfirmPasswordChange,
   onToggleLgpd,
   onComplete,
   onEditProfile,
   onFinishToLogin,
-  onEditStep,
 }: Step7SenhaLgpdProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     headingRef.current?.focus();
-  }, [isCompleted]);
+  }, []);
+
+  const passwordsMatch =
+    formData.password.length >= MIN_PASSWORD_LENGTH &&
+    formData.password === formData.confirmPassword;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const passwordError = validatePasswordMatch(
-      formData.password,
-      formData.confirmPassword
-    );
-    if (passwordError !== null) {
-      setFormError(passwordError);
-      passwordInputRef.current?.focus();
-      return;
+    if (!isEditMode && (!isSocialAccount || formData.password.length > 0 || formData.confirmPassword.length > 0)) {
+      const passwordError = validatePasswordMatch(
+        formData.password,
+        formData.confirmPassword
+      );
+      if (passwordError !== null) {
+        setFormError(passwordError);
+        passwordInputRef.current?.focus();
+        return;
+      }
     }
 
     if (!formData.acceptedLgpd) {
@@ -115,17 +127,16 @@ export function Step7SenhaLgpd({
     setActiveLegalDoc((current) => (current === docKey ? null : docKey));
   }
 
-  const calculatedAge = calculateAgeFromBirthDate(formData.birthDate);
-
   if (isCompleted) {
+    const calculatedAge = calculateAgeFromBirthDate(formData.birthDate);
     return (
       <div className="completion-summary" aria-live="polite">
         <p className="defensive-modal__badge">Perfil salvo</p>
         <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-          Perfil criado com sucesso!
+          Perfil criado com sucesso
         </h1>
         <p className="auth-card__subtitle">
-          Seus dados e preferências foram salvos com segurança. Você já pode acessar a comunidade.
+          Seus dados e preferências foram salvos. Você pode editar seu perfil a qualquer momento.
         </p>
 
         {formData.photoPreviewUrl !== null && (
@@ -142,15 +153,12 @@ export function Step7SenhaLgpd({
           <p>
             <strong>Nome:</strong> {formData.fullName || 'Não informado'}
           </p>
-          {formData.preferredName && (
+          {(calculatedAge !== null || formData.birthDate) && (
             <p>
-              <strong>Prefere ser chamado(a):</strong> {formData.preferredName}
+              <strong>Idade:</strong>{' '}
+              {calculatedAge !== null ? `${calculatedAge} anos` : formData.birthDate}
             </p>
           )}
-          <p>
-            <strong>Idade:</strong>{' '}
-            {calculatedAge !== null ? `${calculatedAge} anos` : formData.birthDate}
-          </p>
           <p>
             <strong>Cidade:</strong> {formData.city}
           </p>
@@ -158,24 +166,24 @@ export function Step7SenhaLgpd({
             <strong>Objetivo:</strong> {formData.goal}
           </p>
           <p>
-            <strong>Interesses:</strong> {formData.hobbies.join(', ')}
+            <strong>Interesses escolhidos:</strong> {formData.hobbies.join(', ')}
           </p>
         </div>
 
-        <div className="action-stack">
+        <div className="action-stack action-stack--compact">
           <button
             type="button"
             className="btn btn--primary"
             onClick={onFinishToLogin}
           >
-            Ir para o login e entrar
+            Acessar meu painel
           </button>
           <button
             type="button"
             className="btn btn--secondary"
             onClick={onEditProfile}
           >
-            Editar dados do perfil
+            Editar perfil
           </button>
         </div>
       </div>
@@ -184,256 +192,191 @@ export function Step7SenhaLgpd({
 
   return (
     <div>
+      {isSocialAccount && socialProvider && (
+        <p className="defensive-modal__badge" style={{ marginBottom: '8px' }}>
+          Conectado via {socialProvider}
+        </p>
+      )}
       <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-        Crie sua senha e confira tudo
+        {isEditMode
+          ? 'Revisar e salvar alterações'
+          : isSocialAccount
+            ? 'Conclua seu cadastro 50+'
+            : 'Crie sua senha de acesso'}
       </h1>
       <p className="auth-card__subtitle">
-        Guarde bem essa senha para entrar de novo quando quiser.
+        {isEditMode
+          ? 'Confira o aceite de privacidade e clique abaixo para atualizar seu perfil, foto e hobbies no servidor.'
+          : isSocialAccount
+            ? 'Confirme o aceite dos termos para finalizar seu cadastro seguro no BeyondTime. A criação de senha local é opcional.'
+            : 'Escolha uma senha segura para proteger sua conta.'}
       </p>
 
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
-        <div className="form-group">
-          <label className="form-label" htmlFor="step7-password">
-            Crie uma senha (mínimo de {MIN_PASSWORD_LENGTH} caracteres)
-          </label>
-          <div className="input-with-action">
+        {!isEditMode && (
+          <>
+            <div className="form-group">
+              <label className="form-label" htmlFor="step7-password">
+                {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
+              </label>
+              <div className="password-row">
+                <input
+                  ref={passwordInputRef}
+                  id="step7-password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="form-input form-input--password"
+                  autoComplete="new-password"
+                  placeholder="Digite sua senha"
+                  value={formData.password}
+                  onChange={(event) => {
+                    onPasswordChange(event.target.value);
+                    if (formError !== null) setFormError(null);
+                  }}
+                  aria-describedby="step7-password-help"
+                />
+                <button
+                  type="button"
+                  className="btn-eye"
+                  aria-label="Mostrar ou ocultar senha"
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                >
+                  <EyeIcon visible={showPassword} />
+                </button>
+              </div>
+              <p id="step7-password-help" className="form-helper">
+                Mínimo de {MIN_PASSWORD_LENGTH} caracteres, com letra maiúscula, minúscula, número e caractere especial (ex.: . , @ ! #).
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="step7-confirm-password">
+                Confirmar senha
+              </label>
+              <div className="password-row">
+                <input
+                  id="step7-confirm-password"
+                  name="confirmPassword"
+                  type={showConfirm ? 'text' : 'password'}
+                  className="form-input form-input--password"
+                  autoComplete="new-password"
+                  placeholder="Digite a senha novamente"
+                  value={formData.confirmPassword}
+                  onChange={(event) => {
+                    onConfirmPasswordChange(event.target.value);
+                    if (formError !== null) setFormError(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn-eye"
+                  aria-label="Mostrar ou ocultar confirmação de senha"
+                  aria-pressed={showConfirm}
+                  onClick={() => setShowConfirm((prev) => !prev)}
+                >
+                  <EyeIcon visible={showConfirm} />
+                </button>
+              </div>
+              {passwordsMatch && (
+                <p className="password-match" aria-live="polite">
+                  As senhas coincidem
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="lgpd-consent">
+          <label className="lgpd-checkbox-row" htmlFor="step7-lgpd">
             <input
-              ref={passwordInputRef}
-              id="step7-password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              className="form-input"
-              autoComplete="new-password"
-              placeholder="Digite sua senha secreta"
-              value={formData.password}
+              id="step7-lgpd"
+              type="checkbox"
+              className="lgpd-checkbox-input"
+              checked={formData.acceptedLgpd}
               onChange={(event) => {
-                onPasswordChange(event.target.value);
+                onToggleLgpd(event.target.checked);
                 if (formError !== null) setFormError(null);
               }}
-              aria-describedby="step7-rules"
             />
-            <button
-              type="button"
-              className="btn-eye"
-              onClick={() => setShowPassword((prev) => !prev)}
-              aria-label={showPassword ? 'Ocultar senha' : 'Ver senha em texto'}
-            >
-              <EyeIcon visible={showPassword} />
-            </button>
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label" htmlFor="step7-confirm">
-            Confirme sua senha
+            <span className="lgpd-checkbox-box" aria-hidden="true">
+              {formData.acceptedLgpd && (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#FFFFFF"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="lgpd-checkbox-box__icon"
+                >
+                  <path d="M5 12l5 5L19 7" />
+                </svg>
+              )}
+            </span>
+            <span className="lgpd-checkbox-text">
+              Li e aceito os <strong>Termos de Uso</strong> e a{' '}
+              <strong>Política de Privacidade e Segurança</strong> do BeyondTime.
+            </span>
           </label>
-          <div className="input-with-action">
-            <input
-              id="step7-confirm"
-              name="confirmPassword"
-              type={showConfirmPassword ? 'text' : 'password'}
-              className="form-input"
-              autoComplete="new-password"
-              placeholder="Digite a mesma senha novamente"
-              value={formData.confirmPassword}
-              onChange={(event) => {
-                onConfirmPasswordChange(event.target.value);
-                if (formError !== null) setFormError(null);
-              }}
-            />
+
+          <div className="lgpd-doc-buttons">
             <button
               type="button"
-              className="btn-eye"
-              onClick={() => setShowConfirmPassword((prev) => !prev)}
-              aria-label={
-                showConfirmPassword
-                  ? 'Ocultar confirmação da senha'
-                  : 'Ver confirmação da senha em texto'
-              }
-            >
-              <EyeIcon visible={showConfirmPassword} />
-            </button>
-          </div>
-        </div>
-
-        {/* Revisão Interativa dos Dados (Conforme Wireframe) */}
-        <div className="review-card">
-          <div className="review-card__header">
-            <h2 className="review-card__title">Revise seus dados:</h2>
-            <span className="review-card__tip">Confira se está tudo certinho antes de concluir</span>
-          </div>
-
-          <ul className="review-list">
-            <li className="review-item">
-              <div className="review-item__info">
-                <span className="review-item__label">Nome completo</span>
-                <span className="review-item__value">
-                  {formData.fullName || 'Não informado'}
-                  {formData.preferredName ? ` (chamado de ${formData.preferredName})` : ''}
-                </span>
-              </div>
-              {onEditStep && (
-                <button
-                  type="button"
-                  className="review-item__edit-btn"
-                  onClick={() => onEditStep(2)}
-                  aria-label="Editar nome e dados pessoais"
-                >
-                  Editar
-                </button>
-              )}
-            </li>
-
-            <li className="review-item">
-              <div className="review-item__info">
-                <span className="review-item__label">Data de nascimento</span>
-                <span className="review-item__value">
-                  {formData.birthDate || 'Não informado'}
-                  {calculatedAge !== null ? ` (${calculatedAge} anos)` : ''}
-                </span>
-              </div>
-              {onEditStep && (
-                <button
-                  type="button"
-                  className="review-item__edit-btn"
-                  onClick={() => onEditStep(2)}
-                  aria-label="Editar data de nascimento"
-                >
-                  Editar
-                </button>
-              )}
-            </li>
-
-            <li className="review-item">
-              <div className="review-item__info">
-                <span className="review-item__label">Localização</span>
-                <span className="review-item__value">{formData.city}</span>
-              </div>
-              {onEditStep && (
-                <button
-                  type="button"
-                  className="review-item__edit-btn"
-                  onClick={() => onEditStep(3)}
-                  aria-label="Editar cidade de localização"
-                >
-                  Editar
-                </button>
-              )}
-            </li>
-
-            <li className="review-item">
-              <div className="review-item__info">
-                <span className="review-item__label">Foto de perfil</span>
-                <span className="review-item__value">
-                  {formData.photoPreviewUrl ? 'Foto selecionada ✓' : 'Adicionar mais tarde'}
-                </span>
-              </div>
-              {onEditStep && (
-                <button
-                  type="button"
-                  className="review-item__edit-btn"
-                  onClick={() => onEditStep(4)}
-                  aria-label="Editar foto de perfil"
-                >
-                  Editar
-                </button>
-              )}
-            </li>
-
-            <li className="review-item">
-              <div className="review-item__info">
-                <span className="review-item__label">Seus interesses</span>
-                <span className="review-item__value">
-                  {formData.hobbies.length > 0
-                    ? formData.hobbies.join(', ')
-                    : 'Nenhum hobby selecionado'}
-                </span>
-              </div>
-              {onEditStep && (
-                <button
-                  type="button"
-                  className="review-item__edit-btn"
-                  onClick={() => onEditStep(5)}
-                  aria-label="Editar interesses e hobbies"
-                >
-                  Editar
-                </button>
-              )}
-            </li>
-
-            <li className="review-item">
-              <div className="review-item__info">
-                <span className="review-item__label">O que procura</span>
-                <span className="review-item__value">{formData.goal}</span>
-              </div>
-              {onEditStep && (
-                <button
-                  type="button"
-                  className="review-item__edit-btn"
-                  onClick={() => onEditStep(6)}
-                  aria-label="Editar o que procura"
-                >
-                  Editar
-                </button>
-              )}
-            </li>
-          </ul>
-        </div>
-
-        <div className="checkbox-group">
-          <input
-            id="step7-lgpd"
-            name="acceptedLgpd"
-            type="checkbox"
-            className="checkbox-input"
-            checked={formData.acceptedLgpd}
-            onChange={(event) => {
-              onToggleLgpd(event.target.checked);
-              if (formError !== null) setFormError(null);
-            }}
-          />
-          <label className="checkbox-label" htmlFor="step7-lgpd">
-            Li e concordo com os{' '}
-            <button
-              type="button"
-              className="text-link"
+              className="btn-legal-outline"
               onClick={() => handleToggleLegalPreview('terms')}
             >
               Termos de Uso
-            </button>{' '}
-            e a{' '}
+            </button>
             <button
               type="button"
-              className="text-link"
+              className="btn-legal-outline"
               onClick={() => handleToggleLegalPreview('privacy')}
             >
               Política de Privacidade e Segurança
             </button>
-            .
-          </label>
+            <a
+              href="/privacidade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-legal-outline"
+              style={{
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: 'var(--brand-primary)',
+              }}
+              title="Abre a Política de Privacidade e Proteção de Dados completa em nova aba"
+            >
+              Ler Política Completa (LGPD) ↗
+            </a>
+          </div>
+
+          {activeLegalDoc !== null && (
+            <p className="form-feedback" aria-live="polite">
+              {LEGAL_PREVIEWS[activeLegalDoc]}
+            </p>
+          )}
         </div>
 
-        {activeLegalDoc !== null && (
-          <div className="callout-legal" role="region" aria-live="polite">
-            <p>{LEGAL_PREVIEWS[activeLegalDoc]}</p>
-            <button
-              type="button"
-              className="btn-legal-close"
-              onClick={() => setActiveLegalDoc(null)}
-            >
-              Fechar resumo
-            </button>
-          </div>
-        )}
-
         {formError !== null && (
-          <p className="form-error" role="alert">
+          <p className="form-error form-error--block" role="alert">
             {formError}
           </p>
         )}
 
-        <button type="submit" className="btn btn--primary">
-          Concluir cadastro
+        <button
+          type="submit"
+          className="btn btn--primary"
+          disabled={isSubmitting}
+          aria-busy={isSubmitting}
+        >
+          {isSubmitting
+            ? 'Salvando no servidor...'
+            : isEditMode
+              ? 'Salvar alterações do perfil'
+              : 'Concluir cadastro'}
         </button>
       </form>
     </div>

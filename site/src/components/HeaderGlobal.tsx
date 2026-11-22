@@ -1,20 +1,37 @@
 import type { MouseEvent } from 'react';
-import type { AppViewId } from '../types/auth';
+import type { AuthViewId } from '../types/auth';
 
 interface HeaderGlobalProps {
-  onNavigate: (targetView: AppViewId, triggerEl: HTMLElement) => void;
-  highContrast: boolean;
-  onToggleHighContrast: () => void;
+  onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
+  onBackToLanding?: () => void;
+  onToggleAccessibility?: () => void;
+  highContrast?: boolean;
+  onToggleHighContrast?: () => void;
 }
 
 export function HeaderGlobal({
   onNavigate,
-  highContrast,
+  onBackToLanding,
+  onToggleAccessibility,
+  highContrast = false,
   onToggleHighContrast,
 }: HeaderGlobalProps) {
   function handleBrandClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
-    onNavigate('home', event.currentTarget);
+    if (onBackToLanding) {
+      onBackToLanding();
+      return;
+    }
+    onNavigate('login', event.currentTarget);
+  }
+
+  function handleBackClick(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (onBackToLanding) {
+      onBackToLanding();
+      return;
+    }
+    onNavigate('login', event.currentTarget);
   }
 
   return (
@@ -36,39 +53,52 @@ export function HeaderGlobal({
         <div className="site-header__right">
           <p className="site-header__tagline">Um novo tempo para se conectar.</p>
 
-          <button
-            type="button"
-            className="btn-theme-toggle"
-            aria-pressed={highContrast}
-            aria-label={highContrast ? 'Ativar modo claro' : 'Ativar modo noturno'}
-            title={highContrast ? 'Modo claro' : 'Modo noturno'}
-            onClick={onToggleHighContrast}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="home-icon"
-              aria-hidden="true"
+          {onToggleHighContrast && (
+            <button
+              type="button"
+              className="btn-theme-toggle"
+              aria-pressed={highContrast}
+              aria-label={highContrast ? 'Ativar modo claro' : 'Ativar modo noturno'}
+              title={highContrast ? 'Modo claro' : 'Modo noturno'}
+              onClick={onToggleHighContrast}
             >
-              {highContrast ? (
-                <>
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2m-15.66 4.93 1.41-1.41m11.32-11.32 1.41-1.41" />
-                </>
-              ) : (
-                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-              )}
-            </svg>
-          </button>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="home-icon"
+                aria-hidden="true"
+              >
+                {highContrast ? (
+                  <>
+                    <circle cx="12" cy="12" r="4" />
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2m-15.66 4.93 1.41-1.41m11.32-11.32 1.41-1.41" />
+                  </>
+                ) : (
+                  <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                )}
+              </svg>
+            </button>
+          )}
+
+          {onToggleAccessibility && (
+            <button
+              type="button"
+              className="btn-contrast btn-contrast--compact"
+              onClick={onToggleAccessibility}
+              aria-label="Abrir Painel de Acessibilidade Dinâmica (RF-09)"
+            >
+              Acessibilidade
+            </button>
+          )}
 
           <button
             type="button"
             className="site-header__home-btn"
-            onClick={(event) => onNavigate('home', event.currentTarget)}
+            onClick={handleBackClick}
           >
             ← Voltar
           </button>

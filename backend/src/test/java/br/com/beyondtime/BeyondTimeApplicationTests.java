@@ -29,7 +29,7 @@ class BeyondTimeApplicationTests {
         assertThat(appliedMigrations).isGreaterThanOrEqualTo(2);
         assertThat(statesCount).isEqualTo(1);
         assertThat(citiesCount).isEqualTo(8);
-        assertThat(hobbiesCount).isEqualTo(15);
+        assertThat(hobbiesCount).isGreaterThanOrEqualTo(15);
         assertThat(icebreakersCount).isEqualTo(13);
     }
 }

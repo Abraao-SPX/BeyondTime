@@ -2,6 +2,7 @@ package br.com.beyondtime.shared.exception;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -34,9 +35,26 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problemDetail;
     }
 
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
+        log.warn("Conflito de integridade de dados detectado no PostgreSQL.");
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT,
+                "Os dados informados entram em conflito com um registro já existente."
+        );
+        problemDetail.setTitle("Conflito de Dados");
+        problemDetail.setType(URI.create("https://api.beyondtime.com.br/errors/data-conflict"));
+        problemDetail.setProperty("code", "DATA_CONFLICT");
+        problemDetail.setProperty("timestamp", Instant.now());
+        return problemDetail;
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgumentException(IllegalArgumentException ex) {
-        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST,
+                "Um ou mais parâmetros enviados na requisição possuem formato inválido."
+        );
         problemDetail.setTitle("Parâmetro Inválido");
         problemDetail.setType(URI.create("https://api.beyondtime.com.br/errors/bad-request"));
         problemDetail.setProperty("code", "BAD_REQUEST");

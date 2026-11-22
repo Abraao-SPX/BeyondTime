@@ -1,195 +1,406 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { useContactForm } from '../hooks/useContactForm';
-import type { AuthViewId, SocialProvider } from '../types/auth';
+import { ApiError, loginWithEmail, loginWithSocial } from '../services/apiClient';
+import {
+  authenticateWithFirebasePopup,
+  getFreshFirebaseIdToken,
+  signOutFirebaseSilently,
+} from '../services/firebaseClient';
+import type {
+  AuthSession,
+  AuthViewId,
+  SocialOnboardingDraft,
+  SocialProvider,
+} from '../types/auth';
+import {
+  containsDangerousXss,
+  MAX_LOGIN_ATTEMPTS,
+  sanitizeTextInput,
+} from '../utils/validation';
 import { SocialAuthGrid } from './SocialAuthGrid';
+import { SocialBirthDateModal } from './SocialBirthDateModal';
+
+function fromIsoBirthDateToBr(isoDate: string): string {
+  const parts = isoDate.trim().split('-');
+  if (parts.length !== 3) return '';
+  const [year, month, day] = parts;
+  return `${day}/${month}/${year}`;
+}
 
 interface TelaLoginProps {
   contact: string;
   onContactChange: (value: string) => void;
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
+  onAuthSuccess: (session: AuthSession, socialDraft?: SocialOnboardingDraft) => void;
 }
 
 export function TelaLogin({
   contact,
   onContactChange,
   onNavigate,
+  onAuthSuccess,
 }: TelaLoginProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockCountdownSeconds, setLockCountdownSeconds] = useState(0);
 
-  const {
-    errorMessage,
-    feedbackMessage,
-    setFeedbackMessage,
-    isSubmitting,
-    inputRef,
-    headingRef,
-    handleInputChange,
-    handleSubmit: handleContactSubmit,
-  } = useContactForm({
-    contact,
-    onContactChange,
-    successMessage: 'Acesso validado! Entrando no BeyondTime...',
-  });
+  // Estados para o fluxo social 50+
+  const [isSocialSubmitting, setIsSocialSubmitting] = useState(false);
+  const [socialPendingToken, setSocialPendingToken] = useState<string | null>(null);
+  const [socialProviderName, setSocialProviderName] = useState<SocialProvider | null>(null);
+  const [socialPendingFullName, setSocialPendingFullName] = useState<string | undefined>(undefined);
+  const [socialPendingPhotoUrl, setSocialPendingPhotoUrl] = useState<string | undefined>(undefined);
+  const [isBirthDateModalOpen, setIsBirthDateModalOpen] = useState(false);
+  const [socialModalError, setSocialModalError] = useState<string | null>(null);
 
-  function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (lockCountdownSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setLockCountdownSeconds((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [lockCountdownSeconds]);
+
+  async function handleSocialSelect(provider: SocialProvider) {
+    setErrorMessage(null);
+    setFeedbackMessage(`Autenticando com ${provider}...`);
+    setIsSocialSubmitting(true);
+
+    try {
+      const authResult = await authenticateWithFirebasePopup(provider);
+      onContactChange(authResult.email);
+
+      try {
+        const session = await loginWithSocial(authResult.idToken, undefined, provider, rememberMe);
+        await signOutFirebaseSilently();
+        setFeedbackMessage(`Acesso com ${provider} autorizado! Carregando seu painel...`);
+        onAuthSuccess(session, {
+          fullName: authResult.fullName || undefined,
+          photoUrl: authResult.photoUrl || undefined,
+          provider,
+        });
+      } catch (apiErr) {
+        if (apiErr instanceof ApiError && apiErr.code === 'BIRTH_DATE_REQUIRED_FOR_NEW_OAUTH_ACCOUNT') {
+          // Usuário novo autenticado no Google/Facebook que ainda não cadastrou data de nascimento (RF02)
+          setSocialPendingToken(authResult.idToken);
+          setSocialProviderName(provider);
+          setSocialPendingFullName(authResult.fullName || undefined);
+          setSocialPendingPhotoUrl(authResult.photoUrl || undefined);
+          setSocialModalError(null);
+          setIsBirthDateModalOpen(true);
+          setFeedbackMessage(null);
+        } else if (apiErr instanceof ApiError) {
+          setErrorMessage(apiErr.message);
+          setFeedbackMessage(null);
+        } else {
+          setErrorMessage(`Não foi possível autenticar com ${provider}. Tente novamente.`);
+          setFeedbackMessage(null);
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || `Erro ao autenticar com ${provider}.`);
+      setFeedbackMessage(null);
+    } finally {
+      setIsSocialSubmitting(false);
+    }
+  }
+
+  async function handleSocialBirthDateConfirm(isoBirthDate: string) {
+    if (!socialPendingToken) return;
+
+    setIsSocialSubmitting(true);
+    setSocialModalError(null);
+
+    try {
+      const freshToken = await getFreshFirebaseIdToken(socialPendingToken);
+      const session = await loginWithSocial(
+        freshToken,
+        isoBirthDate,
+        socialProviderName || undefined,
+        rememberMe
+      );
+      await signOutFirebaseSilently();
+      const draft: SocialOnboardingDraft = {
+        fullName: socialPendingFullName,
+        birthDate: fromIsoBirthDateToBr(isoBirthDate),
+        photoUrl: socialPendingPhotoUrl,
+        provider: socialProviderName || undefined,
+      };
+      setIsBirthDateModalOpen(false);
+      setSocialPendingToken(null);
+      setSocialPendingFullName(undefined);
+      setSocialPendingPhotoUrl(undefined);
+      setFeedbackMessage('Cadastro social validado com sucesso! Carregando seu perfil...');
+      onAuthSuccess(session, draft);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setSocialModalError(err.message);
+      } else {
+        setSocialModalError('Não foi possível validar sua data de nascimento. Tente novamente.');
+      }
+    } finally {
+      setIsSocialSubmitting(false);
+    }
+  }
+
+  function handleSocialBirthDateCancel() {
+    void signOutFirebaseSilently();
+    setIsBirthDateModalOpen(false);
+    setSocialPendingToken(null);
+    setSocialProviderName(null);
+    setSocialPendingFullName(undefined);
+    setSocialPendingPhotoUrl(undefined);
+    setSocialModalError(null);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (password.trim().length === 0) {
-      setPasswordError('Digite sua senha para entrar.');
+    setErrorMessage(null);
+    setFeedbackMessage(null);
+
+    if (lockCountdownSeconds > 0) {
+      setErrorMessage(
+        `Acesso temporariamente bloqueado por excesso de tentativas. Aguarde ${lockCountdownSeconds}s ou use "Esqueceu a senha?".`
+      );
       return;
     }
-    setPasswordError(null);
-    handleContactSubmit(event);
+
+    if (containsDangerousXss(contact)) {
+      setErrorMessage('Formato de e-mail inválido. Scripts ou tags HTML não são permitidos.');
+      inputRef.current?.focus();
+      return;
+    }
+
+    const trimmedEmail = sanitizeTextInput(contact);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail)) {
+      setErrorMessage('Informe o e-mail cadastrado para entrar.');
+      inputRef.current?.focus();
+      return;
+    }
+
+    if (password.length === 0) {
+      setErrorMessage('Digite sua senha para continuar.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const session = await loginWithEmail(trimmedEmail, password, rememberMe);
+      setFailedAttempts(0);
+      setLockCountdownSeconds(0);
+      setFeedbackMessage('Acesso confirmado. Carregando sua conta...');
+      onAuthSuccess(session);
+    } catch (err) {
+      const nextAttempts = failedAttempts + 1;
+      setFailedAttempts(nextAttempts);
+
+      if (err instanceof ApiError) {
+        if (err.status === 429 || nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+          setLockCountdownSeconds(60);
+        }
+        const remaining = Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts);
+        if (err.status === 401 && remaining > 0) {
+          setErrorMessage(
+            `${err.message} (Tentativa ${nextAttempts} de ${MAX_LOGIN_ATTEMPTS} — restam ${remaining}).`
+          );
+        } else {
+          setErrorMessage(err.message);
+        }
+      } else {
+        if (nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+          setLockCountdownSeconds(60);
+          setErrorMessage(
+            `Limite de ${MAX_LOGIN_ATTEMPTS} tentativas excedido. Aguarde 60 segundos antes de tentar novamente.`
+          );
+        } else {
+          setErrorMessage('Não foi possível entrar agora. Tente novamente.');
+        }
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function handleSocialSelect(provider: SocialProvider) {
-    setFeedbackMessage(
-      `Entrada com ${provider} preparada para conexão segura via OAuth 2.0.`
-    );
-  }
+  const isAnySubmitting = isSubmitting || isSocialSubmitting;
 
   return (
-    <section id="view-login" className="auth-view" aria-labelledby="login-title">
-      <div className="auth-split-container">
-        {/* Coluna Esquerda: Arco acolhedor com ilustração institucional */}
-        <div className="auth-split__media" aria-hidden="true">
-          <div className="arch-card">
-            <div className="arch-card__badge">Comunidade 50+</div>
-            <div className="arch-card__figure">
-              <div className="arch-card__circle" />
-              <div className="arch-card__portrait">
-                <svg viewBox="0 0 120 120" fill="none" className="arch-card__svg">
-                  <circle cx="60" cy="45" r="24" fill="#C48214" opacity="0.3" />
-                  <path d="M20 105c0-22 18-40 40-40s40 18 40 40" stroke="#8C2D52" strokeWidth="6" strokeLinecap="round" />
-                  <circle cx="60" cy="45" r="18" fill="#8C2D52" />
-                </svg>
-              </div>
-            </div>
-            <p className="arch-card__quote">
-              &ldquo;Um lugar acolhedor feito especialmente para quem já viveu grandes histórias e quer escrever novas.&rdquo;
-            </p>
-          </div>
-        </div>
+    <section className="auth-step" aria-labelledby="login-title">
+      <header className="auth-step__header">
+        <h1 id="login-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
+          Entrar no BeyondTime
+        </h1>
+        <p className="auth-card__subtitle">
+          Bem-vindo de volta! Conecte-se para encontrar pessoas e grupos com afinidade em Sergipe.
+        </p>
+      </header>
 
-        {/* Coluna Direita: Cartão de Login */}
-        <div className="auth-split__form">
-          <div className="auth-card">
-            <h1
-              id="login-title"
-              ref={headingRef}
-              tabIndex={-1}
-              className="auth-card__title"
-            >
-              Que bom ver você de volta
-            </h1>
-            <p className="auth-card__subtitle">
-              Entre para continuar suas conversas com respeito e carinho.
-            </p>
+      <SocialAuthGrid onSelectProvider={handleSocialSelect} disabled={isAnySubmitting} />
 
-            <form className="auth-form" onSubmit={handleFormSubmit} noValidate>
-              <div className="form-group">
-                <label className="form-label" htmlFor="login-contact">
-                  E-mail ou celular
-                </label>
-                <input
-                  ref={inputRef}
-                  id="login-contact"
-                  name="contact"
-                  type="text"
-                  className="form-input"
-                  autoComplete="username"
-                  placeholder="Digite seu e-mail ou celular"
-                  value={contact}
-                  onChange={(event) => handleInputChange(event.target.value)}
-                  aria-invalid={errorMessage !== null ? 'true' : undefined}
-                  aria-describedby="login-contact-error"
-                />
-                {errorMessage !== null && (
-                  <p id="login-contact-error" className="form-error" role="alert">
-                    {errorMessage}
-                  </p>
-                )}
-              </div>
-
-              <div className="form-group">
-                <div className="form-group__header">
-                  <label className="form-label" htmlFor="login-password">
-                    Sua senha
-                  </label>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={(event) => onNavigate('recover', event.currentTarget)}
-                  >
-                    Esqueceu a senha?
-                  </button>
-                </div>
-                <div className="input-with-action">
-                  <input
-                    id="login-password"
-                    name="password"
-                    type={showPassword ? 'text' : 'password'}
-                    className="form-input"
-                    autoComplete="current-password"
-                    placeholder="Digite sua senha"
-                    value={password}
-                    onChange={(event) => {
-                      setPassword(event.target.value);
-                      if (passwordError) setPasswordError(null);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="btn-eye"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'Ocultar senha' : 'Ver senha'}
-                  >
-                    {showPassword ? 'Ocultar' : 'Ver'}
-                  </button>
-                </div>
-                {passwordError !== null && (
-                  <p className="form-error" role="alert">
-                    {passwordError}
-                  </p>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn--primary"
-                disabled={isSubmitting}
-                aria-busy={isSubmitting}
-              >
-                {isSubmitting ? 'Verificando acesso...' : 'Entrar'}
-              </button>
-            </form>
-
-            <div className="auth-divider" aria-hidden="true">
-              ou entre com sua conta social
-            </div>
-
-            <SocialAuthGrid onSelectProvider={handleSocialSelect} />
-
-            {feedbackMessage !== null && (
-              <p className="form-feedback" aria-live="polite">
-                {feedbackMessage}
-              </p>
-            )}
-
-            <div className="card-footer-action">
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={(event) => onNavigate('register', event.currentTarget)}
-              >
-                Ainda não tem conta? <span className="underline-bold">Criar minha conta</span>
-              </button>
-            </div>
-          </div>
-        </div>
+      <div className="auth-divider" aria-hidden="true">
+        ou continue com e-mail
       </div>
+
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        <div className="form-group">
+          <div className="form-group__header">
+            <label className="form-label" htmlFor="login-contact">
+              E-mail
+            </label>
+            <button
+              type="button"
+              className="link-button"
+              onClick={(event) => onNavigate('recover', event.currentTarget)}
+            >
+              Esqueceu a senha?
+            </button>
+          </div>
+          <input
+            ref={inputRef}
+            id="login-contact"
+            name="contact"
+            type="email"
+            className="form-input"
+            autoComplete="username"
+            placeholder="Digite seu e-mail cadastrado"
+            value={contact}
+            onChange={(event) => {
+              onContactChange(event.target.value);
+              if (errorMessage) setErrorMessage(null);
+            }}
+            aria-invalid={errorMessage !== null ? 'true' : undefined}
+            aria-describedby="login-contact-error"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="login-password">
+            Senha
+          </label>
+          <div className="password-field">
+            <input
+              id="login-password"
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              className="form-input form-input--password"
+              autoComplete="current-password"
+              placeholder="Digite sua senha"
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                if (errorMessage) setErrorMessage(null);
+              }}
+            />
+            <button
+              type="button"
+              className="btn-eye"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+            >
+              {showPassword ? 'Ocultar' : 'Mostrar'}
+            </button>
+          </div>
+          {errorMessage !== null && (
+            <p id="login-contact-error" className="form-error" role="alert">
+              {errorMessage}
+            </p>
+          )}
+        </div>
+
+        <div className="form-group" style={{ marginTop: '4px', marginBottom: '16px' }}>
+          <label
+            htmlFor="login-remember-me"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '12px',
+              minHeight: '48px',
+              cursor: 'pointer',
+              fontSize: '15px',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <input
+              id="login-remember-me"
+              name="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              style={{
+                width: '22px',
+                height: '22px',
+                minWidth: '22px',
+                minHeight: '22px',
+                accentColor: 'var(--brand-primary)',
+                cursor: 'pointer',
+              }}
+            />
+            <span>Manter conectado neste dispositivo</span>
+          </label>
+        </div>
+
+        <button
+          type="submit"
+          className="btn btn--primary"
+          disabled={isAnySubmitting || lockCountdownSeconds > 0}
+          aria-busy={isAnySubmitting}
+        >
+          {lockCountdownSeconds > 0
+            ? `Bloqueado temporariamente (${lockCountdownSeconds}s)`
+            : isAnySubmitting
+              ? 'Verificando acesso...'
+              : 'Entrar'}
+        </button>
+      </form>
+
+      {isAnySubmitting && (
+        <div className="skeleton-loader" aria-hidden="true">
+          <div className="skeleton-loader__bar" />
+          <div className="skeleton-loader__bar skeleton-loader__bar--short" />
+        </div>
+      )}
+
+      {feedbackMessage !== null && (
+        <p className="form-feedback" aria-live="polite">
+          {feedbackMessage}
+        </p>
+      )}
+
+      <div className="card-footer-action">
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={(event) => onNavigate('register', event.currentTarget)}
+        >
+          Ainda não tem conta? <span className="underline-bold">Crie conta agora</span>
+        </button>
+      </div>
+
+      <SocialBirthDateModal
+        isOpen={isBirthDateModalOpen}
+        providerName={socialProviderName}
+        isSubmitting={isSocialSubmitting}
+        errorMessage={socialModalError}
+        onConfirm={handleSocialBirthDateConfirm}
+        onCancel={handleSocialBirthDateCancel}
+      />
     </section>
   );
 }
