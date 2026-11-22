@@ -13,10 +13,12 @@ export type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type ConnectionGoal = 'Amizade' | 'Relacionamento' | 'Companhia';
 
 export type HobbyCategory =
+  | 'Música e Dança'
   | 'Arte e Cultura'
   | 'Lazer e Bem-estar'
   | 'Gastronomia'
-  | 'Viagens e Comunidade';
+  | 'Viagens e Passeios'
+  | 'Jogos e Convivência';
 
 export interface OnboardingFormData {
   contact: string;

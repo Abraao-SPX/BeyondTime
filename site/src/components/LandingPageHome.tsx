@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import type { AuthViewId, ConnectionGoal } from '../types/auth';
+import type { AuthViewId, ConnectionGoal, LegalPageId } from '../types/auth';
+import { HumanSupportBanner } from './HumanSupportBanner';
+
+export interface OnboardingPrefill {
+  goal?: ConnectionGoal;
+  city?: string;
+}
 
 interface LandingPageHomeProps {
   highContrast: boolean;
   onToggleHighContrast: () => void;
-  onOpenAuth: (targetView: AuthViewId) => void;
+  onOpenAuth: (targetView: AuthViewId, prefill?: OnboardingPrefill) => void;
+  onOpenLegalPage?: (page: LegalPageId) => void;
 }
 
 type IconName =
@@ -222,7 +229,7 @@ const STATS = [
   { value: '50+', label: 'Anos de idade mínima', desc: 'Comunidade exclusiva para quem já viveu grandes histórias' },
   { value: '100%', label: 'Foco em Sergipe', desc: 'Aracaju, Estância, Itabaiana e municípios conectados' },
   { value: '3 a 10', label: 'Hobbies em comum', desc: 'Afinidade real por interesses compartilhados' },
-  { value: 'Zero', label: 'Golpes & Fakes', desc: 'Inteligência artificial defensiva e suporte humano' },
+  { value: 'Ativa', label: 'Proteção contra golpes', desc: 'Camadas de verificação e apoio humano dedicado' },
 ];
 
 const MEMBER_STORIES = [
@@ -290,8 +297,8 @@ const SAFETY_PILLARS = [
   },
   {
     icon: 'heart-handshake' as IconName,
-    title: 'Central de Suporte no WhatsApp',
-    text: 'Linha direta (79) 98888-8888 com atendimento humanizado para tirar dúvidas a qualquer momento.',
+    title: 'Acolhimento e Suporte Humanizado',
+    text: 'Atendimento dedicado via suporte.beyondtime@gmail.com para orientar o uso da plataforma com paciência e segurança.',
   },
   {
     icon: 'lock' as IconName,
@@ -320,41 +327,20 @@ export function LandingPageHome({
   highContrast,
   onToggleHighContrast,
   onOpenAuth,
+  onOpenLegalPage,
 }: LandingPageHomeProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<ConnectionGoal>('Amizade');
   const [selectedCity, setSelectedCity] = useState('Aracaju (SE)');
 
   function handleStartRegistration() {
-    onOpenAuth('register');
+    onOpenAuth('register', { goal: selectedGoal, city: selectedCity });
   }
 
   return (
     <div className={`home-shell ${highContrast ? 'high-contrast' : ''}`}>
-      {/* Top Banner Humanizado */}
-      <aside className="support-banner" aria-label="Central de suporte humanizado">
-        <div className="support-banner__inner">
-          <div className="support-banner__content">
-            <span className="support-banner__icon" aria-hidden="true">
-              <HomeIcon name="smartphone" className="home-icon" />
-            </span>
-            <p className="support-banner__text">
-              <strong>Prefere falar com uma pessoa?</strong> Central de suporte e acolhimento 50+:
-              <span className="support-banner__phone"> (79) 98888-8888</span>
-            </p>
-          </div>
-          <div className="support-banner__actions">
-            <a
-              href="https://wa.me/5579988888888?text=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20BeyondTime"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="support-banner__btn-whatsapp"
-            >
-              Abrir WhatsApp
-            </a>
-          </div>
-        </div>
-      </aside>
+      {/* Top Banner Humanizado com suporte configurável */}
+      <HumanSupportBanner />
 
       {/* Header Institucional */}
       <header className="home-header">
@@ -845,7 +831,28 @@ export function LandingPageHome({
               <span>Política de Governança (PDF)</span>
               <HomeIcon name="external-link" className="home-icon" />
             </a>
-            <p className="home-footer__desc">Termos de Uso &amp; Proteção de Dados (LGPD)</p>
+            <div className="home-footer__legal-links" style={{ marginTop: '10px' }}>
+              <button
+                type="button"
+                onClick={() => onOpenLegalPage?.('termos')}
+                style={{ background: 'none', border: 'none', color: 'var(--brand-rose-soft)', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: '0.9375rem' }}
+                aria-label="Abrir Termos de Uso"
+              >
+                Termos de Uso
+              </button>
+              <span aria-hidden="true" style={{ color: 'var(--text-muted)', margin: '0 8px' }}>·</span>
+              <button
+                type="button"
+                onClick={() => onOpenLegalPage?.('privacidade')}
+                style={{ background: 'none', border: 'none', color: 'var(--brand-rose-soft)', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: '0.9375rem' }}
+                aria-label="Abrir Política de Privacidade e LGPD"
+              >
+                Proteção de Dados (LGPD)
+              </button>
+            </div>
+            <p className="home-footer__desc" style={{ marginTop: '8px' }}>
+              Suporte: <a href="mailto:suporte.beyondtime@gmail.com" style={{ color: 'var(--brand-rose-soft)', textDecoration: 'underline' }}>suporte.beyondtime@gmail.com</a>
+            </p>
           </section>
 
           <section aria-labelledby="footer-academic">

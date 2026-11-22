@@ -19,6 +19,7 @@ import {
 } from '../utils/validation';
 import { SocialAuthGrid } from './SocialAuthGrid';
 import { SocialBirthDateModal } from './SocialBirthDateModal';
+import { PasswordInput } from './PasswordInput';
 
 function fromIsoBirthDateToBr(isoDate: string): string {
   const parts = isoDate.trim().split('-');
@@ -41,7 +42,6 @@ export function TelaLogin({
   onAuthSuccess,
 }: TelaLoginProps) {
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const rememberMe = false;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
@@ -115,8 +115,9 @@ export function TelaLogin({
           setFeedbackMessage(null);
         }
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || `Erro ao autenticar com ${provider}.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : `Erro ao autenticar com ${provider}.`;
+      setErrorMessage(msg);
       setFeedbackMessage(null);
     } finally {
       setIsSocialSubmitting(false);
@@ -286,7 +287,7 @@ export function TelaLogin({
               if (errorMessage) setErrorMessage(null);
             }}
             aria-invalid={errorMessage !== null ? 'true' : undefined}
-            aria-describedby="login-contact-error"
+            aria-describedby={errorMessage !== null ? 'login-contact-error' : undefined}
           />
         </div>
 
@@ -294,66 +295,23 @@ export function TelaLogin({
           <label className="form-label" htmlFor="login-password">
             Senha
           </label>
-          <div className="input-with-action">
-            <input
-              id="login-password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              className="form-input form-input--password"
-              autoComplete="current-password"
-              placeholder="Digite sua senha"
-              value={password}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                if (errorMessage) setErrorMessage(null);
-              }}
-            />
-            <button
-              type="button"
-              className="btn-eye-icon"
-              onClick={() => setShowPassword((prev) => !prev)}
-              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-              title={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-            >
-              {showPassword ? (
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="btn-eye__icon"
-                  aria-hidden="true"
-                >
-                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              ) : (
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="btn-eye__icon"
-                  aria-hidden="true"
-                >
-                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94" />
-                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19" />
-                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                  <path d="M1 1l22 22" />
-                </svg>
-              )}
-            </button>
-          </div>
+          <PasswordInput
+            id="login-password"
+            name="password"
+            autoComplete="current-password"
+            placeholder="Digite sua senha"
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (errorMessage) setErrorMessage(null);
+            }}
+          />
+        </div>
           {errorMessage !== null && (
             <p id="login-contact-error" className="form-error" role="alert">
               {errorMessage}
             </p>
           )}
-        </div>
 
         <button
           type="submit"

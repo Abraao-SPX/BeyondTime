@@ -8,6 +8,7 @@ import {
 } from '../services/apiClient';
 import type { AuthViewId } from '../types/auth';
 import { validatePasswordMatch } from '../utils/validation';
+import { PasswordInput } from './PasswordInput';
 
 interface RecuperarSenhaProps {
   contact: string;
@@ -238,10 +239,8 @@ export function RecuperarSenha({
               <label className="form-label" htmlFor="recover-new-pwd">
                 Nova senha
               </label>
-              <input
+              <PasswordInput
                 id="recover-new-pwd"
-                type="password"
-                className="form-input"
                 placeholder="Mínimo 8 caracteres"
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
@@ -251,10 +250,8 @@ export function RecuperarSenha({
               <label className="form-label" htmlFor="recover-confirm-pwd">
                 Confirmar nova senha
               </label>
-              <input
+              <PasswordInput
                 id="recover-confirm-pwd"
-                type="password"
-                className="form-input"
                 placeholder="Repita a nova senha"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}

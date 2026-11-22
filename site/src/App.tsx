@@ -4,7 +4,7 @@ import { CriarMinhaConta } from './components/CriarMinhaConta';
 import { DefensiveModalRF06 } from './components/DefensiveModalRF06';
 import { FooterGlobal } from './components/FooterGlobal';
 import { HeaderGlobal } from './components/HeaderGlobal';
-import { LandingPageHome as LandingPage } from './components/LandingPageHome';
+import { LandingPageHome as LandingPage, type OnboardingPrefill } from './components/LandingPageHome';
 import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
@@ -63,6 +63,9 @@ export function App() {
     recover: '',
   });
   const [pendingView, setPendingView] = useState<AuthViewId | null>(null);
+  const [pendingBackToLanding, setPendingBackToLanding] = useState(false);
+  const [onboardingPrefill, setOnboardingPrefill] = useState<OnboardingPrefill | null>(null);
+  const [isRegisterDirty, setIsRegisterDirty] = useState(false);
   const lastTriggerRef = useRef<HTMLElement | null>(null);
 
   // SEC-MED-08 / RF-09: Painel de Acessibilidade Dinâmica
@@ -142,17 +145,33 @@ export function App() {
     setActiveView(targetView);
   }
 
+  function handleBackToLanding() {
+    if (hasUnsavedData(activeView) || (activeView === 'register' && isRegisterDirty)) {
+      setPendingBackToLanding(true);
+      return;
+    }
+    setShowLanding(true);
+  }
+
   function handleKeepEditing() {
     setPendingView(null);
+    setPendingBackToLanding(false);
     lastTriggerRef.current?.focus();
     lastTriggerRef.current = null;
   }
 
   function handleConfirmDiscard() {
     const target = pendingView;
+    const shouldGoLanding = pendingBackToLanding;
     updateContact(activeView, '');
+    setIsRegisterDirty(false);
     setPendingView(null);
+    setPendingBackToLanding(false);
     lastTriggerRef.current = null;
+    if (shouldGoLanding) {
+      setShowLanding(true);
+      return;
+    }
     if (target !== null) {
       setActiveView(target);
     }
@@ -168,7 +187,10 @@ export function App() {
     setContacts({ login: '', register: '', recover: '' });
   }
 
-  function handleOpenAuthFromLanding(targetView: AuthViewId) {
+  function handleOpenAuthFromLanding(targetView: AuthViewId, prefill?: OnboardingPrefill) {
+    if (prefill) {
+      setOnboardingPrefill(prefill);
+    }
     setActiveView(targetView);
     setShowLanding(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -349,6 +371,8 @@ export function App() {
           isOpen={isAccessibilityOpen}
           onClose={() => setIsAccessibilityOpen(false)}
           onToggleOpen={() => setIsAccessibilityOpen((prev) => !prev)}
+          highContrast={highContrast}
+          onToggleHighContrast={toggleHighContrast}
         />
       </>
     );
@@ -361,11 +385,14 @@ export function App() {
           highContrast={highContrast}
           onToggleHighContrast={toggleHighContrast}
           onOpenAuth={handleOpenAuthFromLanding}
+          onOpenLegalPage={handleOpenLegalPage}
         />
         <AccessibilityPanelRF09
           isOpen={isAccessibilityOpen}
           onClose={() => setIsAccessibilityOpen(false)}
           onToggleOpen={() => setIsAccessibilityOpen((prev) => !prev)}
+          highContrast={highContrast}
+          onToggleHighContrast={toggleHighContrast}
         />
       </>
     );
@@ -379,7 +406,7 @@ export function App() {
 
       <HeaderGlobal
         onNavigate={handleNavigate}
-        onBackToLanding={() => setShowLanding(true)}
+        onBackToLanding={handleBackToLanding}
         onToggleAccessibility={() => setIsAccessibilityOpen(true)}
         highContrast={highContrast}
         onToggleHighContrast={toggleHighContrast}
@@ -596,6 +623,8 @@ export function App() {
                   onContactChange={(value) => updateContact('register', value)}
                   onNavigate={handleNavigate}
                   onAuthSuccess={handleAuthSuccess}
+                  prefill={onboardingPrefill}
+                  onDirtyChange={setIsRegisterDirty}
                 />
               )}
 
@@ -612,7 +641,7 @@ export function App() {
       </main>
 
       <DefensiveModalRF06
-        isOpen={pendingView !== null}
+        isOpen={pendingView !== null || pendingBackToLanding}
         onKeepEditing={handleKeepEditing}
         onConfirmDiscard={handleConfirmDiscard}
       />
@@ -623,6 +652,8 @@ export function App() {
         isOpen={isAccessibilityOpen}
         onClose={() => setIsAccessibilityOpen(false)}
         onToggleOpen={() => setIsAccessibilityOpen((prev) => !prev)}
+        highContrast={highContrast}
+        onToggleHighContrast={toggleHighContrast}
       />
     </div>
   );

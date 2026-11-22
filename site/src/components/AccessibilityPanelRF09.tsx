@@ -1,64 +1,32 @@
 import { useEffect, useState } from 'react';
 
 const FONT_SCALE_STORAGE_KEY = 'beyondtime_accessibility_font_scale_v1';
-const HIGH_CONTRAST_STORAGE_KEY = 'beyondtime_accessibility_high_contrast_v1';
-const DARK_MODE_STORAGE_KEY = 'beyondtime_accessibility_dark_mode_v1';
 
 export const FONT_SCALE_STEPS = [100, 115, 130, 145, 160] as const;
 export type FontScaleStep = typeof FONT_SCALE_STEPS[number];
 
-export interface AccessibilityState {
-  fontScale: FontScaleStep;
-  highContrast: boolean;
-  darkMode: boolean;
-}
-
-export function applyAccessibilityState(state: AccessibilityState): void {
+export function applyFontScale(fontScale: FontScaleStep): void {
   if (typeof document === 'undefined') return;
-
-  // Aplicação instantânea sem reload (RF-09)
-  document.documentElement.style.fontSize = `${state.fontScale}%`;
-
-  if (state.highContrast) {
-    document.documentElement.classList.add('high-contrast-mode');
-  } else {
-    document.documentElement.classList.remove('high-contrast-mode');
-  }
-
-  if (state.darkMode) {
-    document.documentElement.classList.add('dark-mode');
-  } else {
-    document.documentElement.classList.remove('dark-mode');
-  }
+  document.documentElement.style.fontSize = `${fontScale}%`;
 }
 
-export function loadStoredAccessibilityState(): AccessibilityState {
-  if (typeof window === 'undefined') {
-    return { fontScale: 100, highContrast: false, darkMode: false };
-  }
-
+export function loadStoredFontScale(): FontScaleStep {
+  if (typeof window === 'undefined') return 100;
   try {
     const rawScale = window.localStorage.getItem(FONT_SCALE_STORAGE_KEY);
     const parsedScale = rawScale ? Number(rawScale) : 100;
-    const fontScale: FontScaleStep = (FONT_SCALE_STEPS as readonly number[]).includes(parsedScale)
+    return (FONT_SCALE_STEPS as readonly number[]).includes(parsedScale)
       ? (parsedScale as FontScaleStep)
       : 100;
-
-    const highContrast = window.localStorage.getItem(HIGH_CONTRAST_STORAGE_KEY) === 'true';
-    const darkMode = window.localStorage.getItem(DARK_MODE_STORAGE_KEY) === 'true';
-
-    return { fontScale, highContrast, darkMode };
   } catch {
-    return { fontScale: 100, highContrast: false, darkMode: false };
+    return 100;
   }
 }
 
-export function saveStoredAccessibilityState(state: AccessibilityState): void {
+export function saveStoredFontScale(scale: FontScaleStep): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(FONT_SCALE_STORAGE_KEY, String(state.fontScale));
-    window.localStorage.setItem(HIGH_CONTRAST_STORAGE_KEY, String(state.highContrast));
-    window.localStorage.setItem(DARK_MODE_STORAGE_KEY, String(state.darkMode));
+    window.localStorage.setItem(FONT_SCALE_STORAGE_KEY, String(scale));
   } catch {
     // Falha silenciosa em caso de restrições de storage
   }
@@ -68,60 +36,53 @@ interface AccessibilityPanelRF09Props {
   isOpen: boolean;
   onClose: () => void;
   onToggleOpen?: () => void;
+  highContrast?: boolean;
+  onToggleHighContrast?: () => void;
 }
 
 export function AccessibilityPanelRF09({
   isOpen,
   onClose,
   onToggleOpen,
+  highContrast = false,
+  onToggleHighContrast,
 }: AccessibilityPanelRF09Props) {
-  const [state, setState] = useState<AccessibilityState>(() => {
-    const initial = loadStoredAccessibilityState();
-    applyAccessibilityState(initial);
+  const [fontScale, setFontScale] = useState<FontScaleStep>(() => {
+    const initial = loadStoredFontScale();
+    applyFontScale(initial);
     return initial;
   });
 
-  // Garante hidratação e sincronização inicial
   useEffect(() => {
-    applyAccessibilityState(state);
-    saveStoredAccessibilityState(state);
-  }, [state]);
+    applyFontScale(fontScale);
+    saveStoredFontScale(fontScale);
+  }, [fontScale]);
 
   function handleScaleChange(newScale: FontScaleStep) {
-    setState((prev) => ({ ...prev, fontScale: newScale }));
+    setFontScale(newScale);
   }
 
   function handleStepDown() {
-    setState((prev) => {
-      const idx = FONT_SCALE_STEPS.indexOf(prev.fontScale);
+    setFontScale((prev) => {
+      const idx = FONT_SCALE_STEPS.indexOf(prev);
       const nextIdx = Math.max(0, idx - 1);
-      return { ...prev, fontScale: FONT_SCALE_STEPS[nextIdx] };
+      return FONT_SCALE_STEPS[nextIdx];
     });
   }
 
   function handleStepUp() {
-    setState((prev) => {
-      const idx = FONT_SCALE_STEPS.indexOf(prev.fontScale);
+    setFontScale((prev) => {
+      const idx = FONT_SCALE_STEPS.indexOf(prev);
       const nextIdx = Math.min(FONT_SCALE_STEPS.length - 1, idx + 1);
-      return { ...prev, fontScale: FONT_SCALE_STEPS[nextIdx] };
+      return FONT_SCALE_STEPS[nextIdx];
     });
   }
 
-  function handleToggleHighContrast() {
-    setState((prev) => ({ ...prev, highContrast: !prev.highContrast }));
-  }
-
-  function handleToggleDarkMode() {
-    setState((prev) => ({ ...prev, darkMode: !prev.darkMode }));
-  }
-
   function handleResetAll() {
-    const resetState: AccessibilityState = {
-      fontScale: 100,
-      highContrast: false,
-      darkMode: false,
-    };
-    setState(resetState);
+    setFontScale(100);
+    if (highContrast && onToggleHighContrast) {
+      onToggleHighContrast();
+    }
   }
 
   return (
@@ -183,7 +144,7 @@ export function AccessibilityPanelRF09({
             {/* Ajuste Escalar de Fonte: 100% até 160% */}
             <section className="accessibility-section" aria-labelledby="font-scale-heading">
               <h3 id="font-scale-heading" className="accessibility-section-title">
-                Tamanho da Fonte: <span style={{ color: 'var(--brand-primary)' }}>{state.fontScale}%</span>
+                Tamanho da Fonte: <span style={{ color: 'var(--brand-primary)' }}>{fontScale}%</span>
               </h3>
               <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '12px' }}>
                 Aumente o texto para maior conforto visual (vista cansada ou catarata).
@@ -194,7 +155,7 @@ export function AccessibilityPanelRF09({
                   type="button"
                   className="accessibility-stepper-btn"
                   onClick={handleStepDown}
-                  disabled={state.fontScale <= 100}
+                  disabled={fontScale <= 100}
                   aria-label="Diminuir tamanho da fonte"
                 >
                   A- Diminuir
@@ -211,7 +172,7 @@ export function AccessibilityPanelRF09({
                   type="button"
                   className="accessibility-stepper-btn"
                   onClick={handleStepUp}
-                  disabled={state.fontScale >= 160}
+                  disabled={fontScale >= 160}
                   aria-label="Aumentar tamanho da fonte"
                 >
                   A+ Aumentar
@@ -224,10 +185,10 @@ export function AccessibilityPanelRF09({
                     key={stepVal}
                     type="button"
                     className={`accessibility-stepper-btn ${
-                      state.fontScale === stepVal ? 'accessibility-stepper-btn--active' : ''
+                      fontScale === stepVal ? 'accessibility-stepper-btn--active' : ''
                     }`}
                     onClick={() => handleScaleChange(stepVal)}
-                    aria-pressed={state.fontScale === stepVal}
+                    aria-pressed={fontScale === stepVal}
                     aria-label={`Definir escala de fonte em ${stepVal}%`}
                   >
                     {stepVal}%
@@ -236,7 +197,7 @@ export function AccessibilityPanelRF09({
               </div>
             </section>
 
-            {/* Modo de Alto Contraste (WCAG AAA) */}
+            {/* Modo de Alto Contraste e Escuro (WCAG AAA) */}
             <section className="accessibility-section" aria-labelledby="contrast-heading">
               <h3 id="contrast-heading" className="accessibility-section-title">
                 Contraste e Leitura
@@ -244,71 +205,48 @@ export function AccessibilityPanelRF09({
               <button
                 type="button"
                 className={`accessibility-toggle-btn ${
-                  state.highContrast ? 'accessibility-toggle-btn--active' : ''
+                  highContrast ? 'accessibility-toggle-btn--active' : ''
                 }`}
-                onClick={handleToggleHighContrast}
-                aria-pressed={state.highContrast}
-                aria-label="Alternar Modo de Alto Contraste padrão WCAG AAA"
+                onClick={onToggleHighContrast}
+                aria-pressed={highContrast}
+                aria-label="Alternar Modo Noturno e Alto Contraste padrão WCAG AAA"
               >
                 <span>
-                  <strong>Modo de Alto Contraste (WCAG AAA)</strong>
+                  <strong>Modo Noturno e Alto Contraste (WCAG AAA)</strong>
                   <br />
                   <small style={{ color: 'var(--text-muted)' }}>
-                    Fundo preto com textos em amarelo/branco e bordas grossas
+                    Fundo escuro com alto contraste, reduzindo o cansaço dos olhos
                   </small>
                 </span>
                 <span
                   className={`accessibility-badge ${
-                    state.highContrast ? 'accessibility-badge--on' : 'accessibility-badge--off'
+                    highContrast ? 'accessibility-badge--on' : 'accessibility-badge--off'
                   }`}
                 >
-                  {state.highContrast ? 'ATIVADO' : 'DESATIVADO'}
-                </span>
-              </button>
-
-              {/* Modo Noturno */}
-              <button
-                type="button"
-                className={`accessibility-toggle-btn ${
-                  state.darkMode ? 'accessibility-toggle-btn--active' : ''
-                }`}
-                onClick={handleToggleDarkMode}
-                aria-pressed={state.darkMode}
-                aria-label="Alternar Modo Noturno escuro"
-              >
-                <span>
-                  <strong>Modo Noturno (Escuro)</strong>
-                  <br />
-                  <small style={{ color: 'var(--text-muted)' }}>
-                    Tema escuro suave para leitura confortável à noite
-                  </small>
-                </span>
-                <span
-                  className={`accessibility-badge ${
-                    state.darkMode ? 'accessibility-badge--on' : 'accessibility-badge--off'
-                  }`}
-                >
-                  {state.darkMode ? 'ATIVADO' : 'DESATIVADO'}
+                  {highContrast ? 'ATIVADO' : 'DESATIVADO'}
                 </span>
               </button>
             </section>
 
-            <footer style={{ marginTop: '20px', borderTop: '1px solid var(--border-card)', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            {/* Dica defensiva */}
+            <div className="callout-amber" style={{ fontSize: '13px', marginTop: '16px' }}>
+              ℹ️ <strong>Dica de Uso:</strong> Suas preferências ficam salvas automaticamente no seu navegador neste dispositivo.
+            </div>
+
+            <footer className="accessibility-modal-footer">
               <button
                 type="button"
                 className="btn btn--secondary"
-                style={{ minHeight: '48px', minWidth: '48px', padding: '10px 16px', fontSize: '15px' }}
                 onClick={handleResetAll}
-                aria-label="Redefinir todas as configurações visuais para o padrão"
+                aria-label="Restaurar preferências padrões de acessibilidade"
               >
-                Restaurar padrão
+                Restaurar Padrões
               </button>
               <button
                 type="button"
                 className="btn btn--primary"
-                style={{ minHeight: '48px', minWidth: '48px', padding: '10px 24px', fontSize: '15px' }}
                 onClick={onClose}
-                aria-label="Concluir e fechar painel de acessibilidade"
+                aria-label="Concluir e fechar painel"
               >
                 Concluir
               </button>

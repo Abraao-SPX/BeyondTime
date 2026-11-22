@@ -12,6 +12,7 @@ interface HeaderGlobalProps {
 export function HeaderGlobal({
   onNavigate,
   onBackToLanding,
+  onToggleAccessibility,
   highContrast = false,
   onToggleHighContrast,
 }: HeaderGlobalProps) {
@@ -50,6 +51,18 @@ export function HeaderGlobal({
         </a>
 
         <div className="site-header__right">
+          {onToggleAccessibility && (
+            <button
+              type="button"
+              className="btn-theme-toggle"
+              aria-label="Abrir preferências de acessibilidade 50+"
+              title="Acessibilidade 50+"
+              onClick={onToggleAccessibility}
+            >
+              <span aria-hidden="true" style={{ fontSize: '18px', display: 'flex', alignItems: 'center' }}>👁️</span>
+            </button>
+          )}
+
           {onToggleHighContrast && (
             <button
               type="button"
