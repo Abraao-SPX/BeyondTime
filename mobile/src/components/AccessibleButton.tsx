@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   ActivityIndicator,
   StyleProp,
@@ -8,7 +8,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { TOUCH_TARGET_MIN } from '../theme/theme';
+import { BUTTON_HEIGHT_PRIMARY, BUTTON_RADIUS } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
@@ -25,9 +25,12 @@ interface AccessibleButtonProps {
   accessibilityHint?: string;
 }
 
+const DOUBLE_TAP_GUARD_MS = 400;
+
 /**
  * Botão acessível 50+ (RF-06 & RF-09):
- * - Altura mínima garantida de 52dp (>= 48dp).
+ * - Altura mínima de 60dp (>= 48dp), raio 18dp.
+ * - Proteção contra toque duplo acidental (400ms).
  * - Sempre exibe legenda textual visível (nunca ícone isolado).
  */
 export function AccessibleButton({
@@ -42,6 +45,16 @@ export function AccessibleButton({
   accessibilityHint,
 }: AccessibleButtonProps) {
   const { palette, fs } = useTheme();
+  const lastPressRef = useRef<number>(0);
+
+  const handlePress = () => {
+    const now = Date.now();
+    if (now - lastPressRef.current < DOUBLE_TAP_GUARD_MS) {
+      return;
+    }
+    lastPressRef.current = now;
+    onPress();
+  };
 
   const getColors = () => {
     switch (variant) {
@@ -55,7 +68,7 @@ export function AccessibleButton({
         return {
           bg: palette.primarySoft,
           border: palette.border,
-          text: palette.primary,
+          text: palette.primaryText,
         };
       case 'outline':
         return {
@@ -74,7 +87,7 @@ export function AccessibleButton({
         return {
           bg: 'transparent',
           border: 'transparent',
-          text: palette.primary,
+          text: palette.primaryText,
         };
     }
   };
@@ -83,7 +96,7 @@ export function AccessibleButton({
 
   return (
     <TouchableOpacity
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled || loading}
       activeOpacity={0.82}
       accessibilityRole="button"
@@ -96,7 +109,7 @@ export function AccessibleButton({
           backgroundColor: colors.bg,
           borderColor: colors.border,
           borderWidth: variant === 'ghost' ? 0 : 1.5,
-          opacity: disabled ? 0.5 : 1,
+          opacity: disabled ? 0.45 : 1,
         },
         style,
       ]}
@@ -126,10 +139,10 @@ export function AccessibleButton({
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: Math.max(52, TOUCH_TARGET_MIN),
-    borderRadius: 26,
+    minHeight: BUTTON_HEIGHT_PRIMARY,
+    borderRadius: BUTTON_RADIUS,
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },

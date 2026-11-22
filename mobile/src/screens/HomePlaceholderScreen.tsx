@@ -121,13 +121,13 @@ export function HomePlaceholderScreen({
           >
             <ShieldCheckIcon
               size={20}
-              color={userData.isFaceVerified ? palette.verifiedText : palette.primary}
+              color={userData.isFaceVerified ? palette.verifiedText : palette.primaryText}
             />
             <Text
               style={[
                 styles.badgeText,
                 {
-                  color: userData.isFaceVerified ? palette.verifiedText : palette.primary,
+                  color: userData.isFaceVerified ? palette.verifiedText : palette.primaryText,
                   fontSize: fs(15),
                 },
               ]}
@@ -158,7 +158,7 @@ export function HomePlaceholderScreen({
                   { backgroundColor: palette.primarySoft, borderColor: palette.border },
                 ]}
               >
-                <Text style={[styles.hobbyTagText, { color: palette.primary, fontSize: fs(15) }]}>
+                <Text style={[styles.hobbyTagText, { color: palette.primaryText, fontSize: fs(15) }]}>
                   {label}
                 </Text>
               </View>
@@ -182,7 +182,7 @@ export function HomePlaceholderScreen({
             label="Falar com o suporte por e-mail"
             variant="secondary"
             onPress={handleOpenSupport}
-            iconLeft={<MailIcon size={20} color={palette.primary} />}
+            iconLeft={<MailIcon size={20} color={palette.primaryText} />}
           />
 
           <AccessibleButton

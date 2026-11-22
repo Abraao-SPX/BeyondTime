@@ -51,11 +51,11 @@ export function BeyondTimeLogo({
             styles.wordmark,
             {
               fontSize: wordmarkSize,
-              color: palette.isDark ? '#FFFFFF' : palette.textPrimary,
+              color: palette.textPrimary,
             },
           ]}
         >
-          Beyond<Text style={{ color: palette.primary }}>Time</Text>
+          Beyond<Text style={{ color: palette.primaryText }}>Time</Text>
         </Text>
       )}
     </View>

@@ -68,7 +68,7 @@ export function PasswordInput({
           style={styles.toggleBtn}
         >
           {visible ? (
-            <EyeOpenIcon size={22} color={palette.primary} />
+            <EyeOpenIcon size={22} color={palette.primaryText} />
           ) : (
             <EyeClosedIcon size={22} color={palette.textSecondary} />
           )}
