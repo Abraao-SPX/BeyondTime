@@ -40,7 +40,17 @@ const CHALLENGES = [
   { id: 'blink', text: '👁️ Pisque os olhos lentamente', sub: 'Confirmação de vivacidade' },
 ];
 
-export default function FaceCaptureScreen() {
+export interface FaceCaptureScreenProps {
+  onCancel?: () => void;
+  onVerified?: (photoUri: string, result: VerifyResponse) => void;
+  onCapturedPreview?: (photoUri: string) => void;
+}
+
+export default function FaceCaptureScreen({
+  onCancel,
+  onVerified,
+  onCapturedPreview,
+}: FaceCaptureScreenProps = {}) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -157,6 +167,9 @@ export default function FaceCaptureScreen() {
       });
 
       if (photo?.uri) {
+        if (onCapturedPreview) {
+          onCapturedPreview(photo.uri);
+        }
         sendForVerification(referencePhotoUri, photo.uri);
       }
     } catch (e) {
@@ -204,6 +217,9 @@ export default function FaceCaptureScreen() {
       const data: VerifyResponse = await response.json();
       setApiResult(data);
       setStage('result');
+      if (data.status === 'VERIFIED' && onVerified) {
+        onVerified(selfieUri, data);
+      }
     } catch (err: any) {
       console.error(err);
       setErrorMessage(
@@ -254,10 +270,30 @@ export default function FaceCaptureScreen() {
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>Acesso à câmera necessário para biometria.</Text>
-        <TouchableOpacity style={styles.btnPrimary} onPress={requestPermission}>
+        <Text style={[styles.mainTitle, { marginBottom: 10 }]}>
+          Precisamos da câmera para confirmar que é você
+        </Text>
+        <Text style={styles.text}>
+          Sua selfie serve apenas para manter a comunidade mais segura e nunca aparece no seu perfil.
+        </Text>
+        <TouchableOpacity
+          style={[styles.btnPrimary, { minHeight: 56, justifyContent: 'center', marginBottom: 12 }]}
+          onPress={requestPermission}
+          accessibilityRole="button"
+          accessibilityLabel="Conceder permissão da câmera"
+        >
           <Text style={styles.btnText}>Conceder Permissão</Text>
         </TouchableOpacity>
+        {onCancel ? (
+          <TouchableOpacity
+            style={[styles.btnRestart, { width: '75%', minHeight: 52, justifyContent: 'center', marginTop: 4 }]}
+            onPress={onCancel}
+            accessibilityRole="button"
+            accessibilityLabel="Voltar para a tela anterior"
+          >
+            <Text style={styles.btnRestartText}>Voltar</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -431,18 +467,46 @@ export default function FaceCaptureScreen() {
             <TouchableOpacity style={styles.btnRestart} onPress={restart}>
               <Text style={styles.btnRestartText}>🔄 Realizar Novo Teste</Text>
             </TouchableOpacity>
+            {onCancel ? (
+              <TouchableOpacity
+                style={[styles.btnRestart, { marginTop: 10, backgroundColor: '#6B1D2F', borderColor: '#8B263E' }]}
+                onPress={onCancel}
+                accessibilityRole="button"
+                accessibilityLabel="Voltar para tela anterior"
+              >
+                <Text style={styles.btnRestartText}>Voltar</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
       </View>
 
+      {/* Botão Voltar acessível quando integrado ao fluxo de cadastro */}
+      {onCancel ? (
+        <TouchableOpacity
+          style={[
+            styles.settingsBtnFloating,
+            { right: undefined, left: 20, width: undefined, paddingHorizontal: 14, minHeight: 48 },
+          ]}
+          onPress={onCancel}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar"
+        >
+          <Text style={[styles.btnText, { fontSize: 15 }]}>← Voltar</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {/* Botão Flutuante de Configurações do Servidor */}
       <TouchableOpacity
-        style={styles.settingsBtnFloating}
+        style={[styles.settingsBtnFloating, { minWidth: 48, minHeight: 48, width: 48, height: 48, borderRadius: 24 }]}
         onPress={() => {
           setTestResult(null);
           setShowSettings(true);
         }}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Configurar servidor de verificação"
       >
         <Text style={styles.settingsBtnText}>⚙️</Text>
       </TouchableOpacity>
