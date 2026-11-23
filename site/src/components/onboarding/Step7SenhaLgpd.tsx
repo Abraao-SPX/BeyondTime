@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { LegalDocKey, OnboardingFormData, SocialProvider } from '../../types/auth';
+import type { OnboardingFormData, SocialProvider } from '../../types/auth';
 import {
   calculateAgeFromBirthDate,
   MIN_PASSWORD_LENGTH,
@@ -23,13 +23,6 @@ interface Step7SenhaLgpdProps {
   onFinishToLogin: () => void;
 }
 
-const LEGAL_PREVIEWS: Record<LegalDocKey, string> = {
-  terms:
-    'Termos de Uso: o BeyondTime é uma plataforma 50+ para conexões respeitosas, com diretrizes claras contra fraudes, assédio e solicitações financeiras.',
-  privacy:
-    'Política de Privacidade e Segurança: seus dados pessoais e preferências são tratados conforme a LGPD, sem exibição pública de endereço ou telefone.',
-};
-
 export function Step7SenhaLgpd({
   formData,
   isCompleted,
@@ -45,7 +38,6 @@ export function Step7SenhaLgpd({
   onFinishToLogin,
 }: Step7SenhaLgpdProps) {
   const [formError, setFormError] = useState<string | null>(null);
-  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -82,10 +74,6 @@ export function Step7SenhaLgpd({
 
     setFormError(null);
     onComplete();
-  }
-
-  function handleToggleLegalPreview(docKey: LegalDocKey) {
-    setActiveLegalDoc((current) => (current === docKey ? null : docKey));
   }
 
   if (isCompleted) {
@@ -250,49 +238,29 @@ export function Step7SenhaLgpd({
               )}
             </span>
             <span className="lgpd-checkbox-text">
-              Li e aceito os <strong>Termos de Uso</strong> e a{' '}
-              <strong>Política de Privacidade e Segurança</strong> do BeyondTime.
+              Li e aceito os{' '}
+              <a
+                href="/termos"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lgpd-inline-link"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Termos de Uso
+              </a>{' '}
+              e a{' '}
+              <a
+                href="/privacidade"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lgpd-inline-link"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Política de Privacidade e Segurança
+              </a>{' '}
+              do BeyondTime.
             </span>
           </label>
-
-          <div className="lgpd-doc-buttons">
-            <button
-              type="button"
-              className="btn-legal-outline"
-              onClick={() => handleToggleLegalPreview('terms')}
-            >
-              Termos de Uso
-            </button>
-            <button
-              type="button"
-              className="btn-legal-outline"
-              onClick={() => handleToggleLegalPreview('privacy')}
-            >
-              Política de Privacidade e Segurança
-            </button>
-            <a
-              href="/privacidade"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-legal-outline"
-              style={{
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                color: 'var(--brand-primary)',
-              }}
-              title="Abre a Política de Privacidade e Proteção de Dados completa em nova aba"
-            >
-              Ler Política Completa (LGPD) ↗
-            </a>
-          </div>
-
-          {activeLegalDoc !== null && (
-            <p className="form-feedback" aria-live="polite">
-              {LEGAL_PREVIEWS[activeLegalDoc]}
-            </p>
-          )}
         </div>
 
         {formError !== null && (

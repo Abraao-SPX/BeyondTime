@@ -387,6 +387,7 @@ export function App() {
         <LandingPage
           highContrast={highContrast}
           onToggleHighContrast={toggleHighContrast}
+          onToggleAccessibility={() => setIsAccessibilityOpen(true)}
           onOpenAuth={handleOpenAuthFromLanding}
           onOpenLegalPage={handleOpenLegalPage}
         />
@@ -400,6 +401,10 @@ export function App() {
       </>
     );
   }
+
+  const isShowingOnboarding =
+    (authSession !== null && !isLoadingProfile && (isProfileMissing || isEditingProfile)) ||
+    (authSession === null && activeView === 'register');
 
   return (
     <div className="app-shell">
@@ -416,7 +421,7 @@ export function App() {
       />
 
       <main className="auth-main" id="conteudo">
-        <div className="auth-card">
+        <div className={`auth-card${isShowingOnboarding ? ' auth-card--wide' : ''}`}>
           {authSession ? (
             isLoadingProfile ? (
               <section className="completion-summary" aria-live="polite" aria-busy="true">

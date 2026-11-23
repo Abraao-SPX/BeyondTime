@@ -43,7 +43,6 @@ interface AccessibilityPanelRF09Props {
 export function AccessibilityPanelRF09({
   isOpen,
   onClose,
-  onToggleOpen,
   highContrast = false,
   onToggleHighContrast,
 }: AccessibilityPanelRF09Props) {
@@ -87,22 +86,7 @@ export function AccessibilityPanelRF09({
 
   return (
     <>
-      {/* Botão flutuante persistente 50+ com área mínima de toque de 48px (RF-06 / RF-09) */}
-      {onToggleOpen && (
-        <button
-          type="button"
-          className="accessibility-floating-btn"
-          onClick={onToggleOpen}
-          aria-label="Painel de Acessibilidade 50+: ajuste tamanho do texto, alto contraste e modo noturno"
-          aria-haspopup="dialog"
-          aria-expanded={isOpen}
-        >
-          <span aria-hidden="true" style={{ fontSize: '20px' }}>👁️</span>
-          <span>Acessibilidade 50+</span>
-        </button>
-      )}
-
-      {/* Modal Defensivo de Acessibilidade */}
+      {/* Modal Defensivo de Acessibilidade (acionado pelo botão de olho no cabeçalho) */}
       {isOpen && (
         <div
           className="accessibility-modal-overlay"
