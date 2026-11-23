@@ -240,3 +240,38 @@ export function LockIcon({ size = 20, color = '#8B263E' }: IconProps) {
     </Svg>
   );
 }
+
+export function GoogleIcon({ size = 22 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21.8 12.23c0-.72-.06-1.41-.18-2.08H12v3.94h5.49a4.7 4.7 0 01-2.04 3.08v2.56h3.3c1.93-1.78 3.05-4.4 3.05-7.5z"
+        fill="#4285F4"
+      />
+      <Path
+        d="M12 22c2.75 0 5.06-.91 6.75-2.47l-3.3-2.56c-.91.61-2.08.98-3.45.98-2.65 0-4.9-1.79-5.7-4.2H2.89v2.64A10 10 0 0012 22z"
+        fill="#34A853"
+      />
+      <Path
+        d="M6.3 13.75A6.01 6.01 0 015.98 12c0-.61.11-1.2.32-1.75V7.61H2.89A10 10 0 002 12c0 1.61.39 3.14 1.07 4.39l3.23-2.64z"
+        fill="#FBBC05"
+      />
+      <Path
+        d="M12 6.05c1.5 0 2.84.51 3.9 1.52l2.92-2.92C17.05 2.99 14.74 2 12 2A10 10 0 002.89 7.61l3.41 2.64c.8-2.41 3.05-4.2 5.7-4.2z"
+        fill="#EA4335"
+      />
+    </Svg>
+  );
+}
+
+export function FacebookIcon({ size = 22 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={10} fill="#1877F2" />
+      <Path
+        d="M15.4 12.8l.4-2.6h-2.5V8.5c0-.72.35-1.42 1.48-1.42h1.15V4.86S14.88 4.68 13.88 4.68c-2.08 0-3.44 1.26-3.44 3.55v1.97H8.13v2.6h2.31V19.1a9.2 9.2 0 002.86 0v-6.3h2.1z"
+        fill="#FFFFFF"
+      />
+    </Svg>
+  );
+}

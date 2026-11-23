@@ -1,6 +1,14 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  LinearGradient,
+  Mask,
+  Path,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import { useTheme } from '../theme/ThemeContext';
 
 interface BeyondTimeLogoProps {
@@ -10,25 +18,57 @@ interface BeyondTimeLogoProps {
 }
 
 /**
- * Símbolo oficial do infinito do BeyondTime com degradê preservado
- * tanto no tema claro quanto no modo noturno (WCAG AAA > 15:1 no texto).
+ * Símbolo oficial do infinito com coração do BeyondTime (idêntico à marca oficial),
+ * com degradê preservado tanto no tema claro quanto no modo noturno.
  */
-export function BeyondTimeSymbol({ size = 44 }: { size?: number }) {
-  const height = Math.round(size * 0.54);
+export function BeyondTimeSymbol({ size = 48 }: { size?: number }) {
+  const height = Math.round(size * (520 / 960));
   return (
-    <Svg width={size} height={height} viewBox="0 0 100 54" fill="none">
+    <Svg width={size} height={height} viewBox="0 0 960 520" fill="none">
       <Defs>
-        <LinearGradient id="btGrad" x1="0" y1="27" x2="100" y2="27" gradientUnits="userSpaceOnUse">
-          <Stop offset="0%" stopColor="#6B1D2F" />
-          <Stop offset="50%" stopColor="#A90025" />
-          <Stop offset="100%" stopColor="#D64564" />
+        <LinearGradient
+          id="btInfinityHeartGrad"
+          x1="40"
+          y1="440"
+          x2="920"
+          y2="80"
+          gradientUnits="userSpaceOnUse"
+        >
+          <Stop offset="0%" stopColor="#5A081D" />
+          <Stop offset="48%" stopColor="#B80D29" />
+          <Stop offset="100%" stopColor="#F01432" />
         </LinearGradient>
+        <Mask id="btCrossingGap">
+          <Rect x="0" y="0" width="960" height="520" fill="#FFFFFF" />
+          {/* Recorte limpo no cruzamento central onde a fita esquerda passa por cima */}
+          <Path
+            d="M 380 390 L 580 190"
+            stroke="#000000"
+            strokeWidth={102}
+            strokeLinecap="round"
+          />
+          {/* Recortes limpos nas entradas superiores do coração */}
+          <Circle cx="290" cy="65" r="28" fill="#000000" />
+          <Circle cx="670" cy="65" r="28" fill="#000000" />
+        </Mask>
       </Defs>
+
+      {/* Fita direita (passa por trás no cruzamento inferior central) */}
       <Path
-        d="M27 11C16.5 11 9 18 9 27C9 36 16.5 43 27 43C37.5 43 44.5 34.5 50 27C55.5 19.5 62.5 11 73 11C83.5 11 91 18 91 27C91 36 83.5 43 73 43C62.5 43 55.5 34.5 50 27C44.5 19.5 37.5 11 27 11Z"
-        stroke="url(#btGrad)"
-        strokeWidth={7.5}
-        strokeLinecap="round"
+        d="M 480 175 C 455 75, 345 45, 305 115 C 275 170, 320 255, 480 355 C 620 445, 735 480, 835 420 C 935 360, 935 160, 835 95 C 765 50, 695 65, 665 95"
+        stroke="url(#btInfinityHeartGrad)"
+        strokeWidth={68}
+        strokeLinecap="butt"
+        strokeLinejoin="round"
+        mask="url(#btCrossingGap)"
+      />
+
+      {/* Fita esquerda (passa pela frente no cruzamento inferior central) */}
+      <Path
+        d="M 295 95 C 265 65, 195 50, 125 95 C 25 160, 25 360, 125 420 C 225 480, 340 445, 480 355 C 640 255, 685 170, 655 115 C 615 45, 505 75, 480 175"
+        stroke="url(#btInfinityHeartGrad)"
+        strokeWidth={68}
+        strokeLinecap="butt"
         strokeLinejoin="round"
       />
     </Svg>
@@ -37,7 +77,7 @@ export function BeyondTimeSymbol({ size = 44 }: { size?: number }) {
 
 export function BeyondTimeLogo({
   showWordmark = true,
-  symbolSize = 44,
+  symbolSize = 48,
   wordmarkSize = 24,
 }: BeyondTimeLogoProps) {
   const { palette } = useTheme();

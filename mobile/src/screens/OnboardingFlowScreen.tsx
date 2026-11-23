@@ -18,6 +18,8 @@ import {
   ArrowRightIcon,
   CameraIcon,
   CheckIcon,
+  FacebookIcon,
+  GoogleIcon,
   ShieldCheckIcon,
 } from '../components/Icons';
 import { OnboardingHeader } from '../components/OnboardingHeader';
@@ -345,11 +347,13 @@ export function OnboardingFlowScreen({
                 label="Entrar com Google"
                 variant="outline"
                 onPress={() => handleSocialStart('Google')}
+                iconLeft={<GoogleIcon size={22} />}
               />
               <AccessibleButton
                 label="Entrar com Facebook"
                 variant="outline"
                 onPress={() => handleSocialStart('Facebook')}
+                iconLeft={<FacebookIcon size={22} />}
               />
             </View>
 
@@ -764,7 +768,7 @@ export function OnboardingFlowScreen({
                 setErrorMessage(null);
                 setConfirmPassword(text);
               }}
-              placeholder="Digite a mesma senha novamente"
+              placeholder="Repita sua senha"
             />
 
             <TouchableOpacity

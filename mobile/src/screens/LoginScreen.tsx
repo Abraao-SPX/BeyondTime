@@ -12,7 +12,14 @@ import {
 } from 'react-native';
 import { AccessibleButton } from '../components/AccessibleButton';
 import { BeyondTimeLogo } from '../components/BeyondTimeLogo';
-import { LockIcon, LogInIcon, MailIcon, UserPlusIcon } from '../components/Icons';
+import {
+  FacebookIcon,
+  GoogleIcon,
+  LockIcon,
+  LogInIcon,
+  MailIcon,
+  UserPlusIcon,
+} from '../components/Icons';
 import { OnboardingHeader } from '../components/OnboardingHeader';
 import { PasswordInput } from '../components/PasswordInput';
 import { SUPPORT_EMAIL, TOUCH_TARGET_MIN } from '../theme/theme';
@@ -209,11 +216,13 @@ export function LoginScreen({
                 label="Entrar com Google"
                 variant="outline"
                 onPress={() => handleSocialLogin('Google')}
+                iconLeft={<GoogleIcon size={22} />}
               />
               <AccessibleButton
                 label="Entrar com Facebook"
                 variant="outline"
                 onPress={() => handleSocialLogin('Facebook')}
+                iconLeft={<FacebookIcon size={22} />}
               />
             </View>
 
