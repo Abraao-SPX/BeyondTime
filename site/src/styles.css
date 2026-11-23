@@ -2684,6 +2684,13 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   width: 100%;
 }
 
+/* No desktop, o stepper lateral já exibe o progresso de forma completa; oculta o cabeçalho redundante interno */
+@media (min-width: 881px) {
+  .onboarding-split-container .onboarding-split__main .register-progress {
+    display: none;
+  }
+}
+
 .onboarding-split__main--full {
   max-width: 640px;
 }
