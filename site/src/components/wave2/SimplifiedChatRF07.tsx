@@ -8,6 +8,7 @@ interface SimplifiedChatRF07Props {
   activeThreadId: string | null;
   onSelectThread: (contactId: string) => void;
   onSendMessage: (contactId: string, text: string) => void;
+  onRequestBlock: (thread: ChatThread) => void;
   onGoToDiscover: () => void;
 }
 
@@ -16,6 +17,7 @@ export function SimplifiedChatRF07({
   activeThreadId,
   onSelectThread,
   onSendMessage,
+  onRequestBlock,
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
   const [draft, setDraft] = useState('');
@@ -140,6 +142,14 @@ export function SimplifiedChatRF07({
                   </p>
                 </div>
               </div>
+
+              <button
+                type="button"
+                className="btn btn--secondary chat-block-btn"
+                onClick={() => onRequestBlock(activeThread)}
+              >
+                Bloquear contato
+              </button>
             </header>
 
             <div className="chat-safety-tip" role="note">

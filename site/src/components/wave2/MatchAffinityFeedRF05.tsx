@@ -13,6 +13,7 @@ interface MatchAffinityFeedRF05Props {
   onFilterCityChange: (city: string) => void;
   onPass: (candidate: ScoredCandidate) => void;
   onConnect: (candidate: ScoredCandidate) => void;
+  onRequestBlock: (candidate: ScoredCandidate) => void;
   onResetPassed: () => void;
   recentMatch: ScoredCandidate | null;
   onOpenMatchChat: (contactId: string) => void;
@@ -36,6 +37,7 @@ export function MatchAffinityFeedRF05({
   onFilterCityChange,
   onPass,
   onConnect,
+  onRequestBlock,
   onResetPassed,
   recentMatch,
   onOpenMatchChat,
@@ -242,6 +244,13 @@ export function MatchAffinityFeedRF05({
                   ? 'Último perfil disponível com os filtros atuais'
                   : `Mais ${candidates.length - 1} perfis compatíveis aguardando sua avaliação`}
               </span>
+              <button
+                type="button"
+                className="btn-safety-link"
+                onClick={() => onRequestBlock(currentCandidate)}
+              >
+                Bloquear este contato
+              </button>
             </div>
           </article>
 
