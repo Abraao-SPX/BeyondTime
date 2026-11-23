@@ -1472,6 +1472,12 @@ html.high-contrast .site-header__home-btn:hover {
   box-shadow: 0 12px 32px rgba(42, 11, 44, 0.06);
 }
 
+.auth-card--wide,
+.auth-card:has(.onboarding-split-container) {
+  max-width: 1000px;
+  padding: 40px 44px;
+}
+
 .auth-view {
   width: 100%;
 }
@@ -2666,27 +2672,30 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   width: 100%;
   display: flex;
   align-items: flex-start;
-  justify-content: center;
-  gap: 56px;
+  justify-content: space-between;
+  gap: 44px;
 }
 
 /* 3. Coluna Esquerda: Stepper Lateral Integrado e Arejado */
 .onboarding-split__sidebar {
-  width: 310px;
+  width: 280px;
   flex-shrink: 0;
   position: sticky;
   top: 96px;
+  padding-right: 32px;
+  border-right: 1px solid var(--border-header);
 }
 
 .onboarding-split__main {
   flex: 1;
+  min-width: 0;
   max-width: 580px;
   width: 100%;
 }
 
-/* No desktop, o stepper lateral já exibe o progresso de forma completa; oculta o cabeçalho redundante interno */
+/* No desktop, o stepper lateral já exibe o progresso de forma completa; oculta apenas a barra duplicada mantendo o botão Voltar */
 @media (min-width: 881px) {
-  .onboarding-split-container .onboarding-split__main .register-progress {
+  .onboarding-split-container .onboarding-split__main .register-progress__status {
     display: none;
   }
 }
@@ -3189,6 +3198,12 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
 
 /* 8. Responsividade para Mobile */
 @media (max-width: 880px) {
+  .auth-card--wide,
+  .auth-card:has(.onboarding-split-container) {
+    max-width: 560px;
+    padding: 28px 20px;
+  }
+
   .onboarding-split-container,
   .auth-split-container {
     flex-direction: column;
@@ -3199,6 +3214,10 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   .onboarding-split__sidebar {
     width: 100%;
     position: static;
+    padding-right: 0;
+    border-right: none;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-header);
   }
 
   .auth-split__media {
