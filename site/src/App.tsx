@@ -8,6 +8,7 @@ import { LandingPageHome as LandingPage, type OnboardingPrefill } from './compon
 import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
+import { AuthenticatedWorkspace } from './components/wave2/AuthenticatedWorkspace';
 import { useHighContrast } from './hooks/useHighContrast';
 import {
   ApiError,
@@ -401,6 +402,12 @@ export function App() {
     );
   }
 
+  const isShowingWorkspace =
+    authSession !== null && !isLoadingProfile && !isProfileMissing && !isEditingProfile;
+  const isShowingOnboarding =
+    (authSession !== null && !isLoadingProfile && (isProfileMissing || isEditingProfile)) ||
+    (authSession === null && activeView === 'register');
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#conteudo">
@@ -416,7 +423,15 @@ export function App() {
       />
 
       <main className="auth-main" id="conteudo">
-        <div className="auth-card">
+        <div
+          className={`auth-card${
+            isShowingWorkspace
+              ? ' auth-card--workspace'
+              : isShowingOnboarding
+                ? ' auth-card--wide'
+                : ''
+          }`}
+        >
           {authSession ? (
             isLoadingProfile ? (
               <section className="completion-summary" aria-live="polite" aria-busy="true">
@@ -455,72 +470,19 @@ export function App() {
                 onCancelEdit={() => setIsEditingProfile(false)}
               />
             ) : (
-              <section className="completion-summary" aria-live="polite">
-                <p className="defensive-modal__badge">Sessão autenticada (JWT)</p>
-                <h1 className="auth-card__title">
-                  Bem-vindo(a){displayFullName ? `, ${displayFullName}` : ' ao BeyondTime'}
-                </h1>
-                <p className="auth-card__subtitle">
-                  Sua conta está conectada com segurança ao servidor BeyondTime.
-                </p>
-
-                {displayAvatarUrl && (
-                  <div className="photo-preview">
-                    <img
-                      src={displayAvatarUrl}
-                      alt="Foto do seu perfil BeyondTime"
-                      className="photo-preview__img"
-                    />
-                  </div>
-                )}
-
-                <div className="summary-box">
-                  <p>
-                    <strong>E-mail:</strong> {authSession.email}
-                  </p>
-                  <p>
-                    <strong>ID da conta:</strong> {authSession.userId}
-                  </p>
-                  {displayCity && (
-                    <p>
-                      <strong>Cidade:</strong> {displayCity}
-                    </p>
-                  )}
-                  {displayGoal && (
-                    <p>
-                      <strong>Objetivo:</strong> {displayGoal}
-                    </p>
-                  )}
-                  {displayHobbies && displayHobbies.length > 0 && (
-                    <p>
-                      <strong>Interesses:</strong> {displayHobbies.join(', ')}
-                    </p>
-                  )}
-                </div>
-
-                <div className="action-stack action-stack--compact">
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={() => setIsEditingProfile(true)}
-                  >
-                    Editar meu perfil, foto e hobbies
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={handleLogout}
-                  >
-                    Sair da conta
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--danger-outline"
-                    onClick={handleOpenDeleteAccountModal}
-                  >
-                    Excluir minha conta e dados (LGPD)
-                  </button>
-                </div>
+              <>
+                <AuthenticatedWorkspace
+                  authSession={authSession}
+                  serverProfile={serverProfile}
+                  displayFullName={displayFullName ?? ''}
+                  displayCity={displayCity}
+                  displayGoal={displayGoal}
+                  displayHobbies={displayHobbies}
+                  displayAvatarUrl={displayAvatarUrl}
+                  onEditProfile={() => setIsEditingProfile(true)}
+                  onRequestDeleteAccount={handleOpenDeleteAccountModal}
+                  onLogout={handleLogout}
+                />
 
                 {isDeleteModalOpen && (
                   <div
@@ -602,7 +564,7 @@ export function App() {
                     </div>
                   </div>
                 )}
-              </section>
+              </>
             )
           ) : (
             <>
