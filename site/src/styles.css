@@ -2975,6 +2975,17 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   color: var(--brand-burgundy);
 }
 
+html.high-contrast .input-with-action .btn-eye {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-input-strong);
+  color: var(--text-primary);
+}
+
+html.high-contrast .input-with-action .btn-eye:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #FFFFFF;
+}
+
 .input-with-action .btn-eye-icon {
   position: absolute;
   right: 6px;
