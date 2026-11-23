@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="42" height="26" fill="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="bt-infinity-heart-grad" x1="40" y1="440" x2="920" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5A081D"/>
+      <stop offset="48%" stop-color="#B80D29"/>
+      <stop offset="100%" stop-color="#F01432"/>
+    </linearGradient>
+    <mask id="bt-crossing-gap">
+      <rect width="960" height="520" fill="#FFFFFF"/>
+      <!-- Clean transparent gap where left ribbon crosses over right ribbon -->
+      <path d="M 380 390 L 580 190" stroke="#000000" stroke-width="102" stroke-linecap="round"/>
+      <!-- Clean transparent gap at top-left and top-right entrances -->
+      <circle cx="290" cy="65" r="28" fill="#000000"/>
+      <circle cx="670" cy="65" r="28" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- Right ribbon (passes behind at bottom-center crossing) -->
+  <path
+    d="M 480 175 C 455 75, 345 45, 305 115 C 275 170, 320 255, 480 355 C 620 445, 735 480, 835 420 C 935 360, 935 160, 835 95 C 765 50, 695 65, 665 95"
+    stroke="url(#bt-infinity-heart-grad)"
+    stroke-width="68"
+    stroke-linecap="butt"
+    stroke-linejoin="round"
+    mask="url(#bt-crossing-gap)"
+  />
+
+  <!-- Left ribbon (passes in front at bottom-center crossing) -->
+  <path
+    d="M 295 95 C 265 65, 195 50, 125 95 C 25 160, 25 360, 125 420 C 225 480, 340 445, 480 355 C 640 255, 685 170, 655 115 C 615 45, 505 75, 480 175"
+    stroke="url(#bt-infinity-heart-grad)"
+    stroke-width="68"
+    stroke-linecap="butt"
+    stroke-linejoin="round"
+  />
+</svg>

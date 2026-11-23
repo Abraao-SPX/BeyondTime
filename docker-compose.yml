@@ -1,6 +1,43 @@
 services:
   # ==========================================
-  # 1. Inteligência Artificial Anti-Fraude
+  # 0. Banco de Dados Relacional (PostgreSQL 16 — RF04)
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: beyondtime-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-beyondtime_db}
+      POSTGRES_USER: ${POSTGRES_USER:-beyondtime_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-beyondtime_user} -d ${POSTGRES_DB:-beyondtime_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # 1. Reconhecimento Facial & Liveness (IA)
+  # ==========================================
+  face-api:
+    build:
+      context: ./face-api
+      dockerfile: Dockerfile
+    container_name: beyondtime-face-api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - FACE_MATCH_THRESHOLD=0.60
+      - LIVENESS_THRESHOLD=0.80
+      - SAVE_TEST_IMAGES=false
+
+  # ==========================================
+  # 2. Inteligência Artificial Anti-Fraude (NLP)
   # ==========================================
   anjo-da-guarda:
     build:
@@ -8,11 +45,11 @@ services:
       dockerfile: Dockerfile
     container_name: beyondtime-ia
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8001:8000"
     restart: unless-stopped
 
   # ==========================================
-  # 2. Backend Principal (Java Spring Boot)
+  # 3. Backend Principal (Java Spring Boot)
   # ==========================================
   backend:
     build:
@@ -22,7 +59,50 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
-    # Isso diz ao Docker para subir a IA primeiro, pois o Java vai precisar dela
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beyondtime_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env}
+      LOGIN_TRUST_FORWARDED_HEADERS: "${LOGIN_TRUST_FORWARDED_HEADERS:-true}"
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      BEYONDTIME_MAIL_FROM: ${BEYONDTIME_MAIL_FROM:-nao-responda@beyondtime.com.br}
+      PASSWORD_RESET_EXPOSE_DEBUG_CODE: ${PASSWORD_RESET_EXPOSE_DEBUG_CODE:-false}
+      AVATARS_UPLOAD_DIR: /app/uploads/avatars
+    volumes:
+      - avatars_data:/app/uploads
     depends_on:
-      - anjo-da-guarda
+      postgres:
+        condition: service_healthy
 
+  # ==========================================
+  # 4. Site Web & Aplicação React 18 (Nginx)
+  # ==========================================
+  site:
+    build:
+      context: ./site
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET:-}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
+    container_name: beyondtime-site
+    ports:
+      - "${SITE_PORT:-8085}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  avatars_data:
