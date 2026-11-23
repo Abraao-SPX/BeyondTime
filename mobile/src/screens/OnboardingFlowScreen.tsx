@@ -32,6 +32,13 @@ import {
   RELATIONSHIP_GOALS,
   SERGIPE_CITIES,
 } from '../constants/hobbiesTaxonomy';
+import {
+  convertBrDateToIso,
+  registerAccount,
+  upsertMyProfile,
+  type AuthSession,
+} from '../services/authService';
+import { uploadPreResizedAvatar } from '../services/avatarService';
 import { SUPPORT_EMAIL, TOUCH_TARGET_MIN } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 import type { OnboardingData } from '../types/onboarding';
@@ -41,7 +48,7 @@ interface OnboardingFlowScreenProps {
   onChangeData: (next: OnboardingData) => void;
   onExitToSplash: () => void;
   onSwitchToLogin: () => void;
-  onCompleteToFacial: () => void;
+  onCompleteToFacial: (session: AuthSession) => void;
 }
 
 function formatBirthDateInput(raw: string): string {
@@ -98,6 +105,7 @@ export function OnboardingFlowScreen({
 
   const [step, setStep] = useState<number>(1);
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [exitTarget, setExitTarget] = useState<'splash' | 'login' | null>(null);
@@ -158,7 +166,7 @@ export function OnboardingFlowScreen({
     return () => subscription.remove();
   }, [exitTarget, handleBack, legalModal]);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     setErrorMessage(null);
 
     if (step === 1) {
@@ -241,7 +249,47 @@ export function OnboardingFlowScreen({
         setErrorMessage('Para concluir, marque que concorda com os Termos de Uso e Privacidade.');
         return;
       }
-      onCompleteToFacial();
+
+      setSubmitting(true);
+      try {
+        const contactTrimmed = data.contact.trim();
+        const isEmail = contactTrimmed.includes('@');
+        const session = await registerAccount({
+          email: isEmail ? contactTrimmed : `${contactTrimmed.replace(/\D/g, '')}@telefone.beyondtime.local`,
+          phone: isEmail ? undefined : contactTrimmed,
+          password: data.password,
+          birthDate: convertBrDateToIso(data.birthDate),
+        });
+
+        await upsertMyProfile(session, {
+          fullName: data.fullName.trim(),
+          city: data.city.trim(),
+          hobbies: data.selectedHobbies,
+          goal: data.goal,
+        });
+
+        if (
+          data.profilePhotoUri &&
+          (data.profilePhotoUri.startsWith('file://') ||
+            data.profilePhotoUri.startsWith('content://'))
+        ) {
+          try {
+            await uploadPreResizedAvatar(session.accessToken, data.profilePhotoUri);
+          } catch {
+            // Upload de avatar pode ser tentado novamente depois sem bloquear o cadastro
+          }
+        }
+
+        onCompleteToFacial(session);
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Não foi possível concluir seu cadastro agora. Tente novamente.';
+        setErrorMessage(msg);
+      } finally {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -838,6 +886,7 @@ export function OnboardingFlowScreen({
             label={step === 7 ? 'Concluir cadastro' : 'Continuar'}
             variant="primary"
             disabled={isNextDisabled}
+            loading={submitting}
             onPress={handleNext}
             iconRight={<ArrowRightIcon size={20} color={palette.textOnPrimary} />}
           />

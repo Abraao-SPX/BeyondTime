@@ -22,13 +22,25 @@ import {
 } from '../components/Icons';
 import { OnboardingHeader } from '../components/OnboardingHeader';
 import { PasswordInput } from '../components/PasswordInput';
+import {
+  confirmPasswordReset,
+  fetchMyProfile,
+  loginWithEmail,
+  requestPasswordReset,
+  type AuthSession,
+  type ServerProfile,
+} from '../services/authService';
 import { SUPPORT_EMAIL, TOUCH_TARGET_MIN } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 
 interface LoginScreenProps {
   onBack: () => void;
   onGoToRegister: () => void;
-  onLoginSuccess: (contact: string) => void;
+  onLoginSuccess: (
+    contact: string,
+    session: AuthSession,
+    profile: ServerProfile | null
+  ) => void;
 }
 
 /**
@@ -47,11 +59,16 @@ export function LoginScreen({
   const [mode, setMode] = useState<'login' | 'recover'>('login');
   const [contact, setContact] = useState('');
   const [password, setPassword] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [recoverySent, setRecoverySent] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
 
-  const handleSubmitLogin = () => {
+  const handleSubmitLogin = async () => {
     setErrorMessage(null);
     setSocialNotice(null);
     if (!contact.trim()) {
@@ -62,7 +79,26 @@ export function LoginScreen({
       setErrorMessage('Sua senha precisa ter pelo menos 6 caracteres sem contar espaços.');
       return;
     }
-    onLoginSuccess(contact.trim());
+
+    setSubmitting(true);
+    try {
+      const session = await loginWithEmail(contact.trim(), password);
+      let profile: ServerProfile | null = null;
+      try {
+        profile = await fetchMyProfile(session);
+      } catch {
+        profile = null;
+      }
+      onLoginSuccess(contact.trim(), session, profile);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível entrar agora. Tente novamente em instantes.';
+      setErrorMessage(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSocialLogin = (provider: 'Google' | 'Facebook') => {
@@ -72,13 +108,72 @@ export function LoginScreen({
     );
   };
 
-  const handleSendRecovery = () => {
+  const handleSendRecovery = async () => {
     setErrorMessage(null);
+    setRecoveryMessage(null);
     if (!contact.trim()) {
-      setErrorMessage('Informe o e-mail ou telefone cadastrado para enviarmos as instruções.');
+      setErrorMessage('Informe o e-mail cadastrado para enviarmos as instruções.');
       return;
     }
-    setRecoverySent(true);
+
+    setSubmitting(true);
+    try {
+      const res = await requestPasswordReset(contact.trim());
+      setRecoverySent(true);
+      setRecoveryMessage(
+        res.message ||
+          `Instruções enviadas para ${contact.trim()}. Verifique sua caixa de entrada e a pasta de spam.`
+      );
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível solicitar a recuperação de senha.';
+      setErrorMessage(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmReset = async () => {
+    setErrorMessage(null);
+    if (!resetCode.trim()) {
+      setErrorMessage('Informe o código de verificação recebido no e-mail.');
+      return;
+    }
+    if (newPassword.trim().length < 8) {
+      setErrorMessage('A nova senha precisa ter pelo menos 8 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMessage('As duas senhas ficaram diferentes. Vamos conferir com calma.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await confirmPasswordReset(
+        contact.trim(),
+        resetCode.trim(),
+        newPassword,
+        confirmNewPassword
+      );
+      setMode('login');
+      setRecoverySent(false);
+      setResetCode('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPassword('');
+      setSocialNotice('Senha alterada com sucesso. Agora você já pode entrar.');
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível redefinir sua senha. Confira o código digitado.';
+      setErrorMessage(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSupportEmail = () => {
@@ -199,6 +294,7 @@ export function LoginScreen({
             <AccessibleButton
               label="Entrar na minha conta"
               variant="primary"
+              loading={submitting}
               onPress={handleSubmitLogin}
               iconLeft={<LogInIcon size={20} color={palette.textOnPrimary} />}
             />
@@ -288,25 +384,81 @@ export function LoginScreen({
             ) : null}
 
             {recoverySent ? (
-              <View
-                style={[
-                  styles.successBox,
-                  { backgroundColor: palette.verifiedBg, borderColor: palette.verifiedText },
-                ]}
-              >
-                <Text style={[styles.successText, { color: palette.verifiedText, fontSize: fs(15) }]}>
-                  Instruções enviadas para {contact}. Verifique sua caixa de entrada e a
-                  pasta de spam.
-                </Text>
-              </View>
-            ) : null}
+              <View style={styles.form}>
+                <View
+                  style={[
+                    styles.successBox,
+                    { backgroundColor: palette.verifiedBg, borderColor: palette.verifiedText },
+                  ]}
+                >
+                  <Text style={[styles.successText, { color: palette.verifiedText, fontSize: fs(15) }]}>
+                    {recoveryMessage ||
+                      `Instruções enviadas para ${contact}. Verifique sua caixa de entrada e a pasta de spam.`}
+                  </Text>
+                </View>
 
-            <AccessibleButton
-              label="Enviar instruções de recuperação"
-              variant="primary"
-              onPress={handleSendRecovery}
-              iconLeft={<MailIcon size={20} color={palette.textOnPrimary} />}
-            />
+                <View style={styles.fieldGroup}>
+                  <Text style={[styles.label, { color: palette.textPrimary, fontSize: fs(16) }]}>
+                    Código recebido
+                  </Text>
+                  <TextInput
+                    value={resetCode}
+                    onChangeText={(text) => {
+                      setResetCode(text);
+                      setErrorMessage(null);
+                    }}
+                    placeholder="Digite o código"
+                    placeholderTextColor={palette.textMuted}
+                    autoCapitalize="none"
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: palette.surface,
+                        borderColor: palette.border,
+                        color: palette.textPrimary,
+                        fontSize: fs(16),
+                      },
+                    ]}
+                  />
+                </View>
+
+                <PasswordInput
+                  label="Nova senha"
+                  value={newPassword}
+                  onChangeText={(text) => {
+                    setNewPassword(text);
+                    setErrorMessage(null);
+                  }}
+                  placeholder="Mínimo 8 caracteres"
+                />
+
+                <PasswordInput
+                  label="Confirmar nova senha"
+                  value={confirmNewPassword}
+                  onChangeText={(text) => {
+                    setConfirmNewPassword(text);
+                    setErrorMessage(null);
+                  }}
+                  placeholder="Repita sua nova senha"
+                />
+
+                <AccessibleButton
+                  label="Confirmar nova senha"
+                  variant="primary"
+                  loading={submitting}
+                  onPress={handleConfirmReset}
+                  iconLeft={<LockIcon size={20} color={palette.textOnPrimary} />}
+                />
+              </View>
+            ) : (
+              <AccessibleButton
+                label="Enviar instruções de recuperação"
+                variant="primary"
+                loading={submitting}
+                onPress={handleSendRecovery}
+                iconLeft={<MailIcon size={20} color={palette.textOnPrimary} />}
+              />
+            )}
 
             <TouchableOpacity
               onPress={() => {
