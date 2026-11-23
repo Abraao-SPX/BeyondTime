@@ -2368,6 +2368,27 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   color: var(--text-primary);
 }
 
+.lgpd-inline-link {
+  color: var(--brand-primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+  cursor: pointer;
+}
+
+.lgpd-inline-link:hover {
+  color: var(--brand-primary-hover);
+}
+
+html.high-contrast .lgpd-inline-link {
+  color: #FF6B8A;
+}
+
+html.high-contrast .lgpd-inline-link:hover {
+  color: #FFFFFF;
+}
+
 .lgpd-doc-buttons {
   width: 100%;
   display: flex;
