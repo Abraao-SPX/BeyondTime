@@ -6,8 +6,6 @@ import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 interface Step4FotoPerfilProps {
   photoPreviewUrl: string | null;
   photoFileName: string | null;
-  isVerified?: boolean;
-  onVerified?: () => void;
   onPhotoSelect: (previewUrl: string | null, fileName: string | null, file: File | null) => void;
   onNext: () => void;
 }
@@ -15,19 +13,14 @@ interface Step4FotoPerfilProps {
 export function Step4FotoPerfil({
   photoPreviewUrl,
   photoFileName,
-  isVerified: isVerifiedProp,
-  onVerified,
   onPhotoSelect,
   onNext,
 }: Step4FotoPerfilProps) {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
-  const [isLocalVerified, setIsLocalVerified] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const isVerified = isVerifiedProp ?? isLocalVerified;
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -127,24 +120,19 @@ export function Step4FotoPerfil({
 
       <div className="photo-verification-banner">
         <div className="photo-verification-banner__text">
-          <strong>
-            {isVerified ? '✓ Selo 50+ Pré-Verificado' : 'Verificação Facial Anti-Golpe (Opcional)'}
-          </strong>
+          <strong>Verificação facial pelo celular (opcional)</strong>
           <p>
-            {isVerified
-              ? 'Sua biometria facial foi confirmada no celular. Sua conta nascerá com o Selo de Verificado.'
-              : 'Gere um QR Code para abrir a câmera do celular e comprovar autenticidade sem complicação no computador.'}
+            Em breve você poderá confirmar sua identidade apontando a câmera do celular para um
+            código. Veja como vai funcionar.
           </p>
         </div>
-        {!isVerified && (
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => setShowQrModal(true)}
-          >
-            Validar com Câmera do Celular (QR Code)
-          </button>
-        )}
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={() => setShowQrModal(true)}
+        >
+          Ver como funciona
+        </button>
       </div>
 
       {photoFileName !== null && photoError === null && (
@@ -178,16 +166,7 @@ export function Step4FotoPerfil({
         </button>
       </div>
 
-      {showQrModal && (
-        <FacialVerificationQrModal
-          userName="Novo Membro"
-          onVerified={() => {
-            setIsLocalVerified(true);
-            onVerified?.();
-          }}
-          onClose={() => setShowQrModal(false)}
-        />
-      )}
+      {showQrModal && <FacialVerificationQrModal onClose={() => setShowQrModal(false)} />}
     </div>
   );
 }

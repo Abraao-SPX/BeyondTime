@@ -16,8 +16,6 @@ interface Step7SenhaLgpdProps {
   isSocialAccount?: boolean;
   isEditMode?: boolean;
   socialProvider?: SocialProvider | null;
-  isFaciallyVerified?: boolean;
-  onVerified?: () => void;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
   onToggleLgpd: (accepted: boolean) => void;
@@ -33,8 +31,6 @@ export function Step7SenhaLgpd({
   isSocialAccount = false,
   isEditMode = false,
   socialProvider = null,
-  isFaciallyVerified: isVerifiedProp = false,
-  onVerified,
   onPasswordChange,
   onConfirmPasswordChange,
   onToggleLgpd,
@@ -44,12 +40,9 @@ export function Step7SenhaLgpd({
 }: Step7SenhaLgpdProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
-  const [isLocalVerified, setIsLocalVerified] = useState(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
-
-  const verifiedState = isVerifiedProp || isLocalVerified;
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -130,33 +123,19 @@ export function Step7SenhaLgpd({
 
         <div className="photo-verification-banner" style={{ margin: '20px 0' }}>
           <div className="photo-verification-banner__text">
-            <strong>
-              {verifiedState
-                ? '✓ Selo de Verificado 50+ Ativado!'
-                : 'Verificação Facial Anti-Golpe (Opcional)'}
-            </strong>
+            <strong>Verificação facial pelo celular (opcional)</strong>
             <p>
-              {verifiedState
-                ? 'Sua biometria facial foi confirmada com sucesso via celular. Seu perfil entrará verificado no BeyondTime.'
-                : 'Deseja validar seu rosto agora com a câmera do celular antes de acessar o painel? Perfis com o Selo 50+ geram mais conexões reais.'}
+              Em breve você poderá confirmar sua identidade com a câmera do celular e receber o
+              Selo de Verificado 50+. Você poderá fazer isso depois, em Meu Perfil.
             </p>
           </div>
-          {!verifiedState ? (
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => setShowQrModal(true)}
-            >
-              Validar com Câmera do Celular (QR Code)
-            </button>
-          ) : (
-            <span
-              className="editorial-profile__verified-badge"
-              style={{ alignSelf: 'flex-start', margin: '4px 0' }}
-            >
-              ✓ Identidade Confirmada
-            </span>
-          )}
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => setShowQrModal(true)}
+          >
+            Ver como funciona
+          </button>
         </div>
 
         <div className="action-stack action-stack--compact">
@@ -176,16 +155,7 @@ export function Step7SenhaLgpd({
           </button>
         </div>
 
-        {showQrModal && (
-          <FacialVerificationQrModal
-            userName={formData.fullName || 'Membro BeyondTime'}
-            onVerified={() => {
-              setIsLocalVerified(true);
-              onVerified?.();
-            }}
-            onClose={() => setShowQrModal(false)}
-          />
-        )}
+        {showQrModal && <FacialVerificationQrModal onClose={() => setShowQrModal(false)} />}
       </div>
     );
   }

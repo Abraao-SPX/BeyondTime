@@ -69,50 +69,6 @@ async function requestJson<T>(
       headers,
     });
   } catch {
-    if (import.meta.env.DEV) {
-      if (path === '/api/v1/auth/register' || path === '/api/v1/auth/login') {
-        let bodyData: Record<string, any> = {};
-        try {
-          bodyData = options.body ? (JSON.parse(options.body as string) as Record<string, any>) : {};
-        } catch {}
-        const devSession: AuthSession = {
-          accessToken: 'dev-token-' + Date.now(),
-          refreshToken: 'dev-refresh-' + Date.now(),
-          tokenType: 'Bearer',
-          expiresInSeconds: 3600,
-          userId: 'dev-user-' + Date.now(),
-          email: bodyData.email || 'novo.usuario@beyondtime.com.br',
-          role: 'USER',
-          authProvider: 'email',
-          rememberMe: false,
-        };
-        saveAuthSession(devSession, false);
-        return devSession as T;
-      }
-      if (path === '/api/v1/profiles/me') {
-        let bodyData: Record<string, any> = {};
-        try {
-          bodyData = options.body ? (JSON.parse(options.body as string) as Record<string, any>) : {};
-        } catch {}
-        const devProfile: ServerProfile = {
-          id: 'dev-profile-' + Date.now(),
-          userId: 'dev-user-50plus',
-          firstName: (bodyData.fullName || 'Maria').split(' ')[0],
-          fullName: bodyData.fullName || 'Maria Souza',
-          bio: 'Adoro caminhar na orla de Atalaia e tomar um bom café com boa prosa.',
-          city: bodyData.city || 'Aracaju',
-          goal: bodyData.goal || 'Amizade',
-          hobbies: bodyData.hobbies || ['caminhada', 'cafe-e-prosa', 'mpb', 'leitura'],
-          avatarUrl: '/assets/perfil-helena.svg',
-          verificationStatus: 'VERIFIED',
-          verifiedBadge50plus: true,
-        };
-        return devProfile as T;
-      }
-      if (path === '/api/v1/profiles/me/avatar') {
-        return { avatarUrl: '/assets/perfil-helena.svg' } as unknown as T;
-      }
-    }
     throw new ApiError(
       'Não foi possível conectar ao servidor BeyondTime. Verifique se o backend Java está rodando.',
       0,

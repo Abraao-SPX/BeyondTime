@@ -64,15 +64,8 @@ export function AuthenticatedWorkspace({
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isFaciallyVerified, setIsFaciallyVerified] = useState<boolean>(() => {
-    try {
-      return (
-        window.localStorage.getItem(`beyondtime_facial_verified_${authSession.email}`) === 'true'
-      );
-    } catch {
-      return false;
-    }
-  });
+  // O selo só é exibido quando o backend confirma a verificação (RF-11).
+  const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true;
 
   useEffect(() => {
     saveWave2State(authSession.email, wave2State);
@@ -421,11 +414,11 @@ export function AuthenticatedWorkspace({
                   </svg>
                 </div>
                 <div>
-                  <strong>{isFaciallyVerified ? 'Identidade Verificada' : 'Selo de Verificado 50+'}</strong>
+                  <strong>{isFaciallyVerified ? 'Identidade verificada' : 'Selo de Verificado 50+'}</strong>
                   <p>
                     {isFaciallyVerified
-                      ? 'Seu perfil foi autenticado com biometria facial no celular.'
-                      : 'Aponte a câmera do celular para ler o QR Code e obter o selo oficial.'}
+                      ? 'Seu perfil foi confirmado com verificação facial.'
+                      : 'Em breve você poderá confirmar sua identidade com a câmera do celular.'}
                   </p>
                 </div>
                 {!isFaciallyVerified && (
@@ -434,7 +427,7 @@ export function AuthenticatedWorkspace({
                     className="btn btn--secondary btn--sm"
                     onClick={() => setIsQrModalOpen(true)}
                   >
-                    Verificar com QR Code
+                    Ver como funciona
                   </button>
                 )}
               </div>
@@ -602,26 +595,7 @@ export function AuthenticatedWorkspace({
         />
       )}
 
-      {isQrModalOpen && (
-        <FacialVerificationQrModal
-          userName={displayFullName || authSession.email}
-          onVerified={() => {
-            try {
-              window.localStorage.setItem(
-                `beyondtime_facial_verified_${authSession.email}`,
-                'true'
-              );
-            } catch {
-              // ignore
-            }
-            setIsFaciallyVerified(true);
-            setSafetyFeedback(
-              'Identidade confirmada com sucesso! O Selo de Verificado 50+ agora está ativo em seu perfil.'
-            );
-          }}
-          onClose={() => setIsQrModalOpen(false)}
-        />
-      )}
+      {isQrModalOpen && <FacialVerificationQrModal onClose={() => setIsQrModalOpen(false)} />}
     </div>
   );
 }

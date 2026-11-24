@@ -117,44 +117,6 @@ async function requestJson<T>(
       headers,
     });
   } catch {
-    if (__DEV__) {
-      if (path === '/api/v1/auth/register' || path === '/api/v1/auth/login') {
-        let bodyData: Record<string, any> = {};
-        try {
-          bodyData = options.body ? JSON.parse(options.body as string) : {};
-        } catch {}
-        const devSession: AuthSession = {
-          accessToken: 'mobile-dev-token-' + Date.now(),
-          refreshToken: 'mobile-dev-refresh-' + Date.now(),
-          tokenType: 'Bearer',
-          expiresInSeconds: 3600,
-          userId: 'dev-user-mobile-50',
-          email: bodyData.email || 'novo.usuario@beyondtime.com.br',
-          role: 'USER',
-        };
-        return devSession as T;
-      }
-      if (path === '/api/v1/profiles/me') {
-        let bodyData: Record<string, any> = {};
-        try {
-          bodyData = options.body ? JSON.parse(options.body as string) : {};
-        } catch {}
-        const devProfile: ServerProfile = {
-          id: 'dev-profile-mobile',
-          userId: 'dev-user-mobile-50',
-          fullName: bodyData.fullName || 'Maria Souza',
-          firstName: (bodyData.fullName || 'Maria').split(' ')[0],
-          bio: 'Gosto de caminhar na orla e de uma boa prosa.',
-          city: bodyData.city || 'Aracaju',
-          hobbies: bodyData.hobbies || ['caminhada', 'cafe-e-prosa', 'mpb'],
-          goal: bodyData.goal || 'amizade',
-          avatarUrl: null,
-          verificationStatus: 'VERIFIED',
-          verifiedBadge50plus: true,
-        };
-        return devProfile as T;
-      }
-    }
     throw new ApiError(
       'Não foi possível conectar ao servidor BeyondTime. Verifique sua conexão ou se o backend está ativo.',
       0,
