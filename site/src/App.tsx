@@ -49,14 +49,51 @@ export function parseLegalPageFromPath(pathname: string): LegalPageId | null {
   return null;
 }
 
+const IS_DEV_ONDA2_PREVIEW =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('preview') === 'onda2';
+
+const DEV_PREVIEW_SESSION: AuthSession = {
+  accessToken: 'dev-preview-token',
+  refreshToken: 'dev-preview-refresh',
+  tokenType: 'Bearer',
+  expiresInSeconds: 3600,
+  userId: 'dev-preview-50plus',
+  email: 'maria50@beyondtime.com.br',
+  role: 'USER',
+  authProvider: 'email',
+  rememberMe: false,
+};
+
+const DEV_PREVIEW_PROFILE: ServerProfile = {
+  id: 'dev-preview-profile',
+  userId: 'dev-preview-50plus',
+  firstName: 'Maria',
+  fullName: 'Maria Helena',
+  bio: 'Amo caminhar na Orla de Atalaia e conversar tomando um bom café.',
+  city: 'Aracaju',
+  goal: 'Amizade',
+  hobbies: ['caminhada', 'cafe-e-prosa', 'mpb', 'leitura', 'forro'],
+  avatarUrl: '/assets/perfil-helena.svg',
+  verificationStatus: 'VERIFIED',
+  verifiedBadge50plus: true,
+};
+
 export function App() {
   const [legalPage, setLegalPage] = useState<LegalPageId | null>(() =>
     typeof window !== 'undefined' ? parseLegalPageFromPath(window.location.pathname) : null
   );
-  const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession());
-  const [showLanding, setShowLanding] = useState<boolean>(() => loadAuthSession() === null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() =>
+    IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_SESSION : loadAuthSession()
+  );
+  const [showLanding, setShowLanding] = useState<boolean>(() =>
+    IS_DEV_ONDA2_PREVIEW ? false : loadAuthSession() === null
+  );
   const { highContrast, toggleHighContrast } = useHighContrast();
-  const [serverProfile, setServerProfile] = useState<ServerProfile | null>(null);
+  const [serverProfile, setServerProfile] = useState<ServerProfile | null>(() =>
+    IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_PROFILE : null
+  );
   const [activeView, setActiveView] = useState<AuthViewId>('login');
   const [contacts, setContacts] = useState<Record<AuthViewId, string>>({
     login: '',
@@ -207,6 +244,10 @@ export function App() {
       setIsProfileMissing(false);
       setIsEditingProfile(false);
       setOrphanNotice(null);
+      return;
+    }
+    if (import.meta.env.DEV && authSession.userId === 'dev-preview-50plus') {
+      setIsLoadingProfile(false);
       return;
     }
     let active = true;
@@ -388,6 +429,7 @@ export function App() {
         <LandingPage
           highContrast={highContrast}
           onToggleHighContrast={toggleHighContrast}
+          onToggleAccessibility={() => setIsAccessibilityOpen(true)}
           onOpenAuth={handleOpenAuthFromLanding}
           onOpenLegalPage={handleOpenLegalPage}
         />

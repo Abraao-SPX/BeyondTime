@@ -1,11 +1,13 @@
-import { useState } from 'react';
 import { getHobbyLabel } from '../../services/wave2Service';
 import type { ConnectionGoal } from '../../types/auth';
 import type { ScoredCandidate } from '../../types/wave2';
+import { MatchCelebrationModal } from './MatchCelebrationModal';
 
 interface MatchAffinityFeedRF05Props {
   candidates: ScoredCandidate[];
   userCity: string;
+  currentUserName: string;
+  currentUserAvatarUrl: string | null;
   filterGoal: ConnectionGoal | 'Todos';
   filterCity: string;
   availableCities: string[];
@@ -29,7 +31,8 @@ const GOAL_FILTERS: readonly (ConnectionGoal | 'Todos')[] = [
 
 export function MatchAffinityFeedRF05({
   candidates,
-  userCity,
+  currentUserName,
+  currentUserAvatarUrl,
   filterGoal,
   filterCity,
   availableCities,
@@ -43,206 +46,80 @@ export function MatchAffinityFeedRF05({
   onOpenMatchChat,
   onDismissMatchBanner,
 }: MatchAffinityFeedRF05Props) {
-  const [expandedBioId, setExpandedBioId] = useState<string | null>(null);
   const currentCandidate = candidates[0] ?? null;
 
   return (
-    <section className="wave2-section" aria-labelledby="discover-heading">
-      <header className="wave2-section__header">
-        <div>
-          <span className="wave2-eyebrow">RF-05 • Conexões por afinidade</span>
-          <h1 id="discover-heading" className="wave2-title">
-            Pessoas compatíveis em Sergipe
-          </h1>
-          <p className="wave2-subtitle">
-            Ordenamos os perfis pela afinidade de hobbies e proximidade com{' '}
-            <strong>{userCity || 'sua cidade em Sergipe'}</strong>. Sem gestos de deslizar: escolha
-            com calma usando os botões abaixo.
-          </p>
+    <section className="discover-stage" aria-label="Descobrir pessoas">
+      <div className="discover-toolbar" role="region" aria-label="Filtros">
+        <div className="discover-toolbar__field">
+          <label htmlFor="filter-goal" className="discover-toolbar__label">
+            Objetivo
+          </label>
+          <select
+            id="filter-goal"
+            className="form-input discover-toolbar__select"
+            value={filterGoal}
+            onChange={(event) => onFilterGoalChange(event.target.value as ConnectionGoal | 'Todos')}
+          >
+            {GOAL_FILTERS.map((goal) => (
+              <option key={goal} value={goal}>
+                {goal === 'Todos' ? 'Todos' : goal}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="wave2-filters" role="region" aria-label="Filtros de afinidade">
-          <div className="wave2-filter-group">
-            <label htmlFor="filter-goal" className="wave2-filter-label">
-              Objetivo
-            </label>
-            <select
-              id="filter-goal"
-              className="form-input wave2-select"
-              value={filterGoal}
-              onChange={(event) => onFilterGoalChange(event.target.value as ConnectionGoal | 'Todos')}
-            >
-              {GOAL_FILTERS.map((goal) => (
-                <option key={goal} value={goal}>
-                  {goal === 'Todos' ? 'Todos os objetivos' : goal}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="wave2-filter-group">
-            <label htmlFor="filter-city" className="wave2-filter-label">
-              Cidade (SE)
-            </label>
-            <select
-              id="filter-city"
-              className="form-input wave2-select"
-              value={filterCity}
-              onChange={(event) => onFilterCityChange(event.target.value)}
-            >
-              <option value="Todas">Todas em Sergipe</option>
-              {availableCities.map((city) => (
-                <option key={city} value={city}>
-                  {city}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="discover-toolbar__field">
+          <label htmlFor="filter-city" className="discover-toolbar__label">
+            Cidade
+          </label>
+          <select
+            id="filter-city"
+            className="form-input discover-toolbar__select"
+            value={filterCity}
+            onChange={(event) => onFilterCityChange(event.target.value)}
+          >
+            <option value="Todas">Todas em Sergipe</option>
+            {availableCities.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
+          </select>
         </div>
-      </header>
+      </div>
 
       {recentMatch && (
-        <div className="match-celebration" role="status" aria-live="polite">
-          <div className="match-celebration__content">
-            <span className="match-celebration__badge">Nova conexão por afinidade</span>
-            <h2 className="match-celebration__title">
-              Você e {recentMatch.fullName} se conectaram ({recentMatch.affinityPercent}% de afinidade)
-            </h2>
-            <p className="match-celebration__text">
-              Vocês compartilham interesses em comum e agora podem conversar com tranquilidade no chat
-              simplificado.
-            </p>
-          </div>
-          <div className="match-celebration__actions">
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => onOpenMatchChat(recentMatch.id)}
-            >
-              Conversar com {recentMatch.fullName.split(' ')[0]}
-            </button>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={onDismissMatchBanner}
-            >
-              Continuar descobrindo
-            </button>
-          </div>
-        </div>
+        <MatchCelebrationModal
+          currentUserName={currentUserName}
+          currentUserAvatarUrl={currentUserAvatarUrl}
+          matchedCandidate={recentMatch}
+          onStartChat={onOpenMatchChat}
+          onContinueDiscovering={onDismissMatchBanner}
+        />
       )}
 
       {currentCandidate ? (
-        <div className="discover-layout">
-          <article className="candidate-card" aria-label={`Perfil de ${currentCandidate.fullName}`}>
-            <div className="candidate-card__top">
-              <div className="candidate-card__identity">
-                <img
-                  src={currentCandidate.avatarUrl}
-                  alt={`Foto de ${currentCandidate.fullName}`}
-                  className="candidate-card__avatar"
-                />
-                <div>
-                  <div className="candidate-card__name-row">
-                    <h2 className="candidate-card__name">
-                      {currentCandidate.fullName}, {currentCandidate.age}
-                    </h2>
-                    {currentCandidate.verifiedIdentity && (
-                      <span className="candidate-badge candidate-badge--verified">
-                        ✓ Perfil verificado
-                      </span>
-                    )}
-                  </div>
-                  <p className="candidate-card__meta">
-                    {currentCandidate.city} (SE) • {currentCandidate.neighborhood} •{' '}
-                    {currentCandidate.lastActiveLabel}
-                  </p>
-                  <p className="candidate-card__goal">
-                    Busca: <strong>{currentCandidate.goal}</strong>
-                  </p>
-                </div>
-              </div>
+        <article
+          className="deck-card"
+          aria-label={`Perfil de ${currentCandidate.fullName}`}
+        >
+          <div className="deck-card__photo-wrap">
+            <img
+              src={currentCandidate.avatarUrl}
+              alt={`Foto de ${currentCandidate.fullName}`}
+              className="deck-card__photo"
+            />
+            <div className="deck-card__photo-scrim" aria-hidden="true" />
 
-              <div
-                className="affinity-score-pill"
-                aria-label={`${currentCandidate.affinityPercent}% de afinidade`}
-              >
-                <span className="affinity-score-pill__value">
-                  {currentCandidate.affinityPercent}%
-                </span>
-                <span className="affinity-score-pill__label">de afinidade</span>
-              </div>
-            </div>
-
-            <div className="candidate-card__body">
-              <h3 className="candidate-card__section-label">Sobre</h3>
-              <p className="candidate-card__bio">
-                {expandedBioId === currentCandidate.id || currentCandidate.bio.length <= 180
-                  ? currentCandidate.bio
-                  : `${currentCandidate.bio.slice(0, 180)}...`}
-              </p>
-              {currentCandidate.bio.length > 180 && (
-                <button
-                  type="button"
-                  className="text-link"
-                  onClick={() =>
-                    setExpandedBioId((prev) =>
-                      prev === currentCandidate.id ? null : currentCandidate.id
-                    )
-                  }
-                >
-                  {expandedBioId === currentCandidate.id ? 'Mostrar menos' : 'Ler apresentação completa'}
-                </button>
-              )}
-
-              <div className="candidate-card__hobbies-block">
-                <h3 className="candidate-card__section-label">
-                  Interesses e afinidades ({currentCandidate.sharedHobbies.length} em comum com você)
-                </h3>
-                <ul className="candidate-hobbies-list">
-                  {currentCandidate.hobbies.map((hobbyId) => {
-                    const isShared = currentCandidate.sharedHobbies.includes(hobbyId);
-                    return (
-                      <li
-                        key={hobbyId}
-                        className={`candidate-hobby-chip${
-                          isShared ? ' candidate-hobby-chip--shared' : ''
-                        }`}
-                      >
-                        {isShared ? '★ ' : ''}
-                        {getHobbyLabel(hobbyId)}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            </div>
-
-            <div className="candidate-card__actions" role="group" aria-label="Ações para este perfil">
-              <button
-                type="button"
-                className="btn btn--secondary candidate-action-btn"
-                onClick={() => onPass(currentCandidate)}
-              >
-                <span aria-hidden="true">✕</span>
-                <span>Passar por enquanto</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn btn--primary candidate-action-btn"
-                onClick={() => onConnect(currentCandidate)}
-              >
-                <span aria-hidden="true">♥</span>
-                <span>Conectar por afinidade</span>
-              </button>
-            </div>
-
-            <div className="candidate-card__safety-row">
-              <span className="candidate-card__queue-hint">
-                {candidates.length === 1
-                  ? 'Último perfil disponível com os filtros atuais'
-                  : `Mais ${candidates.length - 1} perfis compatíveis aguardando sua avaliação`}
+            <div className="deck-card__top-pills">
+              <span className="deck-pill deck-pill--location">
+                {currentCandidate.sameCity
+                  ? `Na sua cidade • ${currentCandidate.city}`
+                  : `${currentCandidate.city}, SE`}
+              </span>
+              <span className="deck-pill deck-pill--affinity">
+                {currentCandidate.affinityPercent}% em comum
               </span>
               <button
                 type="button"
@@ -252,40 +129,116 @@ export function MatchAffinityFeedRF05({
                 Bloquear este contato
               </button>
             </div>
-          </article>
 
-          {candidates.length > 1 && (
-            <aside className="discover-queue" aria-label="Próximos perfis compatíveis">
-              <h2 className="discover-queue__title">Próximos por afinidade</h2>
-              <ul className="discover-queue__list">
-                {candidates.slice(1, 4).map((nextProfile) => (
-                  <li key={nextProfile.id} className="discover-queue__item">
-                    <img
-                      src={nextProfile.avatarUrl}
-                      alt=""
-                      className="discover-queue__avatar"
+            <div className="deck-card__photo-overlay">
+              <div className="deck-card__headline">
+                <h1 className="deck-card__name">
+                  {currentCandidate.fullName}, {currentCandidate.age}
+                </h1>
+                {currentCandidate.verifiedIdentity && (
+                  <span
+                    className="deck-verified"
+                    title="Perfil verificado"
+                    aria-label="Perfil verificado"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                       aria-hidden="true"
-                    />
-                    <div className="discover-queue__info">
-                      <strong>
-                        {nextProfile.fullName}, {nextProfile.age}
-                      </strong>
-                      <span>
-                        {nextProfile.city} (SE) • {nextProfile.affinityPercent}% afinidade
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+              <p className="deck-card__submeta">
+                {currentCandidate.neighborhood}, {currentCandidate.city} • Busca{' '}
+                {currentCandidate.goal.toLowerCase()}
+              </p>
+            </div>
+          </div>
+
+          <div className="deck-card__details">
+            <p className="deck-card__bio">{currentCandidate.bio}</p>
+
+            <div className="deck-card__hobbies">
+              {currentCandidate.sharedHobbies.length > 0 && (
+                <p className="deck-card__hobbies-label">
+                  {currentCandidate.sharedHobbies.length === 1
+                    ? '1 gosto em comum com você'
+                    : `${currentCandidate.sharedHobbies.length} gostos em comum com você`}
+                </p>
+              )}
+              <ul className="candidate-hobbies-list">
+                {currentCandidate.hobbies.map((hobbyId) => {
+                  const isShared = currentCandidate.sharedHobbies.includes(hobbyId);
+                  return (
+                    <li
+                      key={hobbyId}
+                      className={`candidate-hobby-chip${
+                        isShared ? ' candidate-hobby-chip--shared' : ''
+                      }`}
+                    >
+                      {getHobbyLabel(hobbyId)}
+                    </li>
+                  );
+                })}
               </ul>
-            </aside>
-          )}
-        </div>
+            </div>
+
+            <div className="deck-card__actions" role="group" aria-label="Decisão sobre o perfil">
+              <button
+                type="button"
+                className="deck-action-btn deck-action-btn--pass"
+                onClick={() => onPass(currentCandidate)}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="24"
+                  height="24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+                <span>Passar</span>
+              </button>
+
+              <button
+                type="button"
+                className="deck-action-btn deck-action-btn--like"
+                onClick={() => onConnect(currentCandidate)}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="24"
+                  height="24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                </svg>
+                <span>Curtir</span>
+              </button>
+            </div>
+          </div>
+        </article>
       ) : (
         <div className="wave2-empty-card" role="status">
-          <h2 className="wave2-empty-card__title">Você já viu todos os perfis disponíveis agora</h2>
+          <h2 className="wave2-empty-card__title">Não há mais perfis no momento</h2>
           <p className="wave2-empty-card__text">
-            Você pode ajustar os filtros de objetivo/cidade acima ou rever perfis que passou
-            anteriormente.
+            Altere a cidade ou o objetivo acima, ou veja novamente os perfis que você passou.
           </p>
           <div className="wave2-empty-card__actions">
             <button
@@ -297,7 +250,7 @@ export function MatchAffinityFeedRF05({
                 onResetPassed();
               }}
             >
-              Ver novamente perfis disponíveis
+              Ver perfis novamente
             </button>
           </div>
         </div>

@@ -13,7 +13,7 @@ export function BlockedContactsPanelRF08({
     <div className="blocked-panel" aria-labelledby="blocked-panel-title">
       <div className="blocked-panel__header">
         <div>
-          <span className="wave2-eyebrow">RF-08 • Segurança & Controle</span>
+          <span className="wave2-eyebrow">Segurança e Privacidade</span>
           <h2 id="blocked-panel-title" className="blocked-panel__title">
             Contatos bloqueados ({blockedContacts.length})
           </h2>

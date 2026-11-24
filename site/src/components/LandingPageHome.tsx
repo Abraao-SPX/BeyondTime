@@ -11,6 +11,7 @@ export interface OnboardingPrefill {
 interface LandingPageHomeProps {
   highContrast: boolean;
   onToggleHighContrast: () => void;
+  onToggleAccessibility?: () => void;
   onOpenAuth: (targetView: AuthViewId, prefill?: OnboardingPrefill) => void;
   onOpenLegalPage?: (page: LegalPageId) => void;
 }
@@ -326,6 +327,7 @@ const TECH_STACK = [
 export function LandingPageHome({
   highContrast,
   onToggleHighContrast,
+  onToggleAccessibility,
   onOpenAuth,
   onOpenLegalPage,
 }: LandingPageHomeProps) {
@@ -364,6 +366,18 @@ export function LandingPageHome({
           </nav>
 
           <div className="home-header__actions">
+            {onToggleAccessibility && (
+              <button
+                type="button"
+                className="btn-theme-toggle"
+                onClick={onToggleAccessibility}
+                aria-label="Abrir preferências de acessibilidade 50+"
+                title="Acessibilidade 50+"
+              >
+                <span aria-hidden="true" style={{ fontSize: '18px', display: 'flex', alignItems: 'center' }}>👁️</span>
+              </button>
+            )}
+
             <button
               type="button"
               className="btn-theme-toggle"

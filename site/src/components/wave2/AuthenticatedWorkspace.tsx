@@ -14,6 +14,7 @@ import type { ServerProfile } from '../../services/apiClient';
 import type {
   BlockedContact,
   ChatThread,
+  OutgoingMessagePayload,
   ScoredCandidate,
   Wave2State,
   WorkspaceTabId,
@@ -56,6 +57,7 @@ export function AuthenticatedWorkspace({
   );
   const [filterGoal, setFilterGoal] = useState<ConnectionGoal | 'Todos'>('Todos');
   const [filterCity, setFilterCity] = useState<string>('Todas');
+  const [maxDistance, setMaxDistance] = useState<string>('30km');
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
@@ -135,7 +137,7 @@ export function AuthenticatedWorkspace({
       setRecentMatch(candidate);
     } else {
       setSafetyFeedback(
-        `Seu convite de conexão foi enviado para ${candidate.fullName}. Avisaremos quando houver afinidade mútua.`
+        `Você curtiu ${candidate.fullName}. Se a pessoa também curtir você, a conversa aparecerá em Conversas.`
       );
     }
   }
@@ -162,8 +164,8 @@ export function AuthenticatedWorkspace({
     }));
   }
 
-  function handleSendMessage(contactId: string, text: string) {
-    const outgoing = createOutgoingMessage(text);
+  function handleSendMessage(contactId: string, payload: string | OutgoingMessagePayload) {
+    const outgoing = createOutgoingMessage(payload);
     setWave2State((prev) => ({
       ...prev,
       threads: prev.threads.map((thread) =>
@@ -228,15 +230,28 @@ export function AuthenticatedWorkspace({
 
   return (
     <div className="workspace-container">
-      <nav className="workspace-nav" aria-label="Navegação principal do BeyondTime">
+      {/* Navegação unificada: barra no topo no Desktop e barra inferior fixa no Mobile */}
+      <nav className="workspace-nav" aria-label="Navegação principal">
         <button
           type="button"
           className={`workspace-nav__tab${activeTab === 'discover' ? ' workspace-nav__tab--active' : ''}`}
           onClick={() => setActiveTab('discover')}
           aria-current={activeTab === 'discover' ? 'page' : undefined}
         >
-          <span aria-hidden="true">♥</span>
-          <span>Descobrir ({candidates.length})</span>
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+          </svg>
+          <span>Descobrir</span>
         </button>
 
         <button
@@ -245,7 +260,19 @@ export function AuthenticatedWorkspace({
           onClick={() => setActiveTab('chat')}
           aria-current={activeTab === 'chat' ? 'page' : undefined}
         >
-          <span aria-hidden="true">💬</span>
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
           <span>Conversas</span>
           {totalUnread > 0 && (
             <span className="workspace-nav__badge" aria-label={`${totalUnread} não lidas`}>
@@ -260,8 +287,22 @@ export function AuthenticatedWorkspace({
           onClick={() => setActiveTab('profile')}
           aria-current={activeTab === 'profile' ? 'page' : undefined}
         >
-          <span aria-hidden="true">👤</span>
-          <span>Meu Perfil e Segurança</span>
+<svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          <span>Meu Perfil</span>
+
         </button>
       </nav>
 
@@ -283,6 +324,8 @@ export function AuthenticatedWorkspace({
         <MatchAffinityFeedRF05
           candidates={candidates}
           userCity={userCity}
+          currentUserName={displayFullName || 'Você'}
+          currentUserAvatarUrl={displayAvatarUrl}
           filterGoal={filterGoal}
           filterCity={filterCity}
           availableCities={availableCities}
@@ -326,63 +369,187 @@ export function AuthenticatedWorkspace({
       )}
 
       {activeTab === 'profile' && (
-        <section className="wave2-section" aria-labelledby="my-profile-heading">
-          <div className="profile-hub-grid">
-            <div className="profile-hub-card">
-              <span className="wave2-eyebrow">Sessão autenticada (JWT)</span>
-              <h1 id="my-profile-heading" className="wave2-title">
-                {displayFullName || 'Seu perfil BeyondTime'}
-              </h1>
-              <p className="wave2-subtitle">
-                E-mail: <strong>{authSession.email}</strong>
-                {serverProfile?.city ? ` • ${serverProfile.city} (SE)` : ''}
-                {serverProfile?.goal ? ` • Objetivo: ${serverProfile.goal}` : ''}
-              </p>
 
-              {displayAvatarUrl && (
-                <div className="photo-preview" style={{ marginBottom: '16px' }}>
+        <section className="editorial-profile" aria-labelledby="my-profile-heading">
+          <div className="editorial-profile__grid">
+            {/* Coluna Esquerda: Retrato Grande ou Monograma + Botão Foto */}
+            <div className="editorial-profile__media">
+              {displayAvatarUrl && !displayAvatarUrl.endsWith('.svg') ? (
+                <div className="editorial-profile__photo-box">
                   <img
                     src={displayAvatarUrl}
                     alt={`Foto de perfil de ${displayFullName || authSession.email}`}
-                    className="photo-preview__image"
+                    className="editorial-profile__photo"
                   />
                 </div>
-              )}
-
-              {userHobbies.length > 0 && (
-                <div style={{ marginBottom: '20px' }}>
-                  <h2 className="candidate-card__section-label">Seus interesses cadastrados</h2>
-                  <ul className="candidate-hobbies-list">
-                    {userHobbies.map((hobbyId) => (
-                      <li key={hobbyId} className="candidate-hobby-chip">
-                        {getHobbyLabel(hobbyId)}
-                      </li>
-                    ))}
-                  </ul>
+              ) : (
+                <div className="editorial-profile__monogram" aria-hidden="true">
+                  <span>
+                    {(displayFullName || 'BT')
+                      .trim()
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((part) => part[0]?.toUpperCase() ?? '')
+                      .join('')}
+                  </span>
                 </div>
               )}
 
-              <div className="profile-hub-actions">
-                <button type="button" className="btn btn--primary" onClick={onEditProfile}>
-                  Editar perfil e hobbies
+              <p className="editorial-profile__photo-hint">
+                {displayAvatarUrl && !displayAvatarUrl.endsWith('.svg')
+                  ? 'É assim que sua foto aparece para as outras pessoas em Descobrir.'
+                  : 'Você ainda não tem foto. Perfis com foto recebem mais curtidas.'}
+              </p>
+
+              <button
+                type="button"
+                className="btn btn--secondary editorial-profile__photo-btn"
+                onClick={onEditProfile}
+              >
+                {displayAvatarUrl && !displayAvatarUrl.endsWith('.svg')
+                  ? 'Alterar foto'
+                  : 'Adicionar foto'}
+              </button>
+            </div>
+
+            {/* Coluna Direita: Identidade, Sobre Mim, Meus Gostos e Preferências */}
+            <div className="editorial-profile__content">
+              <header className="editorial-profile__header">
+                <div className="editorial-profile__title-row">
+                  <h1 id="my-profile-heading" className="editorial-profile__name">
+                    {displayFullName || 'Meu Perfil'}
+                  </h1>
+                  <span className="editorial-profile__age">50+</span>
+                </div>
+                <p className="editorial-profile__location">
+                  {userCity ? `${userCity}, Sergipe` : 'Sergipe'}
+                </p>
+                <p className="editorial-profile__privacy-note">
+                  É assim que as outras pessoas veem você em Descobrir. Endereço e telefone nunca
+                  aparecem.
+                </p>
+              </header>
+
+              <div className="editorial-profile__section">
+                <div className="editorial-profile__section-head">
+                  <h2 className="editorial-profile__label">SOBRE MIM</h2>
+                  <button
+                    type="button"
+                    className="editorial-profile__edit-btn"
+                    onClick={onEditProfile}
+                  >
+                    Editar
+                  </button>
+                </div>
+                <p className="editorial-profile__bio">
+                  {serverProfile?.bio?.trim() ||
+                    'Adicione uma breve apresentação contando do que gosta de fazer e o que procura por aqui.'}
+                </p>
+              </div>
+
+              <div className="editorial-profile__section">
+                <div className="editorial-profile__section-head">
+                  <h2 className="editorial-profile__label">MEUS GOSTOS</h2>
+                  <button
+                    type="button"
+                    className="editorial-profile__edit-btn"
+                    onClick={onEditProfile}
+                  >
+                    Editar
+                  </button>
+                </div>
+                <p className="editorial-profile__hobbies-text">
+                  {userHobbies.length > 0
+                    ? userHobbies.map((hobbyId) => getHobbyLabel(hobbyId)).join(', ')
+                    : 'Nenhum interesse selecionado ainda.'}
+                </p>
+                <p className="editorial-profile__helper">
+                  {userHobbies.length} de até 10. Eles decidem quem aparece para você em Descobrir.
+                </p>
+              </div>
+
+              <div className="editorial-profile__section">
+                <h2 className="editorial-profile__label">QUEM APARECE PARA MIM</h2>
+                <div className="editorial-profile__prefs-grid">
+                  <div className="editorial-profile__pref-field">
+                    <label htmlFor="profile-pref-goal" className="editorial-profile__pref-label">
+                      Estou procurando
+                    </label>
+                    <select
+                      id="profile-pref-goal"
+                      className="form-input"
+                      value={filterGoal}
+                      onChange={(event) =>
+                        setFilterGoal(event.target.value as ConnectionGoal | 'Todos')
+                      }
+                    >
+                      <option value="Todos">Todos os objetivos</option>
+                      <option value="Amizade">Amizade</option>
+                      <option value="Companhia">Companhia</option>
+                      <option value="Relacionamento">Relacionamento</option>
+                    </select>
+                  </div>
+
+                  <div className="editorial-profile__pref-field">
+                    <label
+                      htmlFor="profile-pref-distance"
+                      className="editorial-profile__pref-label"
+                    >
+                      Distância máxima
+                    </label>
+                    <select
+                      id="profile-pref-distance"
+                      className="form-input"
+                      value={maxDistance}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setMaxDistance(val);
+                        setFilterCity(val === 'city' ? userCity : 'Todas');
+                      }}
+                    >
+                      <option value="city">Apenas minha cidade</option>
+                      <option value="30km">Até 30 km</option>
+                      <option value="state">Todo Sergipe</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="editorial-profile__helper">
+                  As mudanças já valem nas suas sugestões em Descobrir.
+                </p>
+              </div>
+
+              <div className="editorial-profile__security-section">
+                <BlockedContactsPanelRF08
+                  blockedContacts={wave2State.blockedContacts}
+                  onUnblock={handleUnblockContact}
+                />
+              </div>
+
+              <footer className="editorial-profile__footer-links">
+                <button
+                  type="button"
+                  className="editorial-profile__link"
+                  onClick={onEditProfile}
+                >
+                  Alterar dados da conta
                 </button>
-                <button type="button" className="btn btn--secondary" onClick={onLogout}>
+                <button
+                  type="button"
+                  className="editorial-profile__link"
+                  onClick={onLogout}
+                >
                   Sair da conta
                 </button>
                 <button
                   type="button"
-                  className="btn-safety-link"
+                  className="editorial-profile__link editorial-profile__link--danger"
                   onClick={onRequestDeleteAccount}
                 >
-                  Excluir minha conta definitivamente (LGPD)
+                  Excluir conta e dados
                 </button>
-              </div>
+              </footer>
             </div>
 
-            <BlockedContactsPanelRF08
-              blockedContacts={wave2State.blockedContacts}
-              onUnblock={handleUnblockContact}
-            />
           </div>
         </section>
       )}
