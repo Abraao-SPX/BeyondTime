@@ -3,6 +3,19 @@
    e Bloqueio de Contatos (RF-08) — Acessibilidade 50+ (WCAG AA/AAA)
    ========================================================================== */
 
+/* Acessibilidade para leitores de tela */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .auth-card--workspace {
   max-width: 1120px;
   padding: 32px 36px;
