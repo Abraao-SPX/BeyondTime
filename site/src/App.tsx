@@ -429,6 +429,7 @@ export function App() {
         <LandingPage
           highContrast={highContrast}
           onToggleHighContrast={toggleHighContrast}
+          onToggleAccessibility={() => setIsAccessibilityOpen(true)}
           onOpenAuth={handleOpenAuthFromLanding}
           onOpenLegalPage={handleOpenLegalPage}
         />
