@@ -275,3 +275,107 @@ export function FacebookIcon({ size = 22 }: { size?: number }) {
     </Svg>
   );
 }
+
+export function HeartIcon({
+  size = 22,
+  color = '#A90025',
+  filled = false,
+}: IconProps & { filled?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 20.5C12 20.5 4 15.2 4 9.5C4 6.6 6.2 4.5 8.8 4.5C10.4 4.5 11.4 5.3 12 6.3C12.6 5.3 13.6 4.5 15.2 4.5C17.8 4.5 20 6.6 20 9.5C20 15.2 12 20.5 12 20.5Z"
+        fill={filled ? color : 'none'}
+        stroke={color}
+        strokeWidth={2.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function CloseXIcon({ size = 22, color = '#2A1A20' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 6L18 18M18 6L6 18"
+        stroke={color}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function MessageCircleIcon({ size = 22, color = '#5E4850' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M20 11.5C20 15.9 16.4 19.5 12 19.5C10.6 19.5 9.3 19.1 8.1 18.5L4 19.8L5.3 15.8C4.5 14.6 4 13.1 4 11.5C4 7.1 7.6 3.5 12 3.5C16.4 3.5 20 7.1 20 11.5Z"
+        stroke={color}
+        strokeWidth={2.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function UserIcon({ size = 22, color = '#5E4850' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={8.5} r={3.8} stroke={color} strokeWidth={2.1} />
+      <Path
+        d="M5 19.5C5.7 16.2 8.5 14.2 12 14.2C15.5 14.2 18.3 16.2 19 19.5"
+        stroke={color}
+        strokeWidth={2.1}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function SendIcon({ size = 20, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21 3L10 14M21 3L14.5 21L10 14M21 3L3 9.5L10 14"
+        stroke={color}
+        strokeWidth={2.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function MapPinIcon({ size = 18, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 21C15.5 17.4 18.5 14.2 18.5 10.2C18.5 6.6 15.6 3.8 12 3.8C8.4 3.8 5.5 6.6 5.5 10.2C5.5 14.2 8.5 17.4 12 21Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={10} r={2.3} stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+
+export function SparklesIcon({ size = 18, color = '#A90025' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3L13.9 8.6L19.5 10.5L13.9 12.4L12 18L10.1 12.4L4.5 10.5L10.1 8.6L12 3Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
