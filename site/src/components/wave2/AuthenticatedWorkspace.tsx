@@ -50,6 +50,7 @@ export function AuthenticatedWorkspace({
   );
   const [filterGoal, setFilterGoal] = useState<ConnectionGoal | 'Todos'>('Todos');
   const [filterCity, setFilterCity] = useState<string>('Todas');
+  const [maxDistance, setMaxDistance] = useState<string>('30km');
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
@@ -270,6 +271,8 @@ export function AuthenticatedWorkspace({
         <MatchAffinityFeedRF05
           candidates={candidates}
           userCity={userCity}
+          currentUserName={displayFullName || 'Você'}
+          currentUserAvatarUrl={displayAvatarUrl}
           filterGoal={filterGoal}
           filterCity={filterCity}
           availableCities={availableCities}
@@ -295,55 +298,177 @@ export function AuthenticatedWorkspace({
       )}
 
       {activeTab === 'profile' && (
-        <section className="profile-stage" aria-labelledby="my-profile-heading">
-          <div className="profile-hub-card">
-            <div className="profile-hub-card__header">
-              {displayAvatarUrl && (
-                <img
-                  src={displayAvatarUrl}
-                  alt={`Foto de perfil de ${displayFullName || authSession.email}`}
-                  className="profile-hub-card__avatar"
-                />
+        <section className="editorial-profile" aria-labelledby="my-profile-heading">
+          <div className="editorial-profile__grid">
+            {/* Coluna Esquerda: Retrato Grande ou Monograma + Botão Foto */}
+            <div className="editorial-profile__media">
+              {displayAvatarUrl && !displayAvatarUrl.endsWith('.svg') ? (
+                <div className="editorial-profile__photo-box">
+                  <img
+                    src={displayAvatarUrl}
+                    alt={`Foto de perfil de ${displayFullName || authSession.email}`}
+                    className="editorial-profile__photo"
+                  />
+                </div>
+              ) : (
+                <div className="editorial-profile__monogram" aria-hidden="true">
+                  <span>
+                    {(displayFullName || 'BT')
+                      .trim()
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((part) => part[0]?.toUpperCase() ?? '')
+                      .join('')}
+                  </span>
+                </div>
               )}
-              <div>
-                <h1 id="my-profile-heading" className="wave2-title">
-                  {displayFullName || 'Meu Perfil'}
-                </h1>
-                <p className="wave2-subtitle">
-                  {authSession.email}
-                  {userCity ? ` • ${userCity}, SE` : ''}
-                  {userGoal ? ` • Busca ${userGoal.toLowerCase()}` : ''}
-                </p>
-              </div>
-            </div>
 
-            {userHobbies.length > 0 && (
-              <div className="profile-hub-card__hobbies">
-                <h2 className="deck-card__hobbies-label">Meus interesses</h2>
-                <ul className="candidate-hobbies-list">
-                  {userHobbies.map((hobbyId) => (
-                    <li key={hobbyId} className="candidate-hobby-chip">
-                      {getHobbyLabel(hobbyId)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              <p className="editorial-profile__photo-hint">
+                {displayAvatarUrl && !displayAvatarUrl.endsWith('.svg')
+                  ? 'É assim que sua foto aparece para as outras pessoas em Descobrir.'
+                  : 'Você ainda não tem foto. Perfis com foto recebem mais curtidas.'}
+              </p>
 
-            <div className="profile-hub-actions">
-              <button type="button" className="btn btn--primary" onClick={onEditProfile}>
-                Editar perfil e interesses
-              </button>
-              <button type="button" className="btn btn--secondary" onClick={onLogout}>
-                Sair da conta
-              </button>
               <button
                 type="button"
-                className="btn-safety-link"
-                onClick={onRequestDeleteAccount}
+                className="btn btn--secondary editorial-profile__photo-btn"
+                onClick={onEditProfile}
               >
-                Excluir conta e dados
+                {displayAvatarUrl && !displayAvatarUrl.endsWith('.svg')
+                  ? 'Alterar foto'
+                  : 'Adicionar foto'}
               </button>
+            </div>
+
+            {/* Coluna Direita: Identidade, Sobre Mim, Meus Gostos e Preferências */}
+            <div className="editorial-profile__content">
+              <header className="editorial-profile__header">
+                <div className="editorial-profile__title-row">
+                  <h1 id="my-profile-heading" className="editorial-profile__name">
+                    {displayFullName || 'Meu Perfil'}
+                  </h1>
+                  <span className="editorial-profile__age">50+</span>
+                </div>
+                <p className="editorial-profile__location">
+                  {userCity ? `${userCity}, Sergipe` : 'Sergipe'}
+                </p>
+                <p className="editorial-profile__privacy-note">
+                  É assim que as outras pessoas veem você em Descobrir. Endereço e telefone nunca
+                  aparecem.
+                </p>
+              </header>
+
+              <div className="editorial-profile__section">
+                <div className="editorial-profile__section-head">
+                  <h2 className="editorial-profile__label">SOBRE MIM</h2>
+                  <button
+                    type="button"
+                    className="editorial-profile__edit-btn"
+                    onClick={onEditProfile}
+                  >
+                    Editar
+                  </button>
+                </div>
+                <p className="editorial-profile__bio">
+                  {serverProfile?.bio?.trim() ||
+                    'Adicione uma breve apresentação contando do que gosta de fazer e o que procura por aqui.'}
+                </p>
+              </div>
+
+              <div className="editorial-profile__section">
+                <div className="editorial-profile__section-head">
+                  <h2 className="editorial-profile__label">MEUS GOSTOS</h2>
+                  <button
+                    type="button"
+                    className="editorial-profile__edit-btn"
+                    onClick={onEditProfile}
+                  >
+                    Editar
+                  </button>
+                </div>
+                <p className="editorial-profile__hobbies-text">
+                  {userHobbies.length > 0
+                    ? userHobbies.map((hobbyId) => getHobbyLabel(hobbyId)).join(', ')
+                    : 'Nenhum interesse selecionado ainda.'}
+                </p>
+                <p className="editorial-profile__helper">
+                  {userHobbies.length} de até 10. Eles decidem quem aparece para você em Descobrir.
+                </p>
+              </div>
+
+              <div className="editorial-profile__section">
+                <h2 className="editorial-profile__label">QUEM APARECE PARA MIM</h2>
+                <div className="editorial-profile__prefs-grid">
+                  <div className="editorial-profile__pref-field">
+                    <label htmlFor="profile-pref-goal" className="editorial-profile__pref-label">
+                      Estou procurando
+                    </label>
+                    <select
+                      id="profile-pref-goal"
+                      className="form-input"
+                      value={filterGoal}
+                      onChange={(event) =>
+                        setFilterGoal(event.target.value as ConnectionGoal | 'Todos')
+                      }
+                    >
+                      <option value="Todos">Todos os objetivos</option>
+                      <option value="Amizade">Amizade</option>
+                      <option value="Companhia">Companhia</option>
+                      <option value="Relacionamento">Relacionamento</option>
+                    </select>
+                  </div>
+
+                  <div className="editorial-profile__pref-field">
+                    <label
+                      htmlFor="profile-pref-distance"
+                      className="editorial-profile__pref-label"
+                    >
+                      Distância máxima
+                    </label>
+                    <select
+                      id="profile-pref-distance"
+                      className="form-input"
+                      value={maxDistance}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setMaxDistance(val);
+                        setFilterCity(val === 'city' ? userCity : 'Todas');
+                      }}
+                    >
+                      <option value="city">Apenas minha cidade</option>
+                      <option value="30km">Até 30 km</option>
+                      <option value="state">Todo Sergipe</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="editorial-profile__helper">
+                  As mudanças já valem nas suas sugestões em Descobrir.
+                </p>
+              </div>
+
+              <footer className="editorial-profile__footer-links">
+                <button
+                  type="button"
+                  className="editorial-profile__link"
+                  onClick={onEditProfile}
+                >
+                  Alterar dados da conta
+                </button>
+                <button
+                  type="button"
+                  className="editorial-profile__link"
+                  onClick={onLogout}
+                >
+                  Sair da conta
+                </button>
+                <button
+                  type="button"
+                  className="editorial-profile__link editorial-profile__link--danger"
+                  onClick={onRequestDeleteAccount}
+                >
+                  Excluir conta e dados
+                </button>
+              </footer>
             </div>
           </div>
         </section>

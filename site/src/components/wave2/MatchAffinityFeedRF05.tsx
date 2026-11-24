@@ -1,10 +1,13 @@
 import { getHobbyLabel } from '../../services/wave2Service';
 import type { ConnectionGoal } from '../../types/auth';
 import type { ScoredCandidate } from '../../types/wave2';
+import { MatchCelebrationModal } from './MatchCelebrationModal';
 
 interface MatchAffinityFeedRF05Props {
   candidates: ScoredCandidate[];
   userCity: string;
+  currentUserName: string;
+  currentUserAvatarUrl: string | null;
   filterGoal: ConnectionGoal | 'Todos';
   filterCity: string;
   availableCities: string[];
@@ -27,6 +30,8 @@ const GOAL_FILTERS: readonly (ConnectionGoal | 'Todos')[] = [
 
 export function MatchAffinityFeedRF05({
   candidates,
+  currentUserName,
+  currentUserAvatarUrl,
   filterGoal,
   filterCity,
   availableCities,
@@ -83,32 +88,13 @@ export function MatchAffinityFeedRF05({
       </div>
 
       {recentMatch && (
-        <div className="match-celebration" role="status" aria-live="polite">
-          <div className="match-celebration__content">
-            <h2 className="match-celebration__title">
-              Nova conexão com {recentMatch.fullName}
-            </h2>
-            <p className="match-celebration__text">
-              Vocês se curtiram e já podem conversar.
-            </p>
-          </div>
-          <div className="match-celebration__actions">
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => onOpenMatchChat(recentMatch.id)}
-            >
-              Enviar mensagem
-            </button>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={onDismissMatchBanner}
-            >
-              Continuar vendo perfis
-            </button>
-          </div>
-        </div>
+        <MatchCelebrationModal
+          currentUserName={currentUserName}
+          currentUserAvatarUrl={currentUserAvatarUrl}
+          matchedCandidate={recentMatch}
+          onStartChat={onOpenMatchChat}
+          onContinueDiscovering={onDismissMatchBanner}
+        />
       )}
 
       {currentCandidate ? (
