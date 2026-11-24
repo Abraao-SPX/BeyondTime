@@ -1,12 +1,21 @@
-import React, { useEffect, useState } from 'react';
-import { BackHandler, SafeAreaView, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { BackHandler, SafeAreaView, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { BottomTabBar } from '../components/BottomTabBar';
+import { ChatThreadScreen } from '../screens/ChatThreadScreen';
+import { ConversationsScreen } from '../screens/ConversationsScreen';
+import { DiscoverScreen } from '../screens/DiscoverScreen';
 import { FacialVerificationFlowScreen } from '../screens/FacialVerificationFlowScreen';
 import { HomePlaceholderScreen } from '../screens/HomePlaceholderScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OnboardingFlowScreen } from '../screens/OnboardingFlowScreen';
 import { SplashWelcomeScreen } from '../screens/SplashWelcomeScreen';
 import { logoutAccount, type AuthSession } from '../services/authService';
+import {
+  createConversationFromProfile,
+  formatCurrentTime,
+  INITIAL_CONVERSATIONS,
+} from '../services/chatService';
 import { useTheme } from '../theme/ThemeContext';
 import {
   AppRoute,
@@ -14,6 +23,11 @@ import {
   OnboardingData,
   RelationshipGoal,
 } from '../types/onboarding';
+import type {
+  ChatConversation,
+  MainTab,
+  RankedDiscoveryProfile,
+} from '../types/social';
 
 function parseGoal(goal?: string): RelationshipGoal {
   if (goal === 'relacionamento' || goal === 'companhia' || goal === 'amizade') {
@@ -23,8 +37,8 @@ function parseGoal(goal?: string): RelationshipGoal {
 }
 
 /**
- * Controlador de Navegação Mobile BeyondTime (Onda 1 — Pranchas 1 a 3):
- * Conecta Splash -> Login / Recuperação de Senha / Cadastro (7 etapas) -> Reconhecimento Facial (FaceCaptureScreen) -> Home.
+ * Controlador de Navegação Mobile BeyondTime (Onda 1 + Onda 2: RF-05 e RF-07):
+ * Splash -> Login / Cadastro (7 etapas) -> Reconhecimento Facial -> Abas (Descobrir, Conversas, Meu Perfil).
  */
 export function AppNavigator() {
   const { palette, isDark } = useTheme();
@@ -32,6 +46,23 @@ export function AppNavigator() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [onboardingData, setOnboardingData] = useState<OnboardingData>(
     INITIAL_ONBOARDING_DATA
+  );
+
+  // Estado das abas principais (RF-05 e RF-07)
+  const [activeTab, setActiveTab] = useState<MainTab>('discover');
+  const [conversations, setConversations] = useState<ChatConversation[]>(
+    INITIAL_CONVERSATIONS
+  );
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  const totalUnreadCount = useMemo(
+    () => conversations.reduce((sum, conv) => sum + conv.unreadCount, 0),
+    [conversations]
+  );
+
+  const activeConversation = useMemo(
+    () => conversations.find((conv) => conv.id === activeConversationId) ?? null,
+    [conversations, activeConversationId]
   );
 
   // Suporte defensivo ao botão físico Voltar no Android
@@ -45,19 +76,75 @@ export function AppNavigator() {
         setRoute('onboarding');
         return true;
       }
+      if (route === 'home' && activeTab !== 'discover' && !activeConversationId) {
+        setActiveTab('discover');
+        return true;
+      }
       return false;
     });
     return () => subscription.remove();
-  }, [route]);
+  }, [activeConversationId, activeTab, route]);
 
   const handleResetAndExit = () => {
     const currentSession = authSession;
     setAuthSession(null);
     setOnboardingData(INITIAL_ONBOARDING_DATA);
+    setActiveConversationId(null);
+    setActiveTab('discover');
     setRoute('splash');
     if (currentSession) {
       void logoutAccount(currentSession);
     }
+  };
+
+  const handleMutualConnection = (
+    profile: RankedDiscoveryProfile,
+    openChatNow: boolean
+  ) => {
+    const convId = `conv-${profile.id}`;
+    setConversations((prev) => {
+      const exists = prev.some((c) => c.id === convId);
+      if (exists) return prev;
+      return [createConversationFromProfile(profile), ...prev];
+    });
+
+    if (openChatNow) {
+      setActiveTab('conversations');
+      setActiveConversationId(convId);
+    }
+  };
+
+  const handleOpenConversation = (conversationId: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c))
+    );
+    setActiveConversationId(conversationId);
+  };
+
+  const handleSendMessage = (conversationId: string, text: string) => {
+    const nowTime = formatCurrentTime();
+    setConversations((prev) => {
+      const updated = prev.map((conv) => {
+        if (conv.id !== conversationId) return conv;
+        return {
+          ...conv,
+          unreadCount: 0,
+          lastTimestamp: nowTime,
+          messages: [
+            ...conv.messages,
+            {
+              id: `msg-${Date.now()}`,
+              sender: 'me' as const,
+              text,
+              timestamp: nowTime,
+            },
+          ],
+        };
+      });
+      const current = updated.find((c) => c.id === conversationId);
+      const others = updated.filter((c) => c.id !== conversationId);
+      return current ? [current, ...others] : updated;
+    });
   };
 
   return (
@@ -89,6 +176,8 @@ export function AppNavigator() {
               goal: parseGoal(profile?.goal),
               isFaceVerified: Boolean(profile?.verifiedBadge50plus),
             }));
+            setActiveTab('discover');
+            setActiveConversationId(null);
             setRoute('home');
           }}
         />
@@ -110,24 +199,70 @@ export function AppNavigator() {
       {route === 'facialVerification' && (
         <FacialVerificationFlowScreen
           onBack={() => setRoute('onboarding')}
-          onSkipForLater={() => setRoute('home')}
+          onSkipForLater={() => {
+            setActiveTab('discover');
+            setActiveConversationId(null);
+            setRoute('home');
+          }}
           onVerificationComplete={(selfieUri) => {
             setOnboardingData((prev) => ({
               ...prev,
               isFaceVerified: true,
               verifiedSelfieUri: selfieUri,
             }));
+            setActiveTab('discover');
+            setActiveConversationId(null);
             setRoute('home');
           }}
         />
       )}
 
       {route === 'home' && (
-        <HomePlaceholderScreen
-          userData={onboardingData}
-          onRepeatFacialVerification={() => setRoute('facialVerification')}
-          onSignOut={handleResetAndExit}
-        />
+        <View style={styles.mainShell}>
+          {activeConversation ? (
+            <ChatThreadScreen
+              conversation={activeConversation}
+              onBackToList={() => setActiveConversationId(null)}
+              onSendMessage={handleSendMessage}
+            />
+          ) : (
+            <>
+              <View style={styles.tabContent}>
+                {activeTab === 'discover' && (
+                  <DiscoverScreen
+                    userCity={onboardingData.city}
+                    userHobbies={onboardingData.selectedHobbies}
+                    onMutualConnection={handleMutualConnection}
+                  />
+                )}
+
+                {activeTab === 'conversations' && (
+                  <ConversationsScreen
+                    conversations={conversations}
+                    onSelectConversation={handleOpenConversation}
+                  />
+                )}
+
+                {activeTab === 'profile' && (
+                  <HomePlaceholderScreen
+                    userData={onboardingData}
+                    onRepeatFacialVerification={() => setRoute('facialVerification')}
+                    onSignOut={handleResetAndExit}
+                  />
+                )}
+              </View>
+
+              <BottomTabBar
+                activeTab={activeTab}
+                unreadCount={totalUnreadCount}
+                onSelectTab={(tab) => {
+                  setActiveConversationId(null);
+                  setActiveTab(tab);
+                }}
+              />
+            </>
+          )}
+        </View>
       )}
     </SafeAreaView>
   );
@@ -135,6 +270,12 @@ export function AppNavigator() {
 
 const styles = StyleSheet.create({
   safeArea: {
+    flex: 1,
+  },
+  mainShell: {
+    flex: 1,
+  },
+  tabContent: {
     flex: 1,
   },
 });
