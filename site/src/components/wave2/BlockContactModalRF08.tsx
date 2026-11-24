@@ -44,7 +44,7 @@ export function BlockContactModalRF08({
       }}
     >
       <div className="defensive-modal">
-        <p className="defensive-modal__badge">Segurança & Privacidade (RF-08)</p>
+        <p className="defensive-modal__badge">Segurança & Privacidade</p>
         <h2 id="block-modal-title" className="defensive-modal__title">
           Bloquear {contactName}?
         </h2>

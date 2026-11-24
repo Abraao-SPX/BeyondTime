@@ -34,6 +34,7 @@ interface DiscoverScreenProps {
   userName?: string;
   userCity: string;
   userHobbies: string[];
+  blockedProfileIds?: string[];
   onMutualConnection: (profile: RankedDiscoveryProfile, openChatNow: boolean) => void;
 }
 
@@ -47,14 +48,17 @@ export function DiscoverScreen({
   userName = 'Você',
   userCity,
   userHobbies,
+  blockedProfileIds,
   onMutualConnection,
 }: DiscoverScreenProps) {
   const { palette, fs } = useTheme();
 
-  const rankedProfiles = useMemo(
-    () => rankProfilesByAffinity(SEED_DISCOVERY_PROFILES, userCity, userHobbies),
-    [userCity, userHobbies]
-  );
+  const rankedProfiles = useMemo(() => {
+    const list = rankProfilesByAffinity(SEED_DISCOVERY_PROFILES, userCity, userHobbies);
+    if (!blockedProfileIds || blockedProfileIds.length === 0) return list;
+    const blockedSet = new Set(blockedProfileIds);
+    return list.filter((p) => !blockedSet.has(p.id));
+  }, [userCity, userHobbies, blockedProfileIds]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageErrorMap, setImageErrorMap] = useState<Record<string, boolean>>({});

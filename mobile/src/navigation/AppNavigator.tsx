@@ -24,6 +24,7 @@ import {
   RelationshipGoal,
 } from '../types/onboarding';
 import type {
+  BlockedContactMobile,
   ChatConversation,
   MainTab,
   RankedDiscoveryProfile,
@@ -55,6 +56,13 @@ export function AppNavigator() {
     INITIAL_CONVERSATIONS
   );
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  // Bloqueio de contatos e segurança defensiva (RF-08)
+  const [blockedContacts, setBlockedContacts] = useState<BlockedContactMobile[]>([]);
+  const blockedProfileIds = useMemo(
+    () => blockedContacts.map((b) => b.id),
+    [blockedContacts]
+  );
 
   const totalUnreadCount = useMemo(
     () => conversations.reduce((sum, conv) => sum + conv.unreadCount, 0),
@@ -155,6 +163,35 @@ export function AppNavigator() {
     });
   };
 
+  const handleBlockContact = (profileId: string, fullName: string) => {
+    const today = new Date().toLocaleDateString('pt-BR');
+    const existingConv = conversations.find(
+      (c) => c.profileId === profileId || c.id === `conv-${profileId}`
+    );
+    const newBlocked: BlockedContactMobile = {
+      id: profileId,
+      fullName,
+      age: existingConv?.age ?? 60,
+      city: existingConv?.city ?? 'Aracaju',
+      photoUrl: existingConv?.photoUrl ?? '',
+      blockedAt: today,
+    };
+
+    setBlockedContacts((prev) =>
+      prev.some((b) => b.id === profileId) ? prev : [newBlocked, ...prev]
+    );
+
+    // Ocultação mútua imediata no chat e na lista de conexões (RF-08)
+    setConversations((prev) =>
+      prev.filter((c) => c.profileId !== profileId && c.id !== `conv-${profileId}`)
+    );
+    setActiveConversationId(null);
+  };
+
+  const handleUnblockContact = (profileId: string) => {
+    setBlockedContacts((prev) => prev.filter((b) => b.id !== profileId));
+  };
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: palette.background }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -232,6 +269,7 @@ export function AppNavigator() {
               conversation={activeConversation}
               onBackToList={() => setActiveConversationId(null)}
               onSendMessage={handleSendMessage}
+              onBlockContact={handleBlockContact}
             />
           ) : (
             <>
@@ -241,6 +279,7 @@ export function AppNavigator() {
                     userName={onboardingData.fullName || 'Você'}
                     userCity={onboardingData.city}
                     userHobbies={onboardingData.selectedHobbies}
+                    blockedProfileIds={blockedProfileIds}
                     onMutualConnection={handleMutualConnection}
                   />
                 )}
@@ -255,6 +294,8 @@ export function AppNavigator() {
                 {activeTab === 'profile' && (
                   <HomePlaceholderScreen
                     userData={onboardingData}
+                    blockedContacts={blockedContacts}
+                    onUnblockContact={handleUnblockContact}
                     onRepeatFacialVerification={() => setRoute('facialVerification')}
                     onSignOut={handleResetAndExit}
                   />
