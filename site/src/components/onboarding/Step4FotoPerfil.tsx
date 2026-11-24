@@ -6,6 +6,8 @@ import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 interface Step4FotoPerfilProps {
   photoPreviewUrl: string | null;
   photoFileName: string | null;
+  isVerified?: boolean;
+  onVerified?: () => void;
   onPhotoSelect: (previewUrl: string | null, fileName: string | null, file: File | null) => void;
   onNext: () => void;
 }
@@ -13,15 +15,19 @@ interface Step4FotoPerfilProps {
 export function Step4FotoPerfil({
   photoPreviewUrl,
   photoFileName,
+  isVerified: isVerifiedProp,
+  onVerified,
   onPhotoSelect,
   onNext,
 }: Step4FotoPerfilProps) {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
-  const [isVerified, setIsVerified] = useState(false);
+  const [isLocalVerified, setIsLocalVerified] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isVerified = isVerifiedProp ?? isLocalVerified;
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -176,7 +182,8 @@ export function Step4FotoPerfil({
         <FacialVerificationQrModal
           userName="Novo Membro"
           onVerified={() => {
-            setIsVerified(true);
+            setIsLocalVerified(true);
+            onVerified?.();
           }}
           onClose={() => setShowQrModal(false)}
         />

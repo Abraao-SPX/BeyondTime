@@ -128,6 +128,7 @@ export function CriarMinhaConta({
   const [step, setStep] = useState<OnboardingStep>(() => (existingSession ? 2 : 1));
   const [isCompleted, setIsCompleted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isFaciallyVerified, setIsFaciallyVerified] = useState(false);
   const [step1Error, setStep1Error] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(orphanNotice);
@@ -436,6 +437,8 @@ export function CriarMinhaConta({
         <Step4FotoPerfil
           photoPreviewUrl={formData.photoPreviewUrl}
           photoFileName={formData.photoFileName}
+          isVerified={isFaciallyVerified}
+          onVerified={() => setIsFaciallyVerified(true)}
           onPhotoSelect={(previewUrl, fileName, file) => {
             setPhotoFile(file);
             setFormData((prev) => ({
@@ -473,6 +476,8 @@ export function CriarMinhaConta({
             isSocialAccount={Boolean(socialIdToken) || Boolean(existingSession)}
             isEditMode={isEditMode}
             socialProvider={socialProvider}
+            isFaciallyVerified={isFaciallyVerified}
+            onVerified={() => setIsFaciallyVerified(true)}
             onPasswordChange={(value) => setFormData((prev) => ({ ...prev, password: value }))}
             onConfirmPasswordChange={(value) =>
               setFormData((prev) => ({ ...prev, confirmPassword: value }))
@@ -488,6 +493,18 @@ export function CriarMinhaConta({
             onFinishToLogin={() => {
               const finalSession = createdSession || existingSession;
               if (finalSession) {
+                if (isFaciallyVerified) {
+                  try {
+                    window.localStorage.setItem(
+                      `beyondtime_facial_verified_${finalSession.email}`,
+                      'true'
+                    );
+                    window.localStorage.setItem(
+                      `beyondtime_facial_verified_${formData.contact}`,
+                      'true'
+                    );
+                  } catch {}
+                }
                 onAuthSuccess({ ...finalSession });
               }
             }}
