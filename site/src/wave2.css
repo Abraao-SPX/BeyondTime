@@ -825,6 +825,17 @@
 }
 
 /* Contraste Reforçado no Modo Noturno */
+html.high-contrast .deck-action-btn--pass {
+  background-color: #231D20;
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+html.high-contrast .deck-action-btn--pass:hover {
+  background-color: #32292E;
+  border-color: #FFFFFF;
+}
+
 html.high-contrast .candidate-hobby-chip--shared {
   color: #FF6B8A;
   border-color: #FF6B8A;
