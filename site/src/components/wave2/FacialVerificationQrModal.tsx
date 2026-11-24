@@ -1,4 +1,4 @@
-import { useEffect, useState, useId } from 'react';
+import { useEffect, useMemo, useState, useId } from 'react';
 import QRCode from 'qrcode';
 
 interface FacialVerificationQrModalProps {
@@ -17,10 +17,12 @@ export function FacialVerificationQrModal({
   const [isDone, setIsDone] = useState(false);
   const titleId = useId();
 
-  // Gera uma URL ou deep link único com token de sessão para a leitura móvel
-  const verificationUrl = `https://beyondtime.com.br/verificar-biometria?sessao=bt_${Date.now()}&usuario=${encodeURIComponent(
-    userName || 'membro_beyondtime'
-  )}`;
+  // URL estável com token de sessão único para a leitura móvel
+  const verificationUrl = useMemo(() => {
+    return `https://beyondtime.com.br/verificar-biometria?sessao=bt_${Date.now()}&usuario=${encodeURIComponent(
+      userName || 'membro_beyondtime'
+    )}`;
+  }, [userName]);
 
   useEffect(() => {
     let isMounted = true;
