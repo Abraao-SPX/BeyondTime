@@ -161,30 +161,13 @@ export function ChatThreadScreen({
       style={[styles.container, { backgroundColor: palette.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Topo da conversa com botão explícito "← Conversas" */}
+      {/* Topo da conversa: perfil do contato à esquerda (padrão WhatsApp) e botão Conversas à direita */}
       <View
         style={[
           styles.header,
           { backgroundColor: palette.surface, borderBottomColor: palette.border },
         ]}
       >
-        <TouchableOpacity
-          onPress={onBackToList}
-          accessibilityRole="button"
-          accessibilityLabel="Voltar para Conversas"
-          style={styles.backBtn}
-        >
-          <ChevronLeftIcon size={22} color={palette.textPrimary} />
-          <Text
-            style={[
-              styles.backBtnText,
-              { color: palette.textPrimary, fontSize: fs(16) },
-            ]}
-          >
-            Conversas
-          </Text>
-        </TouchableOpacity>
-
         <View style={styles.contactBlock}>
           {!imgError ? (
             <Image
@@ -225,6 +208,26 @@ export function ChatThreadScreen({
             </Text>
           </View>
         </View>
+
+        <TouchableOpacity
+          onPress={onBackToList}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar para Conversas"
+          style={[
+            styles.backBtn,
+            { backgroundColor: palette.background, borderColor: palette.border },
+          ]}
+        >
+          <ChevronLeftIcon size={20} color={palette.textPrimary} />
+          <Text
+            style={[
+              styles.backBtnText,
+              { color: palette.textPrimary, fontSize: fs(15) },
+            ]}
+          >
+            Conversas
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Aviso discreto contra pedidos financeiros */}
@@ -670,7 +673,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingRight: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1.2,
   },
   backBtnText: {
     fontWeight: '700',
@@ -679,18 +684,18 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
     gap: 10,
   },
   headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
   },
   headerAvatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -700,7 +705,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   contactTextCol: {
-    maxWidth: 170,
+    flex: 1,
   },
   contactName: {
     fontWeight: '700',
