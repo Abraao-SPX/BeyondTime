@@ -27,6 +27,7 @@ import type {
   ChatConversation,
   MainTab,
   RankedDiscoveryProfile,
+  SendMessageOptions,
 } from '../types/social';
 
 function parseGoal(goal?: string): RelationshipGoal {
@@ -121,7 +122,11 @@ export function AppNavigator() {
     setActiveConversationId(conversationId);
   };
 
-  const handleSendMessage = (conversationId: string, text: string) => {
+  const handleSendMessage = (
+    conversationId: string,
+    text: string,
+    options?: SendMessageOptions
+  ) => {
     const nowTime = formatCurrentTime();
     setConversations((prev) => {
       const updated = prev.map((conv) => {
@@ -137,6 +142,9 @@ export function AppNavigator() {
               sender: 'me' as const,
               text,
               timestamp: nowTime,
+              kind: options?.kind ?? 'text',
+              audioDurationSec: options?.audioDurationSec,
+              photoUrl: options?.photoUrl,
             },
           ],
         };
@@ -230,6 +238,7 @@ export function AppNavigator() {
               <View style={styles.tabContent}>
                 {activeTab === 'discover' && (
                   <DiscoverScreen
+                    userName={onboardingData.fullName || 'Você'}
                     userCity={onboardingData.city}
                     userHobbies={onboardingData.selectedHobbies}
                     onMutualConnection={handleMutualConnection}

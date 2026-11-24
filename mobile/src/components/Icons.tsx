@@ -379,3 +379,45 @@ export function SparklesIcon({ size = 18, color = '#A90025' }: IconProps) {
     </Svg>
   );
 }
+
+export function MicIcon({ size = 22, color = '#A90025' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={9}
+        y={3}
+        width={6}
+        height={11}
+        rx={3}
+        stroke={color}
+        strokeWidth={2}
+      />
+      <Path
+        d="M5.5 10.5C5.5 14.1 8.4 17 12 17C15.6 17 18.5 14.1 18.5 10.5"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M12 17V21M9 21H15"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function PlayIcon({ size = 18, color = '#A90025' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 5.5L19 12L7 18.5V5.5Z"
+        fill={color}
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}

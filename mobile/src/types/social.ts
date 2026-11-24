@@ -26,6 +26,15 @@ export interface ChatMessage {
   sender: 'me' | 'other';
   text: string;
   timestamp: string;
+  kind?: 'text' | 'audio' | 'photo';
+  audioDurationSec?: number;
+  photoUrl?: string;
+}
+
+export interface SendMessageOptions {
+  kind?: 'text' | 'audio' | 'photo';
+  audioDurationSec?: number;
+  photoUrl?: string;
 }
 
 export interface ChatConversation {
