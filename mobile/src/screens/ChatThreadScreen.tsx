@@ -12,7 +12,6 @@ import {
   View,
 } from 'react-native';
 import {
-  ArrowRightIcon,
   CameraIcon,
   ChevronLeftIcon,
   CloseXIcon,
@@ -550,103 +549,69 @@ export function ChatThreadScreen({
             { backgroundColor: palette.surface, borderTopColor: palette.border },
           ]}
         >
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={`Escreva para ${firstName}...`}
-            placeholderTextColor={palette.textMuted}
-            multiline
-            accessibilityLabel={`Escreva uma mensagem para ${firstName}`}
+          <View
             style={[
-              styles.inputBox,
+              styles.inputPill,
               {
                 backgroundColor: palette.background,
                 borderColor: palette.border,
-                color: palette.textPrimary,
-                fontSize: fs(16),
               },
             ]}
-          />
+          >
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Mensagem"
+              placeholderTextColor={palette.textMuted}
+              multiline
+              accessibilityLabel={`Escreva uma mensagem para ${firstName}`}
+              style={[
+                styles.inputBox,
+                {
+                  color: palette.textPrimary,
+                  fontSize: fs(16),
+                },
+              ]}
+            />
 
-          <View style={styles.composerActionsRow}>
             <TouchableOpacity
               onPress={() => setShowPhotoTray((prev) => !prev)}
-              activeOpacity={0.8}
+              activeOpacity={0.75}
               accessibilityRole="button"
               accessibilityLabel="Enviar foto"
               accessibilityState={{ expanded: showPhotoTray }}
-              style={[
-                styles.mediaActionBtn,
-                {
-                  backgroundColor: showPhotoTray
-                    ? palette.primarySoft
-                    : palette.background,
-                  borderColor: showPhotoTray ? palette.primary : palette.border,
-                },
-              ]}
+              style={styles.pillCameraBtn}
             >
-              <CameraIcon size={20} color={palette.textPrimary} />
-              <Text
-                style={[
-                  styles.mediaActionText,
-                  { color: palette.textPrimary, fontSize: fs(15) },
-                ]}
-              >
-                Foto
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleStartRecording}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Gravar áudio"
-              accessibilityHint="Toque uma vez para gravar sem precisar segurar"
-              style={[
-                styles.mediaActionBtn,
-                {
-                  backgroundColor: palette.background,
-                  borderColor: palette.border,
-                },
-              ]}
-            >
-              <MicIcon size={20} color={palette.textPrimary} />
-              <Text
-                style={[
-                  styles.mediaActionText,
-                  { color: palette.textPrimary, fontSize: fs(15) },
-                ]}
-              >
-                Áudio
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleSendText}
-              disabled={!draft.trim()}
-              activeOpacity={0.82}
-              accessibilityRole="button"
-              accessibilityLabel="Enviar mensagem"
-              accessibilityState={{ disabled: !draft.trim() }}
-              style={[
-                styles.sendPrimaryBtn,
-                {
-                  backgroundColor: palette.primaryHover,
-                  opacity: draft.trim() ? 1 : 0.45,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.sendPrimaryText,
-                  { color: palette.textOnPrimary, fontSize: fs(16) },
-                ]}
-              >
-                Enviar
-              </Text>
-              <ArrowRightIcon size={18} color={palette.textOnPrimary} />
+              <CameraIcon
+                size={24}
+                color={showPhotoTray ? palette.primaryText : palette.textSecondary}
+              />
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            onPress={draft.trim().length > 0 ? handleSendText : handleStartRecording}
+            activeOpacity={0.82}
+            accessibilityRole="button"
+            accessibilityLabel={
+              draft.trim().length > 0 ? 'Enviar mensagem' : 'Gravar mensagem de voz'
+            }
+            accessibilityHint={
+              draft.trim().length > 0
+                ? 'Envia a mensagem digitada'
+                : 'Toque uma vez para gravar áudio sem precisar segurar'
+            }
+            style={[
+              styles.circleActionBtn,
+              { backgroundColor: palette.primary },
+            ]}
+          >
+            {draft.trim().length > 0 ? (
+              <SendIcon size={22} color="#FFFFFF" />
+            ) : (
+              <MicIcon size={24} color="#FFFFFF" />
+            )}
+          </TouchableOpacity>
         </View>
       )}
     </KeyboardAvoidingView>
@@ -868,50 +833,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   composerWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     borderTopWidth: 1.5,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     gap: 10,
+  },
+  inputPill: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 27,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 18,
+    paddingRight: 6,
   },
   inputBox: {
-    minHeight: 58,
-    maxHeight: 112,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    textAlignVertical: 'top',
-  },
-  composerActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  mediaActionBtn: {
-    minHeight: 52,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-  },
-  mediaActionText: {
-    fontWeight: '700',
-  },
-  sendPrimaryBtn: {
     flex: 1,
-    minHeight: 52,
-    paddingHorizontal: 18,
-    borderRadius: 16,
-    flexDirection: 'row',
+    minHeight: 48,
+    maxHeight: 112,
+    paddingVertical: 12,
+  },
+  pillCameraBtn: {
+    width: TOUCH_TARGET_MIN,
+    height: TOUCH_TARGET_MIN,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
   },
-  sendPrimaryText: {
-    fontWeight: '700',
+  circleActionBtn: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
