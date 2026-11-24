@@ -19,14 +19,26 @@ export function SimplifiedChatRF07({
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
   const [draft, setDraft] = useState('');
+  const [mobileViewingChat, setMobileViewingChat] = useState(Boolean(activeThreadId));
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const activeThread =
     threads.find((item) => item.contactId === activeThreadId) ?? threads[0] ?? null;
 
   useEffect(() => {
+    if (activeThreadId) {
+      setMobileViewingChat(true);
+    }
+  }, [activeThreadId]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [activeThread?.contactId, activeThread?.messages.length]);
+
+  function handleSelect(contactId: string) {
+    onSelectThread(contactId);
+    setMobileViewingChat(true);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,19 +51,15 @@ export function SimplifiedChatRF07({
 
   if (threads.length === 0) {
     return (
-      <section className="wave2-section" aria-labelledby="chat-empty-heading">
+      <section className="wave2-section" aria-label="Conversas">
         <div className="wave2-empty-card">
-          <span className="wave2-eyebrow">RF-07 • Chat Simplificado</span>
-          <h1 id="chat-empty-heading" className="wave2-empty-card__title">
-            Você ainda não tem conversas ativas
-          </h1>
+          <h1 className="wave2-empty-card__title">Nenhuma conversa ainda</h1>
           <p className="wave2-empty-card__text">
-            Conecte-se com pessoas compatíveis na aba Descobrir para iniciar uma conversa tranquila e
-            protegida.
+            Curta pessoas na aba Descobrir para começar a conversar por aqui.
           </p>
           <div className="wave2-empty-card__actions">
             <button type="button" className="btn btn--primary" onClick={onGoToDiscover}>
-              Ir para Descobrir conexões
+              Ir para Descobrir
             </button>
           </div>
         </div>
@@ -62,20 +70,16 @@ export function SimplifiedChatRF07({
   const icebreakers = activeThread ? buildIcebreakerSuggestions(activeThread) : [];
 
   return (
-    <section className="wave2-section" aria-labelledby="chat-heading">
-      <header className="wave2-section__header wave2-section__header--compact">
-        <div>
-          <span className="wave2-eyebrow">RF-07 • Chat Simplificado 50+</span>
-          <h1 id="chat-heading" className="wave2-title">
-            Suas conversas
-          </h1>
-        </div>
-      </header>
+    <section className="wa-chat-section" aria-label="Conversas">
+      <div className={`wa-shell${mobileViewingChat ? ' wa-shell--chat-open' : ''}`}>
+        {/* Coluna Esquerda: Lista de Conexões (estilo WhatsApp Web) */}
+        <aside className="wa-sidebar" aria-label="Suas conexões">
+          <header className="wa-sidebar__header">
+            <h1 className="wa-sidebar__title">Conversas</h1>
+            <span className="wa-sidebar__count">{threads.length}</span>
+          </header>
 
-      <div className="chat-shell">
-        <aside className="chat-sidebar" aria-label="Lista de conexões">
-          <h2 className="chat-sidebar__title">Conexões ({threads.length})</h2>
-          <ul className="chat-thread-list">
+          <ul className="wa-thread-list">
             {threads.map((thread) => {
               const isSelected = activeThread?.contactId === thread.contactId;
               const lastMsg = thread.messages[thread.messages.length - 1];
@@ -83,37 +87,37 @@ export function SimplifiedChatRF07({
                 <li key={thread.contactId}>
                   <button
                     type="button"
-                    className={`chat-thread-item${isSelected ? ' chat-thread-item--active' : ''}`}
-                    onClick={() => onSelectThread(thread.contactId)}
+                    className={`wa-thread-item${isSelected ? ' wa-thread-item--active' : ''}`}
+                    onClick={() => handleSelect(thread.contactId)}
                     aria-current={isSelected ? 'true' : undefined}
                   >
                     <img
                       src={thread.contactAvatarUrl}
                       alt=""
-                      className="chat-thread-item__avatar"
+                      className="wa-thread-item__avatar"
                       aria-hidden="true"
                     />
-                    <div className="chat-thread-item__info">
-                      <div className="chat-thread-item__top">
-                        <strong className="chat-thread-item__name">{thread.contactName}</strong>
-                        <span className="chat-thread-item__affinity">
-                          {thread.affinityPercent}%
-                        </span>
+                    <div className="wa-thread-item__body">
+                      <div className="wa-thread-item__top">
+                        <strong className="wa-thread-item__name">{thread.contactName}</strong>
+                        {lastMsg && (
+                          <span className="wa-thread-item__time">{lastMsg.sentAt}</span>
+                        )}
                       </div>
-                      <span className="chat-thread-item__preview">
-                        {lastMsg
-                          ? lastMsg.text.slice(0, 44) + (lastMsg.text.length > 44 ? '...' : '')
-                          : 'Nova conexão — diga olá!'}
-                      </span>
+                      <div className="wa-thread-item__bottom">
+                        <span className="wa-thread-item__preview">
+                          {lastMsg ? lastMsg.text : 'Nova conexão — envie uma mensagem'}
+                        </span>
+                        {thread.unreadCount > 0 && (
+                          <span
+                            className="chat-unread-badge"
+                            aria-label={`${thread.unreadCount} mensagens não lidas`}
+                          >
+                            {thread.unreadCount}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    {thread.unreadCount > 0 && (
-                      <span
-                        className="chat-unread-badge"
-                        aria-label={`${thread.unreadCount} mensagens não lidas`}
-                      >
-                        {thread.unreadCount}
-                      </span>
-                    )}
                   </button>
                 </li>
               );
@@ -121,50 +125,73 @@ export function SimplifiedChatRF07({
           </ul>
         </aside>
 
+        {/* Coluna Direita: Área Ampla de Conversa */}
         {activeThread && (
-          <div className="chat-conversation">
-            <header className="chat-conversation__header">
-              <div className="chat-conversation__contact">
+          <div className="wa-main">
+            <header className="wa-main__header">
+              <button
+                type="button"
+                className="wa-mobile-back"
+                onClick={() => setMobileViewingChat(false)}
+                aria-label="Voltar para lista de conversas"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+                <span>Conversas</span>
+              </button>
+
+              <div className="wa-main__contact">
                 <img
                   src={activeThread.contactAvatarUrl}
                   alt={`Foto de ${activeThread.contactName}`}
-                  className="chat-conversation__avatar"
+                  className="wa-main__avatar"
                 />
                 <div>
-                  <h2 className="chat-conversation__name">
+                  <h2 className="wa-main__name">
                     {activeThread.contactName}, {activeThread.contactAge}
                   </h2>
-                  <p className="chat-conversation__meta">
-                    {activeThread.contactCity} • {activeThread.affinityPercent}% de afinidade •{' '}
-                    {activeThread.contactGoal}
+                  <p className="wa-main__meta">
+                    {activeThread.contactCity} • {activeThread.contactGoal}
                   </p>
                 </div>
               </div>
             </header>
 
-            <div className="chat-safety-tip" role="note">
-              <strong>Dica de segurança:</strong> converse com calma pelo BeyondTime e nunca envie
-              dinheiro, códigos ou dados bancários para pessoas recém-conhecidas.
+            <div className="wa-safety-bar" role="note">
+              Converse com calma por aqui e nunca envie dinheiro, códigos ou dados bancários.
             </div>
 
             {activeThread.sharedHobbies.length > 0 && (
-              <div className="chat-shared-bar">
-                <span className="chat-shared-bar__label">Em comum:</span>
+              <div className="wa-shared-bar">
+                <span className="wa-shared-bar__label">Em comum:</span>
                 {activeThread.sharedHobbies.map((hobbyId) => (
                   <span key={hobbyId} className="candidate-hobby-chip candidate-hobby-chip--shared">
-                    ★ {getHobbyLabel(hobbyId)}
+                    {getHobbyLabel(hobbyId)}
                   </span>
                 ))}
               </div>
             )}
 
-            <div className="chat-messages" role="log" aria-live="polite" aria-label="Mensagens da conversa">
+            <div
+              className="wa-messages"
+              role="log"
+              aria-live="polite"
+              aria-label="Mensagens da conversa"
+            >
               {activeThread.messages.length === 0 ? (
-                <div className="chat-empty-thread">
-                  <p>
-                    Vocês se conectaram por afinidade! Escolha uma sugestão abaixo ou escreva sua
-                    própria mensagem para começar:
-                  </p>
+                <div className="wa-empty-thread">
+                  <p>Escolha uma frase para começar a conversa ou escreva abaixo:</p>
                   <div className="chat-icebreakers">
                     {icebreakers.map((suggestion) => (
                       <button
@@ -196,26 +223,39 @@ export function SimplifiedChatRF07({
               <div ref={messagesEndRef} />
             </div>
 
-            <form className="chat-composer" onSubmit={handleSubmit}>
+            <form className="wa-composer" onSubmit={handleSubmit}>
               <label htmlFor="chat-message-input" className="sr-only">
                 Escreva sua mensagem para {activeThread.contactName}
               </label>
               <input
                 id="chat-message-input"
                 type="text"
-                className="form-input chat-composer__input"
-                placeholder={`Escreva uma mensagem para ${activeThread.contactName.split(' ')[0]}...`}
+                className="form-input wa-composer__input"
+                placeholder={`Digite uma mensagem para ${activeThread.contactName.split(' ')[0]}...`}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 autoComplete="off"
               />
               <button
                 type="submit"
-                className="btn btn--primary chat-composer__send"
+                className="btn btn--primary wa-composer__send"
                 disabled={draft.trim().length === 0}
               >
                 <span>Enviar</span>
-                <span aria-hidden="true">→</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12h14" />
+                  <path d="m12 5 7 7-7 7" />
+                </svg>
               </button>
             </form>
           </div>

@@ -124,7 +124,7 @@ export function AuthenticatedWorkspace({
       setRecentMatch(candidate);
     } else {
       setStatusFeedback(
-        `Seu convite de conexão foi enviado para ${candidate.fullName}. Avisaremos quando houver afinidade mútua.`
+        `Você curtiu ${candidate.fullName}. Se a pessoa também curtir você, a conversa aparecerá em Conversas.`
       );
     }
   }
@@ -176,15 +176,28 @@ export function AuthenticatedWorkspace({
 
   return (
     <div className="workspace-container">
-      <nav className="workspace-nav" aria-label="Navegação principal do BeyondTime">
+      {/* Navegação unificada: barra no topo no Desktop e barra inferior fixa no Mobile */}
+      <nav className="workspace-nav" aria-label="Navegação principal">
         <button
           type="button"
           className={`workspace-nav__tab${activeTab === 'discover' ? ' workspace-nav__tab--active' : ''}`}
           onClick={() => setActiveTab('discover')}
           aria-current={activeTab === 'discover' ? 'page' : undefined}
         >
-          <span aria-hidden="true">♥</span>
-          <span>Descobrir ({candidates.length})</span>
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+          </svg>
+          <span>Descobrir</span>
         </button>
 
         <button
@@ -193,7 +206,19 @@ export function AuthenticatedWorkspace({
           onClick={() => setActiveTab('chat')}
           aria-current={activeTab === 'chat' ? 'page' : undefined}
         >
-          <span aria-hidden="true">💬</span>
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
           <span>Conversas</span>
           {totalUnread > 0 && (
             <span className="workspace-nav__badge" aria-label={`${totalUnread} não lidas`}>
@@ -208,7 +233,20 @@ export function AuthenticatedWorkspace({
           onClick={() => setActiveTab('profile')}
           aria-current={activeTab === 'profile' ? 'page' : undefined}
         >
-          <span aria-hidden="true">👤</span>
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
           <span>Meu Perfil</span>
         </button>
       </nav>
@@ -256,31 +294,31 @@ export function AuthenticatedWorkspace({
       )}
 
       {activeTab === 'profile' && (
-        <section className="wave2-section" aria-labelledby="my-profile-heading">
+        <section className="profile-stage" aria-labelledby="my-profile-heading">
           <div className="profile-hub-card">
-            <span className="wave2-eyebrow">Sessão autenticada (JWT)</span>
-            <h1 id="my-profile-heading" className="wave2-title">
-              {displayFullName || 'Seu perfil BeyondTime'}
-            </h1>
-            <p className="wave2-subtitle">
-              E-mail: <strong>{authSession.email}</strong>
-              {userCity ? ` • ${userCity} (SE)` : ''}
-              {userGoal ? ` • Objetivo: ${userGoal}` : ''}
-            </p>
-
-            {displayAvatarUrl && (
-              <div className="photo-preview" style={{ marginBottom: '16px' }}>
+            <div className="profile-hub-card__header">
+              {displayAvatarUrl && (
                 <img
                   src={displayAvatarUrl}
                   alt={`Foto de perfil de ${displayFullName || authSession.email}`}
-                  className="photo-preview__image"
+                  className="profile-hub-card__avatar"
                 />
+              )}
+              <div>
+                <h1 id="my-profile-heading" className="wave2-title">
+                  {displayFullName || 'Meu Perfil'}
+                </h1>
+                <p className="wave2-subtitle">
+                  {authSession.email}
+                  {userCity ? ` • ${userCity}, SE` : ''}
+                  {userGoal ? ` • Busca ${userGoal.toLowerCase()}` : ''}
+                </p>
               </div>
-            )}
+            </div>
 
             {userHobbies.length > 0 && (
-              <div style={{ marginBottom: '20px' }}>
-                <h2 className="candidate-card__section-label">Seus interesses cadastrados</h2>
+              <div className="profile-hub-card__hobbies">
+                <h2 className="deck-card__hobbies-label">Meus interesses</h2>
                 <ul className="candidate-hobbies-list">
                   {userHobbies.map((hobbyId) => (
                     <li key={hobbyId} className="candidate-hobby-chip">
@@ -293,7 +331,7 @@ export function AuthenticatedWorkspace({
 
             <div className="profile-hub-actions">
               <button type="button" className="btn btn--primary" onClick={onEditProfile}>
-                Editar perfil e hobbies
+                Editar perfil e interesses
               </button>
               <button type="button" className="btn btn--secondary" onClick={onLogout}>
                 Sair da conta
@@ -303,7 +341,7 @@ export function AuthenticatedWorkspace({
                 className="btn-safety-link"
                 onClick={onRequestDeleteAccount}
               >
-                Excluir minha conta definitivamente (LGPD)
+                Excluir conta e dados
               </button>
             </div>
           </div>

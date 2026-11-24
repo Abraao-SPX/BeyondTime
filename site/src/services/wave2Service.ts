@@ -24,7 +24,7 @@ export const SERGIPE_DISCOVERY_CATALOG: readonly DiscoveryCandidate[] = [
     neighborhood: 'Atalaia',
     goal: 'Amizade',
     bio: 'Aposentada da área de educação, amo caminhar na Orla de Atalaia no fim da tarde, conversar sobre livros e ouvir boa MPB tomando um café coado na hora.',
-    avatarUrl: '/assets/perfil-helena.svg',
+    avatarUrl: '/images/pessoa-madura.jpg',
     verifiedIdentity: true,
     hobbies: ['caminhada', 'leitura', 'mpb', 'cafe-e-prosa', 'viagens'],
     likesBack: true,
@@ -38,7 +38,7 @@ export const SERGIPE_DISCOVERY_CATALOG: readonly DiscoveryCandidate[] = [
     neighborhood: 'Jardins',
     goal: 'Companhia',
     bio: 'Gosto de vida tranquila, boa conversa sem pressa, cozinhar pratos regionais nos domingos e jogar dominó ou xadrez com amigos.',
-    avatarUrl: '/assets/perfil-marcos.svg',
+    avatarUrl: '/images/encontros-selfie-compartilhada.png',
     verifiedIdentity: true,
     hobbies: ['culinaria-regional', 'jogos-tabuleiro', 'xadrez-damas', 'cafe-e-prosa', 'forro'],
     likesBack: true,
@@ -52,7 +52,7 @@ export const SERGIPE_DISCOVERY_CATALOG: readonly DiscoveryCandidate[] = [
     neighborhood: 'Centro Histórico',
     goal: 'Relacionamento',
     bio: 'Apaixonada por jardinagem, artesanato e cinema clássico. Busco uma conexão sincera, com respeito, bom humor e conversas verdadeiras.',
-    avatarUrl: '/assets/perfil-lucia.svg',
+    avatarUrl: '/images/hero-casal-viajante.png',
     verifiedIdentity: true,
     hobbies: ['jardinagem', 'artesanato', 'cinema-teatro', 'seresta-bolero', 'culinaria-regional'],
     likesBack: true,
@@ -190,7 +190,21 @@ function normalizeHobbyKey(raw: string): string {
 }
 
 /**
- * RF-05: Calcula compatibilidade baseada nos hobbies em comum e proximidade em Sergipe.
+ * Lista de municípios da Região Metropolitana de Aracaju (SE) para priorização regional.
+ */
+const GREATER_ARACAJU_CITIES = new Set([
+  'aracaju',
+  'nossa senhora do socorro',
+  'são cristóvão',
+  'sao cristovao',
+  'barra dos coqueiros',
+]);
+
+/**
+ * RF-05: Ordena perfis priorizando:
+ * 1º) Mesma cidade do usuário
+ * 2º) Mesma região (Região Metropolitana / proximidade em Sergipe)
+ * 3º) Maior quantidade de gostos/hobbies em comum
  */
 export function computeAffinityCandidates(
   userHobbies: string[],
@@ -203,6 +217,7 @@ export function computeAffinityCandidates(
   const blockedIds = new Set(state.blockedContacts.map((b) => b.id));
   const interactedIds = new Set([...state.passedIds, ...state.likedIds]);
   const normalizedUserCity = userCity.trim().toLowerCase();
+  const userInMetro = GREATER_ARACAJU_CITIES.has(normalizedUserCity);
   const normalizedUserHobbies =
     userHobbies.length > 0
       ? userHobbies.map(normalizeHobbyKey)
@@ -219,16 +234,16 @@ export function computeAffinityCandidates(
   })
     .map((candidate) => {
       const sharedHobbies = candidate.hobbies.filter((h) => normalizedUserHobbies.includes(h));
+      const candidateCityLower = candidate.city.trim().toLowerCase();
       const sameCity =
-        normalizedUserCity.length > 0 &&
-        normalizedUserCity.includes(candidate.city.toLowerCase());
+        normalizedUserCity.length > 0 && normalizedUserCity.includes(candidateCityLower);
+      const sameRegion = sameCity || (userInMetro && GREATER_ARACAJU_CITIES.has(candidateCityLower));
       const sameGoal = userGoal !== null && candidate.goal === userGoal;
 
-      // Pontuação transparente: base 55% + hobbies em comum (até +30%) + proximidade SE (+10%) + objetivo (+5%)
       const hobbyScore = Math.min(30, sharedHobbies.length * 10);
-      const cityScore = sameCity ? 10 : 4;
+      const locationScore = sameCity ? 14 : sameRegion ? 8 : 4;
       const goalScore = sameGoal ? 5 : 0;
-      const affinityPercent = Math.min(99, 55 + hobbyScore + cityScore + goalScore);
+      const affinityPercent = Math.min(99, 50 + locationScore + hobbyScore + goalScore);
 
       return {
         ...candidate,
@@ -238,13 +253,21 @@ export function computeAffinityCandidates(
       };
     })
     .sort((a, b) => {
-      if (b.affinityPercent !== a.affinityPercent) {
-        return b.affinityPercent - a.affinityPercent;
-      }
+      // 1º prioridade: mesma cidade
       if (a.sameCity !== b.sameCity) {
         return a.sameCity ? -1 : 1;
       }
-      return b.sharedHobbies.length - a.sharedHobbies.length;
+      // 2º prioridade: mesma região metropolitana
+      const aMetro = userInMetro && GREATER_ARACAJU_CITIES.has(a.city.trim().toLowerCase());
+      const bMetro = userInMetro && GREATER_ARACAJU_CITIES.has(b.city.trim().toLowerCase());
+      if (aMetro !== bMetro) {
+        return aMetro ? -1 : 1;
+      }
+      // 3º prioridade: maior número de gostos em comum
+      if (b.sharedHobbies.length !== a.sharedHobbies.length) {
+        return b.sharedHobbies.length - a.sharedHobbies.length;
+      }
+      return b.affinityPercent - a.affinityPercent;
     });
 }
 
