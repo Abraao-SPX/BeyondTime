@@ -1,5 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
   Image,
   Modal,
   ScrollView,
@@ -28,6 +31,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { RankedDiscoveryProfile } from '../types/social';
 
 interface DiscoverScreenProps {
+  userName?: string;
   userCity: string;
   userHobbies: string[];
   onMutualConnection: (profile: RankedDiscoveryProfile, openChatNow: boolean) => void;
@@ -40,6 +44,7 @@ interface DiscoverScreenProps {
  * - Botões grandes e explícitos "Passar" e "Curtir" (>= 60dp), sem dependência de swipe.
  */
 export function DiscoverScreen({
+  userName = 'Você',
   userCity,
   userHobbies,
   onMutualConnection,
@@ -54,6 +59,85 @@ export function DiscoverScreen({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageErrorMap, setImageErrorMap] = useState<Record<string, boolean>>({});
   const [matchedProfile, setMatchedProfile] = useState<RankedDiscoveryProfile | null>(null);
+
+  // Animação da tela de conexão: os dois perfis deslizam um em direção ao outro até se juntarem
+  const leftAvatarX = useRef(new Animated.Value(-84)).current;
+  const rightAvatarX = useRef(new Animated.Value(84)).current;
+  const avatarsOpacity = useRef(new Animated.Value(0)).current;
+  const centerHeartScale = useRef(new Animated.Value(0.3)).current;
+  const centerHeartOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!matchedProfile) return;
+
+    let active = true;
+    const animateMeet = async () => {
+      const reduceMotion = await AccessibilityInfo.isReduceMotionEnabled().catch(() => false);
+      if (!active) return;
+
+      if (reduceMotion) {
+        leftAvatarX.setValue(10);
+        rightAvatarX.setValue(-10);
+        avatarsOpacity.setValue(1);
+        centerHeartScale.setValue(1);
+        centerHeartOpacity.setValue(1);
+        return;
+      }
+
+      leftAvatarX.setValue(-84);
+      rightAvatarX.setValue(84);
+      avatarsOpacity.setValue(0.2);
+      centerHeartScale.setValue(0.3);
+      centerHeartOpacity.setValue(0);
+
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(avatarsOpacity, {
+            toValue: 1,
+            duration: 320,
+            useNativeDriver: true,
+          }),
+          Animated.timing(leftAvatarX, {
+            toValue: 10,
+            duration: 720,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(rightAvatarX, {
+            toValue: -10,
+            duration: 720,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(centerHeartOpacity, {
+            toValue: 1,
+            duration: 260,
+            useNativeDriver: true,
+          }),
+          Animated.spring(centerHeartScale, {
+            toValue: 1,
+            friction: 6,
+            tension: 80,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start();
+    };
+
+    void animateMeet();
+    return () => {
+      active = false;
+    };
+  }, [
+    avatarsOpacity,
+    centerHeartOpacity,
+    centerHeartScale,
+    leftAvatarX,
+    matchedProfile,
+    rightAvatarX,
+  ]);
 
   const currentProfile = rankedProfiles[currentIndex] ?? null;
 
@@ -397,16 +481,69 @@ export function DiscoverScreen({
                 gostos parecidos.
               </Text>
 
-              <View style={styles.matchPhotoWrap}>
-                {!imageErrorMap[matchedProfile.id] ? (
-                  <Image
-                    source={{ uri: matchedProfile.photoUrl }}
-                    style={[styles.matchAvatar, { borderColor: palette.primary }]}
-                    accessibilityLabel={`Foto de ${matchedProfile.fullName}`}
-                  />
-                ) : (
-                  renderInitialsAvatar(matchedProfile.fullName, 92)
-                )}
+              {/* Dois perfis deslizando um em direção ao outro até se encontrarem */}
+              <View style={styles.matchMeetStage}>
+                <Animated.View
+                  style={[
+                    styles.matchProfileItem,
+                    {
+                      opacity: avatarsOpacity,
+                      transform: [{ translateX: leftAvatarX }],
+                    },
+                  ]}
+                >
+                  {renderInitialsAvatar(userName || 'Você', 92)}
+                  <Text
+                    style={[
+                      styles.matchAvatarLabel,
+                      { color: palette.textSecondary, fontSize: fs(13) },
+                    ]}
+                  >
+                    Você
+                  </Text>
+                </Animated.View>
+
+                <Animated.View
+                  style={[
+                    styles.matchCenterHeart,
+                    {
+                      backgroundColor: palette.primary,
+                      borderColor: palette.surface,
+                      opacity: centerHeartOpacity,
+                      transform: [{ scale: centerHeartScale }],
+                    },
+                  ]}
+                >
+                  <HeartIcon size={20} color="#FFFFFF" filled />
+                </Animated.View>
+
+                <Animated.View
+                  style={[
+                    styles.matchProfileItem,
+                    {
+                      opacity: avatarsOpacity,
+                      transform: [{ translateX: rightAvatarX }],
+                    },
+                  ]}
+                >
+                  {!imageErrorMap[matchedProfile.id] ? (
+                    <Image
+                      source={{ uri: matchedProfile.photoUrl }}
+                      style={[styles.matchAvatar, { borderColor: palette.primary }]}
+                      accessibilityLabel={`Foto de ${matchedProfile.fullName}`}
+                    />
+                  ) : (
+                    renderInitialsAvatar(matchedProfile.fullName, 92)
+                  )}
+                  <Text
+                    style={[
+                      styles.matchAvatarLabel,
+                      { color: palette.textSecondary, fontSize: fs(13) },
+                    ]}
+                  >
+                    {matchedProfile.fullName.split(' ')[0]}
+                  </Text>
+                </Animated.View>
               </View>
 
               <View style={styles.matchActions}>
@@ -630,13 +767,37 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
   },
-  matchPhotoWrap: {
-    marginVertical: 4,
+  matchMeetStage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    minHeight: 126,
+    marginVertical: 6,
+    position: 'relative',
+  },
+  matchProfileItem: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  matchAvatarLabel: {
+    fontWeight: '700',
+  },
+  matchCenterHeart: {
+    position: 'absolute',
+    top: 32,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
   },
   matchAvatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 92,
+    height: 92,
+    borderRadius: 46,
     borderWidth: 3,
   },
   matchActions: {
