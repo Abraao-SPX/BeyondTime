@@ -29,6 +29,7 @@ interface AuthenticatedWorkspaceProps {
   authSession: AuthSession;
   serverProfile: ServerProfile | null;
   displayFullName: string;
+  displayAge?: number | null;
   displayCity?: string;
   displayGoal?: string;
   displayHobbies?: string[];
@@ -38,12 +39,21 @@ interface AuthenticatedWorkspaceProps {
   onLogout: () => void;
 }
 
+function formatSergipeLocation(city?: string): string {
+  const cleaned = (city || '')
+    .replace(/\s*\(\s*SE\s*\)/gi, '')
+    .replace(/\s*[-,/]\s*(SE|Sergipe)\b/gi, '')
+    .trim();
+  return cleaned ? `${cleaned}, Sergipe` : 'Sergipe';
+}
+
 type PendingBlockTarget = Pick<BlockedContact, 'id' | 'fullName' | 'age' | 'city' | 'avatarUrl'>;
 
 export function AuthenticatedWorkspace({
   authSession,
   serverProfile,
   displayFullName,
+  displayAge = null,
   displayCity,
   displayGoal,
   displayHobbies,
@@ -106,6 +116,24 @@ export function AuthenticatedWorkspace({
     () => visibleThreads.reduce((acc, thread) => acc + thread.unreadCount, 0),
     [visibleThreads]
   );
+
+  // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
+  // (inclusive quando outra conversa assume o foco após um bloqueio em RF-08).
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    const displayedThread =
+      visibleThreads.find((t) => t.contactId === activeThreadId) ?? visibleThreads[0] ?? null;
+    if (!displayedThread || displayedThread.unreadCount === 0) return;
+
+    setWave2State((prev) => ({
+      ...prev,
+      threads: prev.threads.map((thread) =>
+        thread.contactId === displayedThread.contactId
+          ? { ...thread, unreadCount: 0 }
+          : thread
+      ),
+    }));
+  }, [activeTab, activeThreadId, visibleThreads]);
 
   function handlePassCandidate(candidate: ScoredCandidate) {
     setSafetyFeedback(null);
@@ -279,7 +307,10 @@ export function AuthenticatedWorkspace({
           </svg>
           <span>Conversas</span>
           {totalUnread > 0 && (
-            <span className="workspace-nav__badge" aria-label={`${totalUnread} não lidas`}>
+            <span
+              className="workspace-nav__badge"
+              aria-label={`${totalUnread} ${totalUnread === 1 ? 'não lida' : 'não lidas'}`}
+            >
               {totalUnread}
             </span>
           )}
@@ -440,7 +471,9 @@ export function AuthenticatedWorkspace({
                   <h1 id="my-profile-heading" className="editorial-profile__name">
                     {displayFullName || 'Meu Perfil'}
                   </h1>
-                  <span className="editorial-profile__age">50+</span>
+                  <span className="editorial-profile__age">
+                    {displayAge ? `${displayAge} anos` : '50+'}
+                  </span>
                   {isFaciallyVerified && (
                     <span
                       className="editorial-profile__verified-badge"
@@ -455,7 +488,7 @@ export function AuthenticatedWorkspace({
                   )}
                 </div>
                 <p className="editorial-profile__location">
-                  {userCity ? `${userCity}, Sergipe` : 'Sergipe'}
+                  {formatSergipeLocation(userCity)}
                 </p>
                 <p className="editorial-profile__privacy-note">
                   É assim que as outras pessoas veem você em Descobrir. Endereço e telefone nunca

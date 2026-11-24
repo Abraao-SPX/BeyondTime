@@ -293,7 +293,9 @@ export function SimplifiedChatRF07({
                         {thread.unreadCount > 0 && (
                           <span
                             className="chat-unread-badge"
-                            aria-label={`${thread.unreadCount} mensagens não lidas`}
+                            aria-label={`${thread.unreadCount} ${
+                              thread.unreadCount === 1 ? 'mensagem não lida' : 'mensagens não lidas'
+                            }`}
                           >
                             {thread.unreadCount}
                           </span>

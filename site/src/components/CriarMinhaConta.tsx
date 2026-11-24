@@ -328,17 +328,23 @@ export function CriarMinhaConta({
       <aside className="onboarding-split__sidebar">
         <OnboardingSidebarStepper
           currentStep={step}
-          onStepClick={(targetStep) => {
-            if (targetStep < step && !isCompleted && !isSubmitting) {
-              setStep(targetStep);
-            }
-          }}
+          isCompleted={isCompleted}
+          onStepClick={
+            isCompleted || isSubmitting
+              ? undefined
+              : (targetStep) => {
+                  if (targetStep < step) {
+                    setStep(targetStep);
+                  }
+                }
+          }
         />
       </aside>
 
       <section id="view-register" className="auth-view onboarding-split__main" aria-labelledby="register-title">
       <OnboardingStepHeader
         step={step}
+        isCompleted={isCompleted}
         onBack={canGoBack ? handleBack : undefined}
       />
 
