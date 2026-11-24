@@ -726,6 +726,142 @@
   flex-shrink: 0;
 }
 
+/* Botões de Câmera e Microfone no Chat */
+.wa-media-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border-input-strong);
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.wa-media-btn:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
+.wa-composer--recording {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.wa-recording-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.wa-recording-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #DC2626;
+  display: inline-block;
+  animation: wa-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes wa-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+.wa-recording-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.wa-recording-btn {
+  width: auto;
+  min-height: 46px;
+  padding: 0 18px;
+}
+
+.wa-attachment-bar {
+  padding: 10px 24px;
+  border-top: 1px solid var(--border-header);
+  background-color: var(--bg-surface-hover);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wa-attachment-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wa-attachment-bar__thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1.5px solid var(--border-card);
+}
+
+.wa-attachment-bar__name {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.wa-attachment-bar__cancel {
+  width: auto;
+  min-height: 42px;
+  padding: 6px 14px;
+}
+
+.wa-media-notice {
+  padding: 10px 24px;
+  border-top: 1px solid var(--border-header);
+  background-color: var(--bg-surface-hover);
+  color: var(--danger-text);
+  font-size: 0.92rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-bubble__image {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+
+.chat-bubble__audio-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.chat-bubble__audio-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.chat-bubble__audio {
+  max-width: 100%;
+  height: 40px;
+}
+
 /* ==========================================================================
    MEU PERFIL
    ========================================================================== */

@@ -11,6 +11,7 @@ import {
 import type { AuthSession, ConnectionGoal } from '../../types/auth';
 import type { ServerProfile } from '../../services/apiClient';
 import type {
+  OutgoingMessagePayload,
   ScoredCandidate,
   Wave2State,
   WorkspaceTabId,
@@ -151,8 +152,8 @@ export function AuthenticatedWorkspace({
     }));
   }
 
-  function handleSendMessage(contactId: string, text: string) {
-    const outgoing = createOutgoingMessage(text);
+  function handleSendMessage(contactId: string, payload: string | OutgoingMessagePayload) {
+    const outgoing = createOutgoingMessage(payload);
     setWave2State((prev) => ({
       ...prev,
       threads: prev.threads.map((thread) =>

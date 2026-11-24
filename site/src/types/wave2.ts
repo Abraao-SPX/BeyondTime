@@ -29,6 +29,18 @@ export interface ChatMessage {
   sender: 'me' | 'them';
   text: string;
   sentAt: string;
+  audioUrl?: string;
+  audioDurationLabel?: string;
+  imageUrl?: string;
+  imageName?: string;
+}
+
+export interface OutgoingMessagePayload {
+  text?: string;
+  audioUrl?: string;
+  audioDurationLabel?: string;
+  imageUrl?: string;
+  imageName?: string;
 }
 
 export interface ChatThread {

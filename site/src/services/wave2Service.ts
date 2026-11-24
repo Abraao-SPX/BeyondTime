@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatThread,
   DiscoveryCandidate,
+  OutgoingMessagePayload,
   ScoredCandidate,
   Wave2State,
 } from '../types/wave2';
@@ -332,11 +333,18 @@ export function createBlockedEntry(
   };
 }
 
-export function createOutgoingMessage(text: string): ChatMessage {
+export function createOutgoingMessage(payload: string | OutgoingMessagePayload): ChatMessage {
+  const normalized: OutgoingMessagePayload =
+    typeof payload === 'string' ? { text: payload } : payload;
+
   return {
     id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     sender: 'me',
-    text: text.trim(),
+    text: (normalized.text ?? '').trim(),
     sentAt: formatCurrentTime(),
+    audioUrl: normalized.audioUrl,
+    audioDurationLabel: normalized.audioDurationLabel,
+    imageUrl: normalized.imageUrl,
+    imageName: normalized.imageName,
   };
 }
