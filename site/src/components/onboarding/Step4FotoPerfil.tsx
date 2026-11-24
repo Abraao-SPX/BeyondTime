@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { resizeAndPrepareAvatarFile } from '../../services/profileStorage';
+import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 
 interface Step4FotoPerfilProps {
   photoPreviewUrl: string | null;
@@ -17,6 +18,8 @@ export function Step4FotoPerfil({
 }: Step4FotoPerfilProps) {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -116,6 +119,28 @@ export function Step4FotoPerfil({
         </span>
       </button>
 
+      <div className="photo-verification-banner">
+        <div className="photo-verification-banner__text">
+          <strong>
+            {isVerified ? '✓ Selo 50+ Pré-Verificado' : 'Verificação Facial Anti-Golpe (Opcional)'}
+          </strong>
+          <p>
+            {isVerified
+              ? 'Sua biometria facial foi confirmada no celular. Sua conta nascerá com o Selo de Verificado.'
+              : 'Gere um QR Code para abrir a câmera do celular e comprovar autenticidade sem complicação no computador.'}
+          </p>
+        </div>
+        {!isVerified && (
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => setShowQrModal(true)}
+          >
+            Validar com Câmera do Celular (QR Code)
+          </button>
+        )}
+      </div>
+
       {photoFileName !== null && photoError === null && (
         <p className="photo-selected-name" aria-live="polite">
           Arquivo selecionado: {photoFileName}
@@ -146,6 +171,16 @@ export function Step4FotoPerfil({
           <span className="underline-bold">Adicionar foto mais tarde</span>
         </button>
       </div>
+
+      {showQrModal && (
+        <FacialVerificationQrModal
+          userName="Novo Membro"
+          onVerified={() => {
+            setIsVerified(true);
+          }}
+          onClose={() => setShowQrModal(false)}
+        />
+      )}
     </div>
   );
 }

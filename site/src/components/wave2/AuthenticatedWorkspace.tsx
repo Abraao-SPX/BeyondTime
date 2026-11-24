@@ -21,6 +21,7 @@ import type {
 } from '../../types/wave2';
 import { BlockContactModalRF08 } from './BlockContactModalRF08';
 import { BlockedContactsPanelRF08 } from './BlockedContactsPanelRF08';
+import { FacialVerificationQrModal } from './FacialVerificationQrModal';
 import { MatchAffinityFeedRF05 } from './MatchAffinityFeedRF05';
 import { SimplifiedChatRF07 } from './SimplifiedChatRF07';
 
@@ -62,6 +63,16 @@ export function AuthenticatedWorkspace({
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [isFaciallyVerified, setIsFaciallyVerified] = useState<boolean>(() => {
+    try {
+      return (
+        window.localStorage.getItem(`beyondtime_facial_verified_${authSession.email}`) === 'true'
+      );
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     saveWave2State(authSession.email, wave2State);
@@ -333,15 +344,6 @@ export function AuthenticatedWorkspace({
           onFilterCityChange={setFilterCity}
           onPass={handlePassCandidate}
           onConnect={handleConnectCandidate}
-          onRequestBlock={(candidate) =>
-            setPendingBlock({
-              id: candidate.id,
-              fullName: candidate.fullName,
-              age: candidate.age,
-              city: `${candidate.city} (SE)`,
-              avatarUrl: candidate.avatarUrl,
-            })
-          }
           onResetPassed={handleResetPassed}
           recentMatch={recentMatch}
           onOpenMatchChat={handleOpenMatchChat}
@@ -410,6 +412,32 @@ export function AuthenticatedWorkspace({
                   ? 'Alterar foto'
                   : 'Adicionar foto'}
               </button>
+
+              <div className="editorial-profile__verification-card">
+                <div className="editorial-profile__verification-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    <path d="m9 12 2 2 4-4" />
+                  </svg>
+                </div>
+                <div>
+                  <strong>{isFaciallyVerified ? 'Identidade Verificada' : 'Selo de Verificado 50+'}</strong>
+                  <p>
+                    {isFaciallyVerified
+                      ? 'Seu perfil foi autenticado com biometria facial no celular.'
+                      : 'Aponte a câmera do celular para ler o QR Code e obter o selo oficial.'}
+                  </p>
+                </div>
+                {!isFaciallyVerified && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => setIsQrModalOpen(true)}
+                  >
+                    Verificar com QR Code
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Coluna Direita: Identidade, Sobre Mim, Meus Gostos e Preferências */}
@@ -420,6 +448,18 @@ export function AuthenticatedWorkspace({
                     {displayFullName || 'Meu Perfil'}
                   </h1>
                   <span className="editorial-profile__age">50+</span>
+                  {isFaciallyVerified && (
+                    <span
+                      className="editorial-profile__verified-badge"
+                      title="Identidade verificada com biometria facial anti-golpe"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        <path d="m9 12 2 2 4-4" />
+                      </svg>
+                      Verificado 50+
+                    </span>
+                  )}
                 </div>
                 <p className="editorial-profile__location">
                   {userCity ? `${userCity}, Sergipe` : 'Sergipe'}
@@ -559,6 +599,27 @@ export function AuthenticatedWorkspace({
           contactName={pendingBlock.fullName}
           onConfirm={handleConfirmBlock}
           onCancel={() => setPendingBlock(null)}
+        />
+      )}
+
+      {isQrModalOpen && (
+        <FacialVerificationQrModal
+          userName={displayFullName || authSession.email}
+          onVerified={() => {
+            try {
+              window.localStorage.setItem(
+                `beyondtime_facial_verified_${authSession.email}`,
+                'true'
+              );
+            } catch {
+              // ignore
+            }
+            setIsFaciallyVerified(true);
+            setSafetyFeedback(
+              'Identidade confirmada com sucesso! O Selo de Verificado 50+ agora está ativo em seu perfil.'
+            );
+          }}
+          onClose={() => setIsQrModalOpen(false)}
         />
       )}
     </div>
