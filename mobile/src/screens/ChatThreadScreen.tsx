@@ -563,7 +563,8 @@ export function ChatThreadScreen({
               onChangeText={setDraft}
               placeholder="Mensagem"
               placeholderTextColor={palette.textMuted}
-              multiline
+              returnKeyType="send"
+              onSubmitEditing={handleSendText}
               accessibilityLabel={`Escreva uma mensagem para ${firstName}`}
               style={[
                 styles.inputBox,
@@ -834,7 +835,7 @@ const styles = StyleSheet.create({
   },
   composerWrapper: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     borderTopWidth: 1.5,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -842,19 +843,19 @@ const styles = StyleSheet.create({
   },
   inputPill: {
     flex: 1,
-    minHeight: 54,
+    height: 54,
     borderRadius: 27,
     borderWidth: 1.5,
     flexDirection: 'row',
     alignItems: 'center',
     paddingLeft: 18,
-    paddingRight: 6,
+    paddingRight: 4,
   },
   inputBox: {
     flex: 1,
-    minHeight: 48,
-    maxHeight: 112,
-    paddingVertical: 12,
+    height: 52,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   pillCameraBtn: {
     width: TOUCH_TARGET_MIN,
