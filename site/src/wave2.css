@@ -1463,3 +1463,240 @@ html.high-contrast .editorial-profile__link--danger {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   RF-08: Modal de Bloqueio e Painel de Contatos Bloqueados
+   ========================================================================== */
+.defensive-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  padding: 20px;
+}
+
+.defensive-modal-overlay .defensive-modal {
+  width: 100%;
+  max-width: 520px;
+  background: var(--bg-surface);
+  border: 2px solid var(--border-subtle);
+  border-radius: 20px;
+  padding: 32px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: matchModalFadeIn 0.25s ease-out;
+}
+
+.defensive-modal__badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 4px 12px;
+  border-radius: 999px;
+  margin: 0;
+}
+
+.defensive-modal__title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.defensive-modal__text {
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.block-reason-fieldset {
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 6px 0 10px 0;
+  background: var(--bg-canvas);
+}
+
+.block-reason-fieldset .form-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 0 6px;
+}
+
+.block-reason-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.block-reason-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.98rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.block-reason-option:hover {
+  background: var(--primary-soft);
+}
+
+.block-reason-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.defensive-modal__actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.defensive-modal__actions .btn {
+  flex: 1;
+  min-height: 52px;
+  font-size: 1rem;
+  font-weight: 700;
+  border-radius: 12px;
+}
+
+.btn--danger {
+  background-color: #8B1E28;
+  color: #FFFFFF;
+  border: none;
+  cursor: pointer;
+}
+
+.btn--danger:hover {
+  background-color: #6E1720;
+}
+
+/* Painel de Contatos Bloqueados na Tela Meu Perfil */
+.blocked-panel {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1.5px solid var(--border-subtle);
+  border-radius: 16px;
+  background: var(--bg-surface);
+}
+
+.blocked-panel__header .wave2-eyebrow {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 4px;
+}
+
+.blocked-panel__title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+
+.blocked-panel__desc {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 16px 0;
+}
+
+.blocked-panel__empty {
+  font-size: 0.98rem;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 12px 0;
+}
+
+.blocked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.blocked-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-canvas);
+  gap: 16px;
+}
+
+.blocked-list__person {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+}
+
+.blocked-list__avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-subtle);
+}
+
+.blocked-list__person strong {
+  display: block;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.blocked-list__meta {
+  display: block;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.blocked-list__unblock-btn {
+  min-height: 44px;
+  padding: 8px 18px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .defensive-modal__actions {
+    flex-direction: column-reverse;
+  }
+  .blocked-list__item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .blocked-list__unblock-btn {
+    width: 100%;
+  }
+}
