@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BackHandler,
   Image,
@@ -12,16 +12,14 @@ import {
   View,
 } from 'react-native';
 import {
+  ArrowRightIcon,
   CameraIcon,
   ChevronLeftIcon,
   CloseXIcon,
   MicIcon,
   PlayIcon,
   SendIcon,
-  ShieldCheckIcon,
-  SparklesIcon,
 } from '../components/Icons';
-import { buildStarterSuggestions } from '../services/chatService';
 import { TOUCH_TARGET_MIN } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 import type { ChatConversation, SendMessageOptions } from '../types/social';
@@ -39,7 +37,7 @@ interface ChatThreadScreenProps {
 const SAMPLE_CHAT_PHOTOS = [
   {
     id: 'photo-orla',
-    label: 'Caminhada na Orla',
+    label: 'Fim de tarde na orla',
     url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=700&q=80',
   },
   {
@@ -49,29 +47,31 @@ const SAMPLE_CHAT_PHOTOS = [
   },
 ];
 
+const WAVEFORM_BARS = [10, 18, 13, 24, 16, 28, 14, 22, 18, 26, 15, 20, 12];
+
 function formatDuration(seconds: number): string {
-  const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const mins = Math.floor(seconds / 60);
   const secs = String(seconds % 60).padStart(2, '0');
   return `${mins}:${secs}`;
 }
 
 /**
- * Tela Dedicada de Conversa (estilo WhatsApp simplificado 50+):
- * - Botão explícito "← Conversas" no topo.
- * - Aviso discreto contra pedidos financeiros.
- * - Sugestões clicáveis quando o histórico está vazio.
- * - Barra inferior com câmera (foto), microfone (áudio sem precisar segurar) e botão Enviar.
+ * Tela Dedicada de Conversa (50+):
+ * - Topo limpo à esquerda: Voltar + foto + nome, idade + status verificado.
+ * - Faixa discreta de segurança financeira.
+ * - Bolhas de texto, foto e áudio (com botão play e ondas sonoras).
+ * - Rodapé em duas linhas amplas: campo "Escreva para [Nome]..." + botões Foto, Áudio e Enviar.
  */
 export function ChatThreadScreen({
   conversation,
   onBackToList,
   onSendMessage,
 }: ChatThreadScreenProps) {
-  const { palette, fs } = useTheme();
+  const { palette, isDark, fs } = useTheme();
   const [draft, setDraft] = useState('');
   const [imgError, setImgError] = useState(false);
 
-  // Gravação de voz acessível (toque único: sem precisar ficar segurando)
+  // Gravação de voz acessível (toque único, sem precisar ficar segurando)
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
@@ -82,10 +82,7 @@ export function ChatThreadScreen({
 
   const scrollRef = useRef<ScrollView>(null);
 
-  const starterSuggestions = useMemo(
-    () => buildStarterSuggestions(conversation.sharedHobbyIds),
-    [conversation.sharedHobbyIds]
-  );
+  const firstName = conversation.fullName.split(' ')[0] || conversation.fullName;
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -138,15 +135,11 @@ export function ChatThreadScreen({
   const handleSendSelectedPhoto = () => {
     const chosen =
       SAMPLE_CHAT_PHOTOS.find((p) => p.id === selectedPhotoId) ?? SAMPLE_CHAT_PHOTOS[0];
-    onSendMessage(conversation.id, `Foto enviada: ${chosen.label}`, {
+    onSendMessage(conversation.id, chosen.label, {
       kind: 'photo',
       photoUrl: chosen.url,
     });
     setShowPhotoTray(false);
-  };
-
-  const handlePickSuggestion = (suggestion: string) => {
-    setDraft(suggestion);
   };
 
   const initials = conversation.fullName
@@ -156,18 +149,31 @@ export function ChatThreadScreen({
     .map((p) => p[0]?.toUpperCase())
     .join('');
 
+  const safetyBannerBg = isDark ? '#2D2416' : '#FEF6DC';
+  const safetyBannerText = isDark ? '#F5DFAA' : '#5B4318';
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: palette.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Topo da conversa: perfil do contato à esquerda (padrão WhatsApp) e botão Conversas à direita */}
+      {/* Topo da conversa: seta voltar + avatar + nome, idade e status verificado à esquerda */}
       <View
         style={[
           styles.header,
           { backgroundColor: palette.surface, borderBottomColor: palette.border },
         ]}
       >
+        <TouchableOpacity
+          onPress={onBackToList}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar para Conversas"
+          style={styles.backIconBtn}
+        >
+          <ChevronLeftIcon size={24} color={palette.textPrimary} />
+        </TouchableOpacity>
+
         <View style={styles.contactBlock}>
           {!imgError ? (
             <Image
@@ -192,59 +198,40 @@ export function ChatThreadScreen({
               numberOfLines={1}
               style={[
                 styles.contactName,
-                { color: palette.textPrimary, fontSize: fs(16) },
+                { color: palette.textPrimary, fontSize: fs(19) },
               ]}
             >
-              {conversation.fullName}
+              {conversation.fullName}, {conversation.age}
             </Text>
             <Text
               numberOfLines={1}
               style={[
-                styles.contactCity,
-                { color: palette.textSecondary, fontSize: fs(13) },
+                styles.contactStatus,
+                { color: palette.verifiedText, fontSize: fs(14) },
               ]}
             >
-              {conversation.city}
+              {conversation.verified
+                ? 'Verificado • ativo agora'
+                : `${conversation.city} • ativo agora`}
             </Text>
           </View>
         </View>
-
-        <TouchableOpacity
-          onPress={onBackToList}
-          accessibilityRole="button"
-          accessibilityLabel="Voltar para Conversas"
-          style={[
-            styles.backBtn,
-            { backgroundColor: palette.background, borderColor: palette.border },
-          ]}
-        >
-          <ChevronLeftIcon size={20} color={palette.textPrimary} />
-          <Text
-            style={[
-              styles.backBtnText,
-              { color: palette.textPrimary, fontSize: fs(15) },
-            ]}
-          >
-            Conversas
-          </Text>
-        </TouchableOpacity>
       </View>
 
-      {/* Aviso discreto contra pedidos financeiros */}
+      {/* Faixa suave e discreta contra pedidos financeiros */}
       <View
         style={[
           styles.safetyBanner,
-          { backgroundColor: palette.surface, borderBottomColor: palette.border },
+          { backgroundColor: safetyBannerBg, borderBottomColor: palette.border },
         ]}
       >
-        <ShieldCheckIcon size={18} color={palette.verifiedText} />
         <Text
           style={[
             styles.safetyText,
-            { color: palette.textSecondary, fontSize: fs(13) },
+            { color: safetyBannerText, fontSize: fs(14) },
           ]}
         >
-          Para sua segurança, nunca envie dinheiro, PIX ou dados bancários por aqui.
+          Nunca envie dinheiro, códigos ou dados do banco.
         </Text>
       </View>
 
@@ -256,60 +243,15 @@ export function ChatThreadScreen({
         showsVerticalScrollIndicator={false}
       >
         {conversation.messages.length === 0 ? (
-          <View
-            style={[
-              styles.emptySuggestionsCard,
-              { backgroundColor: palette.surface, borderColor: palette.border },
-            ]}
-          >
-            <View style={styles.suggestionsHeader}>
-              <SparklesIcon size={20} color={palette.primaryText} />
-              <Text
-                style={[
-                  styles.suggestionsTitle,
-                  { color: palette.textPrimary, fontSize: fs(17) },
-                ]}
-              >
-                Ideias para começar a conversa
-              </Text>
-            </View>
-
+          <View style={styles.emptyHistoryBox}>
             <Text
               style={[
-                styles.suggestionsSubtitle,
-                { color: palette.textSecondary, fontSize: fs(15) },
+                styles.emptyHistoryText,
+                { color: palette.textSecondary, fontSize: fs(16) },
               ]}
             >
-              Toque em uma sugestão abaixo para preencher sua mensagem, ou escreva do seu jeito:
+              Comece uma conversa tranquila com {firstName} no seu tempo.
             </Text>
-
-            <View style={styles.suggestionsList}>
-              {starterSuggestions.map((item, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  onPress={() => handlePickSuggestion(item)}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Usar sugestão: ${item}`}
-                  style={[
-                    styles.suggestionPill,
-                    {
-                      backgroundColor: palette.background,
-                      borderColor: palette.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.suggestionText,
-                      { color: palette.textPrimary, fontSize: fs(15) },
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
           </View>
         ) : (
           conversation.messages.map((msg) => {
@@ -320,17 +262,22 @@ export function ChatThreadScreen({
               <View
                 key={msg.id}
                 style={[
-                  styles.bubbleRow,
-                  isMe ? styles.bubbleRowRight : styles.bubbleRowLeft,
+                  styles.messageGroup,
+                  isMe ? styles.alignRight : styles.alignLeft,
                 ]}
               >
                 <View
                   style={[
                     styles.bubble,
-                    {
-                      backgroundColor: isMe ? palette.primarySoft : palette.surface,
-                      borderColor: isMe ? palette.borderStrong : palette.border,
-                    },
+                    isMe
+                      ? {
+                          backgroundColor: palette.primaryHover,
+                          borderColor: palette.primaryHover,
+                        }
+                      : {
+                          backgroundColor: palette.surface,
+                          borderColor: palette.border,
+                        },
                   ]}
                 >
                   {msg.kind === 'photo' && msg.photoUrl ? (
@@ -343,7 +290,10 @@ export function ChatThreadScreen({
                       <Text
                         style={[
                           styles.bubbleText,
-                          { color: palette.textPrimary, fontSize: fs(15) },
+                          {
+                            color: isMe ? palette.textOnPrimary : palette.textPrimary,
+                            fontSize: fs(16),
+                          },
                         ]}
                       >
                         {msg.text}
@@ -354,6 +304,7 @@ export function ChatThreadScreen({
                       onPress={() =>
                         setPlayingMessageId((prev) => (prev === msg.id ? null : msg.id))
                       }
+                      activeOpacity={0.8}
                       accessibilityRole="button"
                       accessibilityLabel={
                         isPlaying ? 'Pausar mensagem de voz' : 'Ouvir mensagem de voz'
@@ -363,50 +314,79 @@ export function ChatThreadScreen({
                       <View
                         style={[
                           styles.audioPlayCircle,
-                          { backgroundColor: palette.surface, borderColor: palette.primary },
+                          {
+                            backgroundColor: isMe
+                              ? palette.surface
+                              : palette.primaryHover,
+                          },
                         ]}
                       >
-                        <PlayIcon size={16} color={palette.primaryText} />
+                        <PlayIcon
+                          size={18}
+                          color={isMe ? palette.primaryHover : '#FFFFFF'}
+                        />
                       </View>
-                      <View style={styles.audioInfoCol}>
-                        <Text
-                          style={[
-                            styles.audioTitle,
-                            { color: palette.textPrimary, fontSize: fs(15) },
-                          ]}
-                        >
-                          {isPlaying ? 'Reproduzindo áudio...' : 'Mensagem de voz'}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.audioDuration,
-                            { color: palette.textSecondary, fontSize: fs(13) },
-                          ]}
-                        >
-                          Duração: {formatDuration(msg.audioDurationSec ?? 1)}
-                        </Text>
+
+                      <View style={styles.waveformWrap}>
+                        {WAVEFORM_BARS.map((barHeight, barIdx) => (
+                          <View
+                            key={barIdx}
+                            style={[
+                              styles.waveformBar,
+                              {
+                                height: barHeight,
+                                backgroundColor: isMe
+                                  ? isPlaying && barIdx % 2 === 0
+                                    ? '#FFFFFF'
+                                    : 'rgba(255,255,255,0.75)'
+                                  : isPlaying && barIdx % 2 === 0
+                                    ? palette.primary
+                                    : palette.textSecondary,
+                              },
+                            ]}
+                          />
+                        ))}
                       </View>
+
+                      <Text
+                        style={[
+                          styles.audioDuration,
+                          {
+                            color: isMe ? '#FFFFFF' : palette.textPrimary,
+                            fontSize: fs(15),
+                          },
+                        ]}
+                      >
+                        {formatDuration(msg.audioDurationSec ?? 1)}
+                      </Text>
                     </TouchableOpacity>
                   ) : (
                     <Text
                       style={[
                         styles.bubbleText,
-                        { color: palette.textPrimary, fontSize: fs(16) },
+                        {
+                          color: isMe ? palette.textOnPrimary : palette.textPrimary,
+                          fontSize: fs(16),
+                        },
                       ]}
                     >
                       {msg.text}
                     </Text>
                   )}
-
-                  <Text
-                    style={[
-                      styles.bubbleTime,
-                      { color: palette.textMuted, fontSize: fs(12) },
-                    ]}
-                  >
-                    {msg.timestamp}
-                  </Text>
                 </View>
+
+                <Text
+                  style={[
+                    styles.metaOutside,
+                    { color: palette.textMuted, fontSize: fs(13) },
+                  ]}
+                >
+                  {msg.kind === 'audio'
+                    ? `${msg.timestamp} • Mensagem de voz`
+                    : isMe
+                      ? `${msg.timestamp} • Lida`
+                      : msg.timestamp}
+                </Text>
               </View>
             );
           })
@@ -486,7 +466,7 @@ export function ChatThreadScreen({
               onPress={handleSendSelectedPhoto}
               accessibilityRole="button"
               accessibilityLabel="Enviar foto selecionada"
-              style={[styles.trayBtnPrimary, { backgroundColor: palette.primary }]}
+              style={[styles.trayBtnPrimary, { backgroundColor: palette.primaryHover }]}
             >
               <SendIcon size={18} color={palette.textOnPrimary} />
               <Text
@@ -502,7 +482,7 @@ export function ChatThreadScreen({
         </View>
       ) : null}
 
-      {/* Barra inferior: Modo Gravação de Voz (sem precisar segurar) OU Campo de Mensagem */}
+      {/* Rodapé: Gravação de voz (sem precisar segurar) OU Caixa ampla + [Foto] [Áudio] [Enviar →] */}
       {isRecording ? (
         <View
           style={[
@@ -518,7 +498,7 @@ export function ChatThreadScreen({
                 { color: palette.textPrimary, fontSize: fs(16) },
               ]}
             >
-              Gravando mensagem de voz • {formatDuration(recordingSeconds)}
+              Gravando áudio • {formatDuration(recordingSeconds)}
             </Text>
           </View>
 
@@ -549,7 +529,7 @@ export function ChatThreadScreen({
               activeOpacity={0.82}
               accessibilityRole="button"
               accessibilityLabel="Enviar áudio gravado"
-              style={[styles.trayBtnPrimary, { backgroundColor: palette.primary }]}
+              style={[styles.trayBtnPrimary, { backgroundColor: palette.primaryHover }]}
             >
               <SendIcon size={18} color={palette.textOnPrimary} />
               <Text
@@ -566,37 +546,19 @@ export function ChatThreadScreen({
       ) : (
         <View
           style={[
-            styles.composerBar,
+            styles.composerWrapper,
             { backgroundColor: palette.surface, borderTopColor: palette.border },
           ]}
         >
-          {/* Botão Câmera (Enviar foto) */}
-          <TouchableOpacity
-            onPress={() => setShowPhotoTray((prev) => !prev)}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Enviar foto"
-            accessibilityState={{ expanded: showPhotoTray }}
-            style={[
-              styles.mediaIconBtn,
-              {
-                backgroundColor: showPhotoTray ? palette.primarySoft : palette.background,
-                borderColor: showPhotoTray ? palette.primary : palette.border,
-              },
-            ]}
-          >
-            <CameraIcon size={22} color={palette.primaryText} />
-          </TouchableOpacity>
-
           <TextInput
             value={draft}
             onChangeText={setDraft}
-            placeholder="Escreva sua mensagem..."
+            placeholder={`Escreva para ${firstName}...`}
             placeholderTextColor={palette.textMuted}
             multiline
-            accessibilityLabel="Campo para escrever sua mensagem"
+            accessibilityLabel={`Escreva uma mensagem para ${firstName}`}
             style={[
-              styles.input,
+              styles.inputBox,
               {
                 backgroundColor: palette.background,
                 borderColor: palette.border,
@@ -606,49 +568,85 @@ export function ChatThreadScreen({
             ]}
           />
 
-          {/* Botão Microfone (Gravar áudio sem precisar ficar segurando) */}
-          <TouchableOpacity
-            onPress={handleStartRecording}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Gravar mensagem de voz"
-            accessibilityHint="Toque uma vez para iniciar a gravação sem precisar segurar"
-            style={[
-              styles.mediaIconBtn,
-              {
-                backgroundColor: palette.primarySoft,
-                borderColor: palette.border,
-              },
-            ]}
-          >
-            <MicIcon size={22} color={palette.primaryText} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={handleSendText}
-            disabled={!draft.trim()}
-            activeOpacity={0.82}
-            accessibilityRole="button"
-            accessibilityLabel="Enviar mensagem"
-            accessibilityState={{ disabled: !draft.trim() }}
-            style={[
-              styles.sendButton,
-              {
-                backgroundColor: palette.primary,
-                opacity: draft.trim() ? 1 : 0.45,
-              },
-            ]}
-          >
-            <SendIcon size={18} color={palette.textOnPrimary} />
-            <Text
+          <View style={styles.composerActionsRow}>
+            <TouchableOpacity
+              onPress={() => setShowPhotoTray((prev) => !prev)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar foto"
+              accessibilityState={{ expanded: showPhotoTray }}
               style={[
-                styles.sendButtonText,
-                { color: palette.textOnPrimary, fontSize: fs(15) },
+                styles.mediaActionBtn,
+                {
+                  backgroundColor: showPhotoTray
+                    ? palette.primarySoft
+                    : palette.background,
+                  borderColor: showPhotoTray ? palette.primary : palette.border,
+                },
               ]}
             >
-              Enviar
-            </Text>
-          </TouchableOpacity>
+              <CameraIcon size={20} color={palette.textPrimary} />
+              <Text
+                style={[
+                  styles.mediaActionText,
+                  { color: palette.textPrimary, fontSize: fs(15) },
+                ]}
+              >
+                Foto
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleStartRecording}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Gravar áudio"
+              accessibilityHint="Toque uma vez para gravar sem precisar segurar"
+              style={[
+                styles.mediaActionBtn,
+                {
+                  backgroundColor: palette.background,
+                  borderColor: palette.border,
+                },
+              ]}
+            >
+              <MicIcon size={20} color={palette.textPrimary} />
+              <Text
+                style={[
+                  styles.mediaActionText,
+                  { color: palette.textPrimary, fontSize: fs(15) },
+                ]}
+              >
+                Áudio
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleSendText}
+              disabled={!draft.trim()}
+              activeOpacity={0.82}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar mensagem"
+              accessibilityState={{ disabled: !draft.trim() }}
+              style={[
+                styles.sendPrimaryBtn,
+                {
+                  backgroundColor: palette.primaryHover,
+                  opacity: draft.trim() ? 1 : 0.45,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.sendPrimaryText,
+                  { color: palette.textOnPrimary, fontSize: fs(16) },
+                ]}
+              >
+                Enviar
+              </Text>
+              <ArrowRightIcon size={18} color={palette.textOnPrimary} />
+            </TouchableOpacity>
+          </View>
         </View>
       )}
     </KeyboardAvoidingView>
@@ -662,162 +660,133 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    gap: 10,
-  },
-  backBtn: {
-    minHeight: TOUCH_TARGET_MIN,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
     paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1.2,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    gap: 8,
   },
-  backBtnText: {
-    fontWeight: '700',
+  backIconBtn: {
+    width: TOUCH_TARGET_MIN,
+    height: TOUCH_TARGET_MIN,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   contactBlock: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 10,
+    gap: 12,
   },
   headerAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   headerAvatarFallback: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   initials: {
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: 16,
   },
   contactTextCol: {
     flex: 1,
+    gap: 2,
   },
   contactName: {
+    fontWeight: '800',
+  },
+  contactStatus: {
     fontWeight: '700',
   },
-  contactCity: {
-    fontWeight: '500',
-  },
   safetyBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderBottomWidth: 1,
   },
   safetyText: {
-    flex: 1,
-    lineHeight: 19,
+    fontWeight: '600',
+    lineHeight: 20,
   },
   messagesContainer: {
     flexGrow: 1,
     padding: 16,
-    gap: 12,
+    gap: 16,
   },
-  emptySuggestionsCard: {
-    marginTop: 'auto',
-    borderRadius: 20,
-    borderWidth: 1.5,
-    padding: 18,
-    gap: 12,
-  },
-  suggestionsHeader: {
-    flexDirection: 'row',
+  emptyHistoryBox: {
+    flex: 1,
     alignItems: 'center',
-    gap: 8,
-  },
-  suggestionsTitle: {
-    fontWeight: '700',
-  },
-  suggestionsSubtitle: {
-    lineHeight: 22,
-  },
-  suggestionsList: {
-    gap: 10,
-  },
-  suggestionPill: {
-    minHeight: TOUCH_TARGET_MIN,
-    borderRadius: 16,
-    borderWidth: 1.2,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     justifyContent: 'center',
+    paddingHorizontal: 20,
   },
-  suggestionText: {
-    lineHeight: 22,
+  emptyHistoryText: {
+    textAlign: 'center',
+    lineHeight: 24,
   },
-  bubbleRow: {
+  messageGroup: {
     width: '100%',
-    flexDirection: 'row',
-  },
-  bubbleRowRight: {
-    justifyContent: 'flex-end',
-  },
-  bubbleRowLeft: {
-    justifyContent: 'flex-start',
-  },
-  bubble: {
-    maxWidth: '84%',
-    borderRadius: 18,
-    borderWidth: 1.2,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
     gap: 6,
   },
-  bubbleText: {
-    lineHeight: 23,
+  alignLeft: {
+    alignItems: 'flex-start',
   },
-  bubbleTime: {
-    alignSelf: 'flex-end',
-    fontWeight: '600',
+  alignRight: {
+    alignItems: 'flex-end',
+  },
+  bubble: {
+    maxWidth: '86%',
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  bubbleText: {
+    lineHeight: 24,
+  },
+  metaOutside: {
+    fontWeight: '500',
+    paddingHorizontal: 4,
   },
   photoMsgWrap: {
-    gap: 8,
+    gap: 10,
   },
   msgPhoto: {
-    width: 210,
-    height: 150,
+    width: 230,
+    height: 155,
     borderRadius: 12,
   },
   audioBubbleRow: {
     minHeight: TOUCH_TARGET_MIN,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingRight: 8,
+    gap: 12,
   },
   audioPlayCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1.5,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  audioInfoCol: {
-    gap: 2,
+  waveformWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 30,
   },
-  audioTitle: {
-    fontWeight: '700',
+  waveformBar: {
+    width: 3.5,
+    borderRadius: 2,
   },
   audioDuration: {
-    fontWeight: '500',
+    fontWeight: '700',
+    marginLeft: 2,
   },
   photoTray: {
     borderTopWidth: 1.5,
@@ -898,41 +867,51 @@ const styles = StyleSheet.create({
   trayBtnText: {
     fontWeight: '700',
   },
-  composerBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  composerWrapper: {
     borderTopWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
+    gap: 10,
   },
-  mediaIconBtn: {
-    width: 48,
-    height: 52,
+  inputBox: {
+    minHeight: 58,
+    maxHeight: 112,
     borderRadius: 16,
     borderWidth: 1.5,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    textAlignVertical: 'top',
+  },
+  composerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  mediaActionBtn: {
+    minHeight: 52,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 7,
   },
-  input: {
+  mediaActionText: {
+    fontWeight: '700',
+  },
+  sendPrimaryBtn: {
     flex: 1,
     minHeight: 52,
-    maxHeight: 110,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  sendButton: {
-    minHeight: 52,
-    paddingHorizontal: 14,
+    paddingHorizontal: 18,
     borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 8,
   },
-  sendButtonText: {
+  sendPrimaryText: {
     fontWeight: '700',
   },
 });
