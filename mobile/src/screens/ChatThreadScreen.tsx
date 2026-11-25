@@ -178,7 +178,7 @@ export function ChatThreadScreen({
         </TouchableOpacity>
 
         <View style={styles.contactBlock}>
-          {!imgError ? (
+          {!imgError && conversation.photoUrl ? (
             <Image
               source={{ uri: conversation.photoUrl }}
               style={styles.headerAvatar}
@@ -401,7 +401,9 @@ export function ChatThreadScreen({
                   {msg.kind === 'audio'
                     ? `${msg.timestamp} • Mensagem de voz`
                     : isMe
-                      ? `${msg.timestamp} • Lida`
+                      ? msg.read
+                        ? `${msg.timestamp} • Lida`
+                        : `${msg.timestamp} • Enviada`
                       : msg.timestamp}
                 </Text>
               </View>

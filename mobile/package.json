@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
+    "@stomp/stompjs": "^7.5.0",
     "expo": "~51.0.28",
     "expo-build-properties": "~0.12.5",
     "expo-camera": "~15.0.14",

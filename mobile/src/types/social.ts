@@ -29,6 +29,7 @@ export interface ChatMessage {
   kind?: 'text' | 'audio' | 'photo';
   audioDurationSec?: number;
   photoUrl?: string;
+  read?: boolean;
 }
 
 export interface SendMessageOptions {
@@ -39,6 +40,7 @@ export interface SendMessageOptions {
 
 export interface ChatConversation {
   id: string;
+  matchId?: string;
   profileId: string;
   fullName: string;
   age: number;
