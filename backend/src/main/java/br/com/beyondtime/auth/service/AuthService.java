@@ -254,16 +254,23 @@ public class AuthService {
 
         ensureUserIsActive(user);
 
-        if (!oauthAccountRepository.existsByUserIdAndProvider(user.getId(), provider)) {
-            if (!claims.emailVerified()) {
-                throw new BusinessException(
-                        "EMAIL_NOT_VERIFIED_BY_PROVIDER",
-                        "O e-mail da sua conta social não foi verificado pelo provedor. Verifique seu e-mail no Google ou Facebook.",
-                        HttpStatus.FORBIDDEN
-                );
-            }
-            oauthAccountRepository.save(new UserOAuthAccount(user, provider, providerUserId));
+        if (!claims.emailVerified()) {
+            throw new BusinessException(
+                    "EMAIL_NOT_VERIFIED_BY_PROVIDER",
+                    "O e-mail da sua conta social não foi verificado pelo provedor. Verifique seu e-mail no Google ou Facebook.",
+                    HttpStatus.FORBIDDEN
+            );
         }
+
+        if (oauthAccountRepository.existsByUserIdAndProvider(user.getId(), provider)) {
+            throw new BusinessException(
+                    "OAUTH_ACCOUNT_CONFLICT",
+                    "Esta conta já está vinculada a outro identificador deste provedor social.",
+                    HttpStatus.CONFLICT
+            );
+        }
+
+        oauthAccountRepository.save(new UserOAuthAccount(user, provider, providerUserId));
 
         return issueTokensForUser(user);
     }

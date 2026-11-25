@@ -216,7 +216,8 @@ public class ChatConversationService {
         Optional<UserChatKey> keyOpt = userChatKeyRepository.findById(contactId);
 
         String contactName = profileOpt.map(Profile::getDisplayName)
-                .orElseGet(() -> userOpt.map(User::getEmail).orElse("Contato BeyondTime"));
+                .filter(name -> name != null && !name.isBlank())
+                .orElse("Contato BeyondTime");
 
         Integer contactAge = userOpt.map(User::getBirthDate)
                 .map(birthDate -> Period.between(birthDate, LocalDate.now()).getYears())
