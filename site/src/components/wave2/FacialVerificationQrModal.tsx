@@ -14,7 +14,7 @@ interface FacialVerificationQrModalProps {
  * apenas para apresentar o fluxo ao usuário.
  */
 export function FacialVerificationQrModal({ onClose }: FacialVerificationQrModalProps) {
-  const [qrSvg, setQrSvg] = useState<string>('');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -31,16 +31,16 @@ export function FacialVerificationQrModal({ onClose }: FacialVerificationQrModal
 
   useEffect(() => {
     let isMounted = true;
-    QRCode.toString(
+    QRCode.toDataURL(
       verificationUrl,
       {
-        type: 'svg',
         margin: 2,
+        width: 240,
         color: { dark: '#5A081D', light: '#FFFFFF' },
       },
-      (error, svgString) => {
-        if (!error && svgString && isMounted) {
-          setQrSvg(svgString);
+      (error, dataUrl) => {
+        if (!error && dataUrl && isMounted) {
+          setQrDataUrl(dataUrl);
         }
       }
     );
@@ -99,12 +99,15 @@ export function FacialVerificationQrModal({ onClose }: FacialVerificationQrModal
         <div className="facial-qr-modal__body">
           <div className="facial-qr-modal__grid">
             <div className="facial-qr-modal__qr-container">
-              <div
-                className="facial-qr-modal__qr-box"
-                role="img"
-                aria-label="Código QR da verificação facial pelo celular"
-                dangerouslySetInnerHTML={{ __html: qrSvg }}
-              />
+              <div className="facial-qr-modal__qr-box">
+                {qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="Código QR da verificação facial pelo celular"
+                    style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
+                  />
+                ) : null}
+              </div>
               <span className="facial-qr-modal__qr-hint">Código de verificação BeyondTime</span>
             </div>
 
