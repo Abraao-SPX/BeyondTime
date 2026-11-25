@@ -28,9 +28,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class BlockService {
@@ -130,9 +134,18 @@ public class BlockService {
 
     @Transactional(readOnly = true)
     public List<BlockedContactResponse> listBlockedContacts(UUID blockerUserId) {
-        return blockRepository.findByBlockerUserIdOrderByCreatedAtDesc(blockerUserId)
-                .stream()
-                .map(this::toResponse)
+        List<ChatUserBlock> blocks = blockRepository.findByBlockerUserIdOrderByCreatedAtDesc(blockerUserId);
+        if (blocks.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> blockedIds = blocks.stream()
+                .map(ChatUserBlock::getBlockedUserId)
+                .distinct()
+                .toList();
+        Map<UUID, User> usersById = userRepository.findAllById(blockedIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a, HashMap::new));
+        return blocks.stream()
+                .map(block -> toResponse(block, Optional.ofNullable(usersById.get(block.getBlockedUserId()))))
                 .toList();
     }
 
@@ -169,9 +182,12 @@ public class BlockService {
     }
 
     private BlockedContactResponse toResponse(ChatUserBlock block) {
+        return toResponse(block, userRepository.findById(block.getBlockedUserId()));
+    }
+
+    private BlockedContactResponse toResponse(ChatUserBlock block, Optional<User> userOpt) {
         UUID blockedId = block.getBlockedUserId();
         Optional<Profile> profileOpt = profileRepository.findByUserId(blockedId);
-        Optional<User> userOpt = userRepository.findById(blockedId);
 
         String fullName = profileOpt.map(Profile::getDisplayName)
                 .orElse("Usuário BeyondTime");
