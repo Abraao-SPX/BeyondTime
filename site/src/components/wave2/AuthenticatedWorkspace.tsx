@@ -126,7 +126,8 @@ export function AuthenticatedWorkspace({
   const [serverBlocked, setServerBlocked] = useState<BlockedContact[]>([]);
   const [filterGoal, setFilterGoal] = useState<ConnectionGoal | 'Todos'>('Todos');
   const [filterCity, setFilterCity] = useState<string>('Todas');
-  const [maxDistance, setMaxDistance] = useState<string>('30km');
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState<boolean>(() => !isPreviewMode);
+  const [isLoadingDiscovery, setIsLoadingDiscovery] = useState<boolean>(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
@@ -265,6 +266,7 @@ export function AuthenticatedWorkspace({
   const reloadRemoteDiscovery = useCallback(
     async (cityFilter: string, goalFilter: ConnectionGoal | 'Todos') => {
       if (isPreviewMode) return;
+      setIsLoadingDiscovery(true);
       try {
         const dtos = await fetchDiscoveryProfiles(authSession, {
           city: cityFilter,
@@ -278,6 +280,8 @@ export function AuthenticatedWorkspace({
             ? err.message
             : 'Não foi possível carregar as sugestões de pessoas agora.';
         setSafetyFeedback(msg);
+      } finally {
+        setIsLoadingDiscovery(false);
       }
     },
     [authSession, isPreviewMode]
@@ -350,6 +354,10 @@ export function AuthenticatedWorkspace({
               ? err.message
               : 'Não foi possível conectar ao servidor BeyondTime para carregar conexões reais.'
           );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingWorkspace(false);
         }
       }
 
@@ -577,6 +585,9 @@ export function AuthenticatedWorkspace({
 
     setServerCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
     void sendMatchInteraction(authSession, 'pass', candidate.id).catch((err) => {
+      setServerCandidates((prev) =>
+        prev.some((c) => c.id === candidate.id) ? prev : [candidate, ...prev]
+      );
       setSafetyFeedback(
         err instanceof ApiError ? err.message : 'Não foi possível registrar essa ação agora.'
       );
@@ -627,6 +638,9 @@ export function AuthenticatedWorkspace({
           );
         }
       } catch (err) {
+        setServerCandidates((prev) =>
+          prev.some((c) => c.id === candidate.id) ? prev : [candidate, ...prev]
+        );
         setSafetyFeedback(
           err instanceof ApiError ? err.message : 'Não foi possível registrar sua curtida agora.'
         );
@@ -993,6 +1007,7 @@ export function AuthenticatedWorkspace({
       {activeTab === 'discover' && (
         <MatchAffinityFeedRF05
           candidates={candidates}
+          isLoading={isLoadingWorkspace || isLoadingDiscovery}
           userCity={userCity}
           currentUserName={displayFullName || 'Você'}
           currentUserAvatarUrl={displayAvatarUrl}
@@ -1013,6 +1028,7 @@ export function AuthenticatedWorkspace({
       {activeTab === 'chat' && (
         <SimplifiedChatRF07
           threads={visibleThreads}
+          isLoading={isLoadingWorkspace}
           activeThreadId={activeThreadId}
           onSelectThread={handleSelectThread}
           onSendMessage={handleSendMessage}
@@ -1193,24 +1209,23 @@ export function AuthenticatedWorkspace({
 
                   <div className="editorial-profile__pref-field">
                     <label
-                      htmlFor="profile-pref-distance"
+                      htmlFor="profile-pref-city"
                       className="editorial-profile__pref-label"
                     >
-                      Distância máxima
+                      Cidade em Sergipe
                     </label>
                     <select
-                      id="profile-pref-distance"
+                      id="profile-pref-city"
                       className="form-input"
-                      value={maxDistance}
-                      onChange={(event) => {
-                        const val = event.target.value;
-                        setMaxDistance(val);
-                        setFilterCity(val === 'city' ? userCity : 'Todas');
-                      }}
+                      value={filterCity}
+                      onChange={(event) => setFilterCity(event.target.value)}
                     >
-                      <option value="city">Apenas minha cidade</option>
-                      <option value="30km">Até 30 km</option>
-                      <option value="state">Todo Sergipe</option>
+                      <option value="Todas">Todas em Sergipe</option>
+                      {availableCities.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>

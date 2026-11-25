@@ -92,6 +92,8 @@ export function App() {
   const [showLanding, setShowLanding] = useState<boolean>(() =>
     IS_DEV_ONDA2_PREVIEW ? false : loadAuthSession() === null
   );
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [profileRetryTick, setProfileRetryTick] = useState(0);
   const { highContrast, toggleHighContrast } = useHighContrast();
   const [serverProfile, setServerProfile] = useState<ServerProfile | null>(() =>
     IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_PROFILE : null
@@ -261,6 +263,7 @@ export function App() {
   useEffect(() => {
     if (!authSession) {
       setIsLoadingProfile(false);
+      setProfileLoadError(null);
       setServerProfile(null);
       setIsProfileMissing(false);
       setIsEditingProfile(false);
@@ -269,15 +272,18 @@ export function App() {
     }
     if (import.meta.env.DEV && authSession.userId === 'dev-preview-50plus') {
       setIsLoadingProfile(false);
+      setProfileLoadError(null);
       return;
     }
     let active = true;
     setIsLoadingProfile(true);
+    setProfileLoadError(null);
     fetchMyProfile(authSession)
       .then((profile) => {
         if (active) {
           setServerProfile(profile);
           setIsProfileMissing(false);
+          setProfileLoadError(null);
           setOrphanNotice(null);
         }
       })
@@ -290,6 +296,7 @@ export function App() {
           setServerProfile(null);
           setIsProfileMissing(false);
           setIsEditingProfile(false);
+          setProfileLoadError(null);
           setOrphanNotice(null);
           setSocialDraft(null);
         } else if (err instanceof ApiError && err.status === 404) {
@@ -298,8 +305,15 @@ export function App() {
           // redireciona suavemente para conclusão do perfil 50+ (dados, foto, hobbies RF03 e objetivo).
           setServerProfile(null);
           setIsProfileMissing(true);
+          setProfileLoadError(null);
           setOrphanNotice(
             'Bem-vindo(a)! Agora vamos completar seu perfil 50+ com sua cidade, foto, hobbies e objetivo para começar a se conectar com segurança!'
+          );
+        } else {
+          setProfileLoadError(
+            err instanceof ApiError
+              ? err.message
+              : 'Não foi possível carregar seu perfil agora. Verifique sua conexão e tente novamente.'
           );
         }
       })
@@ -311,7 +325,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [authSession]);
+  }, [authSession, profileRetryTick]);
 
   async function handleLogout() {
     try {
@@ -519,6 +533,27 @@ export function App() {
                 <div className="skeleton-loader" aria-hidden="true">
                   <div className="skeleton-loader__bar" />
                   <div className="skeleton-loader__bar skeleton-loader__bar--short" />
+                </div>
+              </section>
+            ) : profileLoadError !== null && serverProfile === null ? (
+              <section className="auth-card" aria-live="polite" role="alert">
+                <h1 className="auth-card__title">Não foi possível carregar seu perfil</h1>
+                <p className="auth-card__subtitle">{profileLoadError}</p>
+                <div className="defensive-modal__actions" style={{ marginTop: '20px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => setProfileRetryTick((prev) => prev + 1)}
+                  >
+                    Tentar novamente
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleLogout}
+                  >
+                    Sair da conta
+                  </button>
                 </div>
               </section>
             ) : isProfileMissing || isEditingProfile ? (

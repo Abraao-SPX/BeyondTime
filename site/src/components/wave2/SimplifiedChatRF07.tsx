@@ -5,6 +5,7 @@ import type { ChatThread, OutgoingMessagePayload } from '../../types/wave2';
 
 interface SimplifiedChatRF07Props {
   threads: ChatThread[];
+  isLoading?: boolean;
   activeThreadId: string | null;
   onSelectThread: (contactId: string) => void;
   onSendMessage: (
@@ -97,6 +98,7 @@ function formatSeconds(totalSeconds: number): string {
 
 export function SimplifiedChatRF07({
   threads,
+  isLoading = false,
   activeThreadId,
   onSelectThread,
   onSendMessage,
@@ -425,6 +427,19 @@ export function SimplifiedChatRF07({
     } else {
       cleanupRecordingStream();
     }
+  }
+
+  if (isLoading && threads.length === 0) {
+    return (
+      <section className="wave2-section" aria-label="Conversas">
+        <div className="wave2-empty-card" role="status" aria-live="polite">
+          <h1 className="wave2-empty-card__title">Carregando suas conversas...</h1>
+          <p className="wave2-empty-card__text">
+            Aguarde um instante enquanto buscamos suas mensagens protegidas.
+          </p>
+        </div>
+      </section>
+    );
   }
 
   if (threads.length === 0) {
