@@ -31,7 +31,6 @@ import {
   type EncryptedMessageDto,
 } from '../../services/wave2ApiClient';
 import {
-  bytesToBase64,
   decryptMediaBytes,
   decryptMessageText,
   encryptMediaBytes,
@@ -137,6 +136,7 @@ export function AuthenticatedWorkspace({
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
   const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
+  const createdObjectUrlsRef = useRef<Set<string>>(new Set());
   const prevFiltersRef = useRef<{ city: string; goal: ConnectionGoal | 'Todos' }>({
     city: filterCity,
     goal: filterGoal,
@@ -148,6 +148,16 @@ export function AuthenticatedWorkspace({
   activeTabRef.current = activeTab;
   activeThreadIdRef.current = activeThreadId;
   serverThreadsRef.current = serverThreads;
+
+  useEffect(() => {
+    const urls = createdObjectUrlsRef.current;
+    return () => {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
+      urls.clear();
+    };
+  }, []);
 
   const hydrateRemoteMessage = useCallback(
     async (
@@ -177,11 +187,14 @@ export function AuthenticatedWorkspace({
           if (plainBytes) {
             const mime =
               dto.mediaMimeType || (dto.messageType === 'AUDIO' ? 'audio/mp4' : 'image/jpeg');
-            const dataUrl = `data:${mime};base64,${bytesToBase64(plainBytes)}`;
+            const objectUrl = URL.createObjectURL(
+              new Blob([plainBytes.buffer as ArrayBuffer], { type: mime })
+            );
+            createdObjectUrlsRef.current.add(objectUrl);
             if (dto.messageType === 'IMAGE') {
-              imageUrl = dataUrl;
+              imageUrl = objectUrl;
             } else {
-              audioUrl = dataUrl;
+              audioUrl = objectUrl;
             }
           }
         } catch {

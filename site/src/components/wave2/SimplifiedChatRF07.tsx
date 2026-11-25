@@ -16,7 +16,47 @@ interface SimplifiedChatRF07Props {
 }
 
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_CHAT_IMAGE_DIMENSION = 1600;
 const MAX_AUDIO_RECORDING_SECONDS = 600;
+
+function stripImageExifViaCanvas(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const tempUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        let { naturalWidth: width, naturalHeight: height } = img;
+        if (width > MAX_CHAT_IMAGE_DIMENSION || height > MAX_CHAT_IMAGE_DIMENSION) {
+          const ratio = Math.min(
+            MAX_CHAT_IMAGE_DIMENSION / width,
+            MAX_CHAT_IMAGE_DIMENSION / height
+          );
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas indisponível'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch (err) {
+        reject(err);
+      } finally {
+        URL.revokeObjectURL(tempUrl);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(tempUrl);
+      reject(new Error('Falha ao carregar imagem'));
+    };
+    img.src = tempUrl;
+  });
+}
 const AUDIO_MIME_CANDIDATES = [
   'audio/mp4',
   'audio/webm;codecs=opus',
@@ -239,19 +279,18 @@ export function SimplifiedChatRF07({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onerror = () => {
-      if (isMountedRef.current) {
-        setMediaNotice('Não foi possível ler a foto escolhida. Tente selecionar outra imagem.');
-      }
-    };
-    reader.onload = () => {
-      if (typeof reader.result === 'string' && isMountedRef.current) {
-        setPendingImageForContact(targetContactId, { url: reader.result, name: file.name });
-        setMediaNotice(null);
-      }
-    };
-    reader.readAsDataURL(file);
+    void stripImageExifViaCanvas(file)
+      .then((cleanDataUrl) => {
+        if (isMountedRef.current) {
+          setPendingImageForContact(targetContactId, { url: cleanDataUrl, name: file.name });
+          setMediaNotice(null);
+        }
+      })
+      .catch(() => {
+        if (isMountedRef.current) {
+          setMediaNotice('Não foi possível preparar a foto escolhida. Tente selecionar outra imagem.');
+        }
+      });
   }
 
   async function handleStartRecording() {
