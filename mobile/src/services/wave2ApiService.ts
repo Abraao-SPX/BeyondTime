@@ -488,11 +488,11 @@ export function mapDiscoveryDtoToRankedProfile(dto: DiscoveryProfileDto): Ranked
         : `Sergipe • ${shortCity}`);
 
   const hobbies =
-    dto.hobbySlugs && dto.hobbySlugs.length > 0 ? dto.hobbySlugs : dto.hobbies || [];
+    dto.hobbies && dto.hobbies.length > 0 ? dto.hobbies : dto.hobbySlugs || [];
   const sharedHobbyIds =
-    dto.sharedHobbySlugs && dto.sharedHobbySlugs.length > 0
-      ? dto.sharedHobbySlugs
-      : dto.sharedHobbies || [];
+    dto.sharedHobbies && dto.sharedHobbies.length > 0
+      ? dto.sharedHobbies
+      : dto.sharedHobbySlugs || [];
 
   return {
     id: dto.userId || dto.id,

@@ -31,7 +31,7 @@ interface ChatThreadScreenProps {
     conversationId: string,
     text: string,
     options?: SendMessageOptions
-  ) => void;
+  ) => Promise<boolean> | boolean | void;
   onBlockContact?: (profileId: string, fullName: string) => void;
 }
 
@@ -71,6 +71,7 @@ export function ChatThreadScreen({
 }: ChatThreadScreenProps) {
   const { palette, isDark, fs } = useTheme();
   const [draft, setDraft] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
 
@@ -96,6 +97,10 @@ export function ChatThreadScreen({
   }, [onBackToList]);
 
   useEffect(() => {
+    setImgError(false);
+  }, [conversation.id, conversation.photoUrl]);
+
+  useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [conversation.messages.length]);
 
@@ -107,11 +112,18 @@ export function ChatThreadScreen({
     return () => clearInterval(timer);
   }, [isRecording]);
 
-  const handleSendText = () => {
+  const handleSendText = async () => {
     const clean = draft.trim();
-    if (!clean) return;
-    onSendMessage(conversation.id, clean, { kind: 'text' });
-    setDraft('');
+    if (!clean || isSending) return;
+    setIsSending(true);
+    try {
+      const result = await onSendMessage(conversation.id, clean, { kind: 'text' });
+      if (result !== false) {
+        setDraft('');
+      }
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleStartRecording = () => {

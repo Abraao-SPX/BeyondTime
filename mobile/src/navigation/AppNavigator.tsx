@@ -110,9 +110,20 @@ export function AppNavigator() {
   const stompRef = useRef<ChatStompConnection | null>(null);
   const activeConversationIdRef = useRef<string | null>(activeConversationId);
   const conversationsRef = useRef<ChatConversation[]>(conversations);
+  const activeSessionRef = useRef<AuthSession | null>(authSession);
 
   activeConversationIdRef.current = activeConversationId;
   conversationsRef.current = conversations;
+  activeSessionRef.current = authSession;
+
+  const isSessionCurrent = useCallback((session: AuthSession): boolean => {
+    const current = activeSessionRef.current;
+    return (
+      current !== null &&
+      current.userId === session.userId &&
+      current.accessToken === session.accessToken
+    );
+  }, []);
 
   const blockedProfileIds = useMemo(
     () => blockedContacts.map((b) => b.id),
@@ -133,9 +144,11 @@ export function AppNavigator() {
     setIsLoadingWave2(true);
     try {
       const dtos = await fetchDiscoveryProfiles(session, { limit: 30 });
+      if (!isSessionCurrent(session)) return;
       setRemoteDiscoveryProfiles(dtos.map(mapDiscoveryDtoToRankedProfile));
       setWave2Error(null);
     } catch (error) {
+      if (!isSessionCurrent(session)) return;
       setWave2Error(
         getFriendlyApiError(
           error,
@@ -143,16 +156,20 @@ export function AppNavigator() {
         )
       );
     } finally {
-      setIsLoadingWave2(false);
+      if (isSessionCurrent(session)) {
+        setIsLoadingWave2(false);
+      }
     }
-  }, []);
+  }, [isSessionCurrent]);
 
   const reloadConversations = useCallback(async (session: AuthSession) => {
     try {
       const convDtos = await fetchChatConversations(session);
+      if (!isSessionCurrent(session)) return;
       const mapped = await Promise.all(
         convDtos.map((dto) => mapConversationDtoToChatConversation(dto, session.userId))
       );
+      if (!isSessionCurrent(session)) return;
       setConversations((prev) => {
         const prevById = new Map(prev.map((c) => [c.id, c]));
         return mapped.map((nextConv) => {
@@ -167,6 +184,7 @@ export function AppNavigator() {
         });
       });
     } catch (error) {
+      if (!isSessionCurrent(session)) return;
       setWave2Error(
         getFriendlyApiError(
           error,
@@ -174,7 +192,7 @@ export function AppNavigator() {
         )
       );
     }
-  }, []);
+  }, [isSessionCurrent]);
 
   const appendMessageDeduplicated = useCallback(
     (conversationId: string, msg: ChatMessage, markUnreadIfInactive: boolean) => {
@@ -341,6 +359,7 @@ export function AppNavigator() {
 
   const handleResetAndExit = () => {
     const currentSession = authSession;
+    activeSessionRef.current = null;
     if (stompRef.current) {
       stompRef.current.disconnect();
       stompRef.current = null;
@@ -366,17 +385,20 @@ export function AppNavigator() {
       setWave2Error('Faça login novamente para curtir perfis.');
       return { matched: false, conversationId: null };
     }
+    const session = authSession;
     try {
-      const response = await sendMatchInteraction(authSession, 'like', profile.id);
+      const response = await sendMatchInteraction(session, 'like', profile.id);
+      if (!isSessionCurrent(session)) return { matched: false, conversationId: null };
       setWave2Error(null);
       setRemoteDiscoveryProfiles((prev) => prev.filter((p) => p.id !== profile.id));
 
       if (response.matched) {
-        await reloadConversations(authSession);
+        await reloadConversations(session);
         return { matched: true, conversationId: response.conversationId };
       }
       return { matched: false, conversationId: null };
     } catch (error) {
+      if (!isSessionCurrent(session)) return { matched: false, conversationId: null };
       setWave2Error(
         getFriendlyApiError(
           error,
@@ -392,11 +414,14 @@ export function AppNavigator() {
       setWave2Error('Faça login novamente para avançar nos perfis.');
       return;
     }
+    const session = authSession;
     try {
-      await sendMatchInteraction(authSession, 'pass', profile.id);
+      await sendMatchInteraction(session, 'pass', profile.id);
+      if (!isSessionCurrent(session)) return;
       setWave2Error(null);
       setRemoteDiscoveryProfiles((prev) => prev.filter((p) => p.id !== profile.id));
     } catch (error) {
+      if (!isSessionCurrent(session)) return;
       setWave2Error(
         getFriendlyApiError(
           error,
@@ -419,9 +444,11 @@ export function AppNavigator() {
       void (async () => {
         try {
           const dtos = await fetchConversationMessages(session, conversationId, 100);
+          if (!isSessionCurrent(session)) return;
           const decoded = await Promise.all(
             dtos.map((dto) => mapMessageDtoToChatMessage(dto, session.userId))
           );
+          if (!isSessionCurrent(session)) return;
           setConversations((prev) =>
             prev.map((conv) => {
               if (conv.id !== conversationId) return conv;
@@ -437,6 +464,7 @@ export function AppNavigator() {
           );
           setWave2Error(null);
         } catch (error) {
+          if (!isSessionCurrent(session)) return;
           setWave2Error(
             getFriendlyApiError(
               error,
@@ -445,13 +473,14 @@ export function AppNavigator() {
           );
         }
 
+        if (!isSessionCurrent(session)) return;
         const sentViaStomp = stompRef.current?.sendReadReceipt(conversationId);
         if (!sentViaStomp) {
           void markConversationReadRest(session, conversationId).catch(() => undefined);
         }
       })();
     },
-    [authSession]
+    [authSession, isSessionCurrent]
   );
 
   const handleMutualConnection = (
@@ -467,10 +496,12 @@ export function AppNavigator() {
         let targetConvId = conversationId ?? null;
         if (!targetConvId) {
           const convDto = await openOrCreateConversation(session, profile.id);
+          if (!isSessionCurrent(session)) return;
           const mappedConv = await mapConversationDtoToChatConversation(
             convDto,
             session.userId
           );
+          if (!isSessionCurrent(session)) return;
           targetConvId = mappedConv.id;
           setConversations((prev) =>
             prev.some((c) => c.id === mappedConv.id) ? prev : [mappedConv, ...prev]
@@ -479,11 +510,13 @@ export function AppNavigator() {
           await reloadConversations(session);
         }
 
+        if (!isSessionCurrent(session)) return;
         if (targetConvId) {
           setActiveTab('conversations');
           handleOpenConversation(targetConvId);
         }
       } catch (error) {
+        if (!isSessionCurrent(session)) return;
         setWave2Error(
           getFriendlyApiError(
             error,
@@ -494,43 +527,48 @@ export function AppNavigator() {
     })();
   };
 
-  const handleSendMessage = (
+  const handleSendMessage = async (
     conversationId: string,
     text: string,
     options?: SendMessageOptions
-  ) => {
+  ): Promise<boolean> => {
     if (!authSession) {
       setWave2Error('Sua sessão expirou. Entre novamente para enviar mensagens.');
-      return;
+      return false;
     }
     const session = authSession;
 
-    void (async () => {
-      try {
-        const rawPayload =
-          options?.kind === 'photo' && options.photoUrl
-            ? JSON.stringify({ caption: text, photoUrl: options.photoUrl })
-            : text;
+    try {
+      const rawPayload =
+        options?.kind === 'photo' && options.photoUrl
+          ? JSON.stringify({ caption: text, photoUrl: options.photoUrl })
+          : text;
 
-        const encoded = await encodeChatPayload(rawPayload, conversationId);
-        const payload: SendEncryptedMessageDto = {
-          conversationId,
-          ciphertext: encoded.ciphertext,
-          iv: encoded.iv,
-          messageType: mapKindToMessageType(options?.kind),
-          mediaDurationSeconds:
-            options?.kind === 'audio' ? options.audioDurationSec ?? 1 : null,
-          senderKeyVersion: encoded.senderKeyVersion,
-        };
+      const encoded = await encodeChatPayload(rawPayload, conversationId);
+      if (!isSessionCurrent(session)) return false;
 
-        const sentViaStomp = stompRef.current?.sendMessage(payload);
-        if (!sentViaStomp) {
-          const savedDto = await sendEncryptedMessageRest(session, payload);
-          const mappedMsg = await mapMessageDtoToChatMessage(savedDto, session.userId);
-          appendMessageDeduplicated(conversationId, mappedMsg, false);
-        }
-        setWave2Error(null);
-      } catch (error) {
+      const payload: SendEncryptedMessageDto = {
+        conversationId,
+        ciphertext: encoded.ciphertext,
+        iv: encoded.iv,
+        messageType: mapKindToMessageType(options?.kind),
+        mediaDurationSeconds:
+          options?.kind === 'audio' ? options.audioDurationSec ?? 1 : null,
+        senderKeyVersion: encoded.senderKeyVersion,
+      };
+
+      const sentViaStomp = stompRef.current?.sendMessage(payload);
+      if (!sentViaStomp) {
+        const savedDto = await sendEncryptedMessageRest(session, payload);
+        if (!isSessionCurrent(session)) return false;
+        const mappedMsg = await mapMessageDtoToChatMessage(savedDto, session.userId);
+        if (!isSessionCurrent(session)) return false;
+        appendMessageDeduplicated(conversationId, mappedMsg, false);
+      }
+      setWave2Error(null);
+      return true;
+    } catch (error) {
+      if (isSessionCurrent(session)) {
         setWave2Error(
           getFriendlyApiError(
             error,
@@ -538,7 +576,8 @@ export function AppNavigator() {
           )
         );
       }
-    })();
+      return false;
+    }
   };
 
   const handleBlockContact = (profileId: string, _fullName: string, reason?: string) => {
@@ -551,6 +590,7 @@ export function AppNavigator() {
     void (async () => {
       try {
         const blockedDto = await createBlockContact(session, profileId, reason);
+        if (!isSessionCurrent(session)) return;
         const mappedBlock = mapBlockDtoToBlockedContact(blockedDto);
 
         setBlockedContacts((prev) =>
@@ -561,6 +601,7 @@ export function AppNavigator() {
         setActiveConversationId(null);
         setWave2Error(null);
       } catch (error) {
+        if (!isSessionCurrent(session)) return;
         setWave2Error(
           getFriendlyApiError(
             error,
@@ -581,10 +622,12 @@ export function AppNavigator() {
     void (async () => {
       try {
         await deleteBlockContact(session, profileId);
+        if (!isSessionCurrent(session)) return;
         setBlockedContacts((prev) => prev.filter((b) => b.id !== profileId));
         setWave2Error(null);
         await reloadDiscovery(session);
       } catch (error) {
+        if (!isSessionCurrent(session)) return;
         setWave2Error(
           getFriendlyApiError(
             error,
