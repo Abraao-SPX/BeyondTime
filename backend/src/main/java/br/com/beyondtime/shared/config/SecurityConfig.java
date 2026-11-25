@@ -69,6 +69,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/").permitAll()
+                        .requestMatchers("/ws-chat", "/ws-chat/**").permitAll()
                         .requestMatchers("/api/v1/locations/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/hobbies", "/api/v1/hobbies/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/profiles/avatars/**").permitAll()
