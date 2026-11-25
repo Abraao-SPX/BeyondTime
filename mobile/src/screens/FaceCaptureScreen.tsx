@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, Text, View, Dimensions, ActivityIndicator, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, Dimensions, ActivityIndicator, TouchableOpacity, BackHandler } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system';
 import Svg, { Defs, Rect, Mask, Ellipse } from 'react-native-svg';
 
 const { width, height } = Dimensions.get('window');
@@ -11,14 +12,7 @@ const MASK_HEIGHT = MASK_WIDTH * 1.35;
 const MASK_X = width / 2;
 const MASK_Y = height / 2.5;
 
-// Servidores disponíveis
-export const PRESET_ENDPOINTS = [
-  { label: '🚀 Cloudflare HTTPS (Recomendado)', url: 'https://coated-meals-retained-ward.trycloudflare.com' },
-  { label: '🌐 VPS Oracle Porta 80', url: 'http://132.226.242.158' },
-  { label: '🔌 VPS Oracle Porta 8000', url: 'http://132.226.242.158:8000' },
-];
-
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || PRESET_ENDPOINTS[0].url;
+const DEFAULT_API_URL = (process.env.EXPO_PUBLIC_API_URL || '').trim();
 
 type VerifyResponse = {
   status: string;
@@ -179,11 +173,29 @@ export default function FaceCaptureScreen({
     }
   };
 
+  useEffect(() => {
+    if (!onCancel) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onCancel();
+      return true;
+    });
+    return () => sub.remove();
+  }, [onCancel]);
+
   const sendForVerification = async (refUri: string, selfieUri: string) => {
     setStage('analyzing');
     setErrorMessage(null);
 
     const targetUrl = serverUrl.trim().replace(/\/$/, '');
+    if (!targetUrl) {
+      setErrorMessage(
+        'O serviço de verificação facial ainda não está ativo neste aplicativo. Você pode continuar e verificar depois.'
+      );
+      setStage('result');
+      void FileSystem.deleteAsync(refUri, { idempotent: true }).catch(() => undefined);
+      void FileSystem.deleteAsync(selfieUri, { idempotent: true }).catch(() => undefined);
+      return;
+    }
 
     try {
       const formData = new FormData();
@@ -192,26 +204,23 @@ export default function FaceCaptureScreen({
         uri: refUri,
         name: 'ref.jpg',
         type: 'image/jpeg',
-      } as any);
+      } as unknown as Blob);
 
       formData.append('selfie_image', {
         uri: selfieUri,
         name: 'selfie.jpg',
         type: 'image/jpeg',
-      } as any);
+      } as unknown as Blob);
 
       formData.append('same_person_expected', 'true');
 
       const response = await fetch(`${targetUrl}/api/verify`, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-        },
       });
 
       if (!response.ok) {
-        throw new Error(`Servidor respondeu com código HTTP ${response.status}`);
+        throw new Error('Não foi possível concluir a verificação facial agora. Tente novamente.');
       }
 
       const data: VerifyResponse = await response.json();
@@ -220,40 +229,15 @@ export default function FaceCaptureScreen({
       if (data.status === 'VERIFIED' && onVerified) {
         onVerified(selfieUri, data);
       }
-    } catch (err: any) {
-      console.error(err);
+    } catch {
       setErrorMessage(
-        `${err.message || 'Falha de comunicação com o servidor de IA.'}\n(Servidor: ${targetUrl})\n\n💡 Dica: Toque no ícone ⚙️ no topo para alternar entre Cloudflare HTTPS e IP da VPS.`
+        'Não foi possível concluir a verificação facial agora. Verifique sua conexão e tente novamente.'
       );
       setStage('result');
-    }
-  };
-
-  const testServerConnection = async (targetUrl?: string) => {
-    const url = (targetUrl || serverUrl).trim().replace(/\/$/, '');
-    setTestingEndpoint(true);
-    setTestResult('Testando conexão com ' + url + '...');
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(`${url}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-        },
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        setTestResult(`🟢 Conectado com Sucesso!\n(HTTP ${res.status}: ${JSON.stringify(data)})`);
-      } else {
-        setTestResult(`🔴 Servidor respondeu com código HTTP ${res.status}`);
-      }
-    } catch (err: any) {
-      setTestResult(`🔴 Falha: ${err.message || 'Sem resposta (timeout ou bloqueio de rede)'}`);
     } finally {
-      setTestingEndpoint(false);
+      // Remove selfies temporárias do disco após envio/erro (LGPD — AUD-012)
+      void FileSystem.deleteAsync(refUri, { idempotent: true }).catch(() => undefined);
+      void FileSystem.deleteAsync(selfieUri, { idempotent: true }).catch(() => undefined);
     }
   };
 
@@ -379,9 +363,9 @@ export default function FaceCaptureScreen({
         {stage === 'analyzing' && (
           <View style={styles.analyzingCard}>
             <ActivityIndicator size="large" color="#00E676" />
-            <Text style={styles.analyzingTitle}>Analisando Biometria & Anti-Spoofing</Text>
+            <Text style={styles.analyzingTitle}>Verificando sua foto</Text>
             <Text style={styles.analyzingDesc}>
-              Processando rede neural MiniFASNet e cálculo vetorial SFace...
+              Aguarde um momento enquanto confirmamos sua identidade com segurança...
             </Text>
           </View>
         )}
@@ -391,20 +375,11 @@ export default function FaceCaptureScreen({
           <View style={styles.finalCard}>
             {errorMessage ? (
               <>
-                <Text style={styles.finalIcon}>⚠️</Text>
-                <Text style={styles.titleError}>Erro na Verificação</Text>
+                <Text style={styles.titleError}>Não foi possível verificar agora</Text>
                 <Text style={styles.descText}>{errorMessage}</Text>
               </>
             ) : apiResult ? (
               <>
-                <Text style={styles.finalIcon}>
-                  {apiResult.status === 'VERIFIED'
-                    ? '🛡️✅'
-                    : apiResult.status === 'LIVENESS_FAILED'
-                    ? '🚫🤖'
-                    : '❌👤'}
-                </Text>
-
                 <Text
                   style={
                     apiResult.status === 'VERIFIED'
@@ -413,63 +388,25 @@ export default function FaceCaptureScreen({
                   }
                 >
                   {apiResult.status === 'VERIFIED'
-                    ? 'Aprovado: Pessoa Real & Mesma Face!'
+                    ? 'Verificação concluída com sucesso!'
                     : apiResult.status === 'LIVENESS_FAILED'
-                    ? 'Reprovado: Ataque Anti-Spoofing Detectado!'
-                    : 'Reprovado: Rostos Diferentes!'}
+                    ? 'Não conseguimos confirmar a foto ao vivo. Tente em um lugar bem iluminado.'
+                    : 'Não conseguimos confirmar o rosto. Tente novamente olhando para a câmera.'}
                 </Text>
-
-                {/* Tabela de Métricas do Backend */}
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Anti-Spoofing (MiniFASNet):</Text>
-                  <Text
-                    style={[
-                      styles.metricValue,
-                      {
-                        color:
-                          apiResult.liveness?.passed
-                            ? '#00E676'
-                            : '#FF5252',
-                      },
-                    ]}
-                  >
-                    {apiResult.liveness?.available
-                      ? `${( (apiResult.liveness?.score ?? 0) * 100).toFixed(1)}% (${apiResult.liveness?.passed ? 'VIVO' : 'SPOOF'})`
-                      : 'Não disponível'}
-                  </Text>
-                </View>
-
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Similaridade 1:1 (SFace):</Text>
-                  <Text style={styles.metricValue}>
-                    {apiResult.similarity_score !== undefined
-                      ? `${(apiResult.similarity_score * 100).toFixed(1)}%`
-                      : 'N/A'}
-                  </Text>
-                </View>
-
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Rosto Detectado:</Text>
-                  <Text style={styles.metricValue}>
-                    {apiResult.face_detected ? 'Sim (YuNet)' : 'Não'}
-                  </Text>
-                </View>
-
-                <View style={styles.metricRow}>
-                  <Text style={styles.metricLabel}>Status Geral:</Text>
-                  <Text style={[styles.metricValue, { fontWeight: '900' }]}>
-                    {apiResult.status}
-                  </Text>
-                </View>
               </>
             ) : null}
 
-            <TouchableOpacity style={styles.btnRestart} onPress={restart}>
-              <Text style={styles.btnRestartText}>🔄 Realizar Novo Teste</Text>
+            <TouchableOpacity
+              style={[styles.btnRestart, { minHeight: 48 }]}
+              onPress={restart}
+              accessibilityRole="button"
+              accessibilityLabel="Tentar verificação novamente"
+            >
+              <Text style={styles.btnRestartText}>Tentar novamente</Text>
             </TouchableOpacity>
             {onCancel ? (
               <TouchableOpacity
-                style={[styles.btnRestart, { marginTop: 10, backgroundColor: '#6B1D2F', borderColor: '#8B263E' }]}
+                style={[styles.btnRestart, { minHeight: 48, marginTop: 10, backgroundColor: '#6B1D2F', borderColor: '#8B263E' }]}
                 onPress={onCancel}
                 accessibilityRole="button"
                 accessibilityLabel="Voltar para tela anterior"
@@ -496,92 +433,6 @@ export default function FaceCaptureScreen({
           <Text style={[styles.btnText, { fontSize: 15 }]}>← Voltar</Text>
         </TouchableOpacity>
       ) : null}
-
-      {/* Botão Flutuante de Configurações do Servidor */}
-      <TouchableOpacity
-        style={[styles.settingsBtnFloating, { minWidth: 48, minHeight: 48, width: 48, height: 48, borderRadius: 24 }]}
-        onPress={() => {
-          setTestResult(null);
-          setShowSettings(true);
-        }}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel="Configurar servidor de verificação"
-      >
-        <Text style={styles.settingsBtnText}>⚙️</Text>
-      </TouchableOpacity>
-
-      {/* Modal de Configuração do Servidor */}
-      <Modal
-        visible={showSettings}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowSettings(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>⚙️ Configurar Servidor da IA</Text>
-            <Text style={styles.modalSubtitle}>
-              Selecione o endpoint ou digite a URL da VPS:
-            </Text>
-
-            <TextInput
-              style={styles.inputUrl}
-              value={serverUrl}
-              onChangeText={setServerUrl}
-              placeholder="https://..."
-              placeholderTextColor="#777"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={styles.presetHeading}>Opções Rápidas:</Text>
-            {PRESET_ENDPOINTS.map((preset, idx) => {
-              const isSelected = serverUrl === preset.url;
-              return (
-                <TouchableOpacity
-                  key={idx}
-                  style={[styles.presetCard, isSelected && styles.presetCardActive]}
-                  onPress={() => {
-                    setServerUrl(preset.url);
-                    testServerConnection(preset.url);
-                  }}
-                >
-                  <Text style={[styles.presetName, isSelected && styles.presetNameActive]}>
-                    {preset.label}
-                  </Text>
-                  <Text style={styles.presetAddress}>{preset.url}</Text>
-                </TouchableOpacity>
-              );
-            })}
-
-            <TouchableOpacity
-              style={styles.testConnectionBtn}
-              onPress={() => testServerConnection()}
-              disabled={testingEndpoint}
-            >
-              {testingEndpoint ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.testConnectionText}>🧪 Testar Conexão Agora</Text>
-              )}
-            </TouchableOpacity>
-
-            {testResult && (
-              <View style={styles.testResultCard}>
-                <Text style={styles.testResultFeedback}>{testResult}</Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={styles.closeModalBtn}
-              onPress={() => setShowSettings(false)}
-            >
-              <Text style={styles.closeModalText}>Salvar e Fechar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
