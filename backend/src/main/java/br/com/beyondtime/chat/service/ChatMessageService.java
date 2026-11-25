@@ -15,6 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
@@ -96,17 +98,19 @@ public class ChatMessageService {
 
         EncryptedMessageResponse response = EncryptedMessageResponse.from(saved);
 
-        // Entrega em tempo real (< 50ms) para o destinatário e eco para outros dispositivos do remetente
-        messagingTemplate.convertAndSendToUser(
-                participants.otherUserId().toString(),
-                "/queue/messages",
-                response
-        );
-        messagingTemplate.convertAndSendToUser(
-                senderId.toString(),
-                "/queue/messages",
-                response
-        );
+        // Entrega em tempo real somente após commit da transação (evita mensagens fantasmas em rollback — AUD-040)
+        runAfterCommit(() -> {
+            messagingTemplate.convertAndSendToUser(
+                    participants.otherUserId().toString(),
+                    "/queue/messages",
+                    response
+            );
+            messagingTemplate.convertAndSendToUser(
+                    senderId.toString(),
+                    "/queue/messages",
+                    response
+            );
+        });
 
         return response;
     }
@@ -189,12 +193,25 @@ public class ChatMessageService {
 
         ReadReceiptEvent event = new ReadReceiptEvent(conversationId, readerUserId, updated, now);
         if (updated > 0) {
-            messagingTemplate.convertAndSendToUser(
+            runAfterCommit(() -> messagingTemplate.convertAndSendToUser(
                     participants.otherUserId().toString(),
                     "/queue/read-receipts",
                     event
-            );
+            ));
         }
         return event;
+    }
+
+    private void runAfterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }
