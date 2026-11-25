@@ -44,6 +44,7 @@ export interface OutgoingMessagePayload {
 }
 
 export interface ChatThread {
+  conversationId?: string;
   contactId: string;
   contactName: string;
   contactAge: number;
@@ -53,6 +54,8 @@ export interface ChatThread {
   affinityPercent: number;
   sharedHobbies: string[];
   verifiedIdentity: boolean;
+  contactPublicKeyJwk?: string | null;
+  contactHasChatKey?: boolean;
   unreadCount: number;
   messages: ChatMessage[];
 }
