@@ -56,9 +56,10 @@ public class ChatConversationController {
     public ResponseEntity<List<EncryptedMessageResponse>> listEncryptedMessages(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
             @PathVariable UUID conversationId,
-            @RequestParam(defaultValue = "100") int limit) {
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(required = false) String before) {
         AuthenticatedUser user = requireAuth(currentUser);
-        return ResponseEntity.ok(messageService.getConversationMessages(conversationId, user.userId(), limit));
+        return ResponseEntity.ok(messageService.getConversationMessages(conversationId, user.userId(), limit, before));
     }
 
     @PostMapping("/{conversationId}/messages")

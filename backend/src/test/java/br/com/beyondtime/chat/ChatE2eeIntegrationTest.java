@@ -4,10 +4,15 @@ import br.com.beyondtime.auth.domain.User;
 import br.com.beyondtime.auth.domain.UserStatus;
 import br.com.beyondtime.auth.repository.UserRepository;
 import br.com.beyondtime.chat.domain.ChatMatch;
+import br.com.beyondtime.chat.domain.ChatMessageType;
 import br.com.beyondtime.chat.domain.ChatUserBlock;
+import br.com.beyondtime.chat.domain.Conversation;
+import br.com.beyondtime.chat.domain.EncryptedMessage;
 import br.com.beyondtime.chat.domain.UserChatKey;
 import br.com.beyondtime.chat.repository.ChatMatchRepository;
 import br.com.beyondtime.chat.repository.ChatUserBlockRepository;
+import br.com.beyondtime.chat.repository.ConversationRepository;
+import br.com.beyondtime.chat.repository.EncryptedMessageRepository;
 import br.com.beyondtime.chat.repository.UserChatKeyRepository;
 import br.com.beyondtime.shared.security.JwtService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -32,7 +38,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +72,12 @@ class ChatE2eeIntegrationTest {
 
     @Autowired
     private ChatUserBlockRepository chatUserBlockRepository;
+
+    @Autowired
+    private ConversationRepository conversationRepository;
+
+    @Autowired
+    private EncryptedMessageRepository encryptedMessageRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -388,5 +402,64 @@ class ChatE2eeIntegrationTest {
                         .header("Authorization", tokenA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.conversationId").exists());
+    }
+
+    @Test
+    void devePaginarMensagensMaisRecentesEmOrdemAscendenteECursorBeforeSemSobreposicao() throws Exception {
+        ChatMatch match = chatMatchRepository.save(
+                new ChatMatch(userA.getId(), userB.getId(), BigDecimal.valueOf(92.00), (short) 3)
+        );
+        Conversation conv = conversationRepository.save(new Conversation(match.getId()));
+
+        OffsetDateTime baseTime = OffsetDateTime.now().minusHours(3);
+        for (int i = 1; i <= 150; i++) {
+            EncryptedMessage msg = new EncryptedMessage(
+                    conv.getId(),
+                    i % 2 == 0 ? userA.getId() : userB.getId(),
+                    i % 2 == 0 ? userB.getId() : userA.getId(),
+                    "cipher-" + i,
+                    "aXZfMTJfYnl0ZXNfZ2Nt",
+                    ChatMessageType.TEXT,
+                    null,
+                    null,
+                    null,
+                    null,
+                    1
+            );
+            // Mensagens 49, 50 e 51 compartilham o mesmo sentAt para testar desempate estável por (sent_at, id)
+            OffsetDateTime ts = (i >= 49 && i <= 51) ? baseTime.plusSeconds(50) : baseTime.plusSeconds(i);
+            ReflectionTestUtils.setField(msg, "sentAt", ts);
+            encryptedMessageRepository.save(msg);
+        }
+
+        // Página 1: limit=100 -> retorna as 100 mais recentes em ordem cronológica ascendente
+        MvcResult page1 = mockMvc.perform(get("/api/v1/chat/conversations/" + conv.getId() + "/messages")
+                        .param("limit", "100")
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode arr1 = objectMapper.readTree(page1.getResponse().getContentAsString());
+        assertThat(arr1.size()).isEqualTo(100);
+        assertThat(arr1.get(99).get("ciphertext").asText()).isEqualTo("cipher-150");
+
+        String oldestIdPage1 = arr1.get(0).get("id").asText();
+
+        // Página 2: before=oldestIdPage1&limit=100 -> retorna as 50 mais antigas sem sobreposição nem omissão
+        MvcResult page2 = mockMvc.perform(get("/api/v1/chat/conversations/" + conv.getId() + "/messages")
+                        .param("limit", "100")
+                        .param("before", oldestIdPage1)
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode arr2 = objectMapper.readTree(page2.getResponse().getContentAsString());
+        assertThat(arr2.size()).isEqualTo(50);
+        assertThat(arr2.get(0).get("ciphertext").asText()).isEqualTo("cipher-1");
+
+        Set<String> allIds = new HashSet<>();
+        arr1.forEach(n -> allIds.add(n.get("id").asText()));
+        arr2.forEach(n -> allIds.add(n.get("id").asText()));
+        assertThat(allIds).hasSize(150);
     }
 }

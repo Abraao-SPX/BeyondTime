@@ -17,6 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -103,13 +106,70 @@ public class ChatMessageService {
 
     @Transactional(readOnly = true)
     public List<EncryptedMessageResponse> getConversationMessages(UUID conversationId, UUID currentUserId, int limit) {
+        return getConversationMessages(conversationId, currentUserId, limit, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<EncryptedMessageResponse> getConversationMessages(
+            UUID conversationId,
+            UUID currentUserId,
+            int limit,
+            String before) {
         conversationService.validateParticipationAndAccess(conversationId, currentUserId);
         int safeLimit = Math.min(Math.max(limit <= 0 ? DEFAULT_PAGE_LIMIT : limit, 1), MAX_PAGE_LIMIT);
-        return encryptedMessageRepository
-                .findByConversationIdOrderBySentAtAsc(conversationId, PageRequest.of(0, safeLimit))
-                .stream()
+        PageRequest page = PageRequest.of(0, safeLimit);
+
+        List<EncryptedMessage> descBatch;
+        if (before == null || before.isBlank()) {
+            descBatch = encryptedMessageRepository.findByConversationIdOrderBySentAtDescIdDesc(conversationId, page);
+        } else {
+            String trimmed = before.trim();
+            UUID cursorMessageId = tryParseUuid(trimmed);
+            if (cursorMessageId != null) {
+                EncryptedMessage anchor = encryptedMessageRepository.findById(cursorMessageId)
+                        .filter(m -> m.getConversationId().equals(conversationId))
+                        .orElseThrow(() -> new BusinessException(
+                                "INVALID_PAGINATION_CURSOR",
+                                "Marcador de paginação inválido para esta conversa.",
+                                HttpStatus.BAD_REQUEST
+                        ));
+                descBatch = encryptedMessageRepository.findBeforeCursor(
+                        conversationId, anchor.getSentAt(), anchor.getId(), page
+                );
+            } else {
+                OffsetDateTime beforeInstant = tryParseOffsetDateTime(trimmed);
+                if (beforeInstant == null) {
+                    throw new BusinessException(
+                            "INVALID_PAGINATION_CURSOR",
+                            "Parâmetro 'before' deve ser um UUID de mensagem ou data/hora ISO-8601 válida.",
+                            HttpStatus.BAD_REQUEST
+                    );
+                }
+                descBatch = encryptedMessageRepository.findBeforeSentAt(conversationId, beforeInstant, page);
+            }
+        }
+
+        List<EncryptedMessage> chronological = new ArrayList<>(descBatch);
+        Collections.reverse(chronological);
+        return chronological.stream()
                 .map(EncryptedMessageResponse::from)
                 .toList();
+    }
+
+    private UUID tryParseUuid(String raw) {
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private OffsetDateTime tryParseOffsetDateTime(String raw) {
+        try {
+            return OffsetDateTime.parse(raw);
+        } catch (DateTimeParseException ex) {
+            return null;
+        }
     }
 
     @Transactional
