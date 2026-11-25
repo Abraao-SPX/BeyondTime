@@ -31,13 +31,20 @@ export function SimplifiedChatRF07({
   onRequestBlock,
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
-  const [draft, setDraft] = useState('');
+  const [draftByContact, setDraftByContact] = useState<Record<string, string>>({});
   const [mobileViewingChat, setMobileViewingChat] = useState(Boolean(activeThreadId));
-  const [pendingImage, setPendingImage] = useState<{ url: string; name: string } | null>(null);
+  const [pendingImageByContact, setPendingImageByContact] = useState<
+    Record<string, { url: string; name: string } | null>
+  >({});
+  const [failedAudioByContact, setFailedAudioByContact] = useState<
+    Record<string, { url: string; durationLabel: string } | null>
+  >({});
+  const [isSending, setIsSending] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [mediaNotice, setMediaNotice] = useState<string | null>(null);
 
+  const isMountedRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -49,6 +56,39 @@ export function SimplifiedChatRF07({
 
   const activeThread =
     threads.find((item) => item.contactId === activeThreadId) ?? threads[0] ?? null;
+  const activeContactId = activeThread?.contactId ?? null;
+  const draft = activeContactId ? (draftByContact[activeContactId] ?? '') : '';
+  const pendingImage = activeContactId ? (pendingImageByContact[activeContactId] ?? null) : null;
+  const failedAudio = activeContactId ? (failedAudioByContact[activeContactId] ?? null) : null;
+
+  function setDraftForContact(contactId: string, value: string) {
+    setDraftByContact((prev) => ({ ...prev, [contactId]: value }));
+  }
+
+  function setPendingImageForContact(
+    contactId: string,
+    value: { url: string; name: string } | null
+  ) {
+    setPendingImageByContact((prev) => ({ ...prev, [contactId]: value }));
+  }
+
+  function setFailedAudioForContact(
+    contactId: string,
+    value: { url: string; durationLabel: string } | null
+  ) {
+    setFailedAudioByContact((prev) => ({ ...prev, [contactId]: value }));
+  }
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (recordingTimerRef.current !== null) {
+        window.clearInterval(recordingTimerRef.current);
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
 
   useEffect(() => {
     if (activeThreadId) {
@@ -60,15 +100,6 @@ export function SimplifiedChatRF07({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [activeThread?.contactId, activeThread?.messages.length]);
 
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current !== null) {
-        window.clearInterval(recordingTimerRef.current);
-      }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-    };
-  }, []);
-
   function cleanupRecordingStream() {
     if (recordingTimerRef.current !== null) {
       window.clearInterval(recordingTimerRef.current);
@@ -77,8 +108,10 @@ export function SimplifiedChatRF07({
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     mediaRecorderRef.current = null;
-    setIsRecording(false);
-    setRecordingSeconds(0);
+    if (isMountedRef.current) {
+      setIsRecording(false);
+      setRecordingSeconds(0);
+    }
     recordingSecondsRef.current = 0;
   }
 
@@ -90,35 +123,79 @@ export function SimplifiedChatRF07({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeThread) return;
+    if (!activeThread || isSending) return;
+    const contactId = activeThread.contactId;
     const trimmed = draft.trim();
     if (!trimmed && !pendingImage) return;
 
-    if (pendingImage) {
-      const ok = await onSendMessage(activeThread.contactId, {
-        text: trimmed,
-        imageUrl: pendingImage.url,
-        imageName: pendingImage.name,
-      });
-      if (ok !== false) {
-        setPendingImage(null);
-        setDraft('');
+    setIsSending(true);
+    try {
+      if (pendingImage) {
+        const ok = await onSendMessage(contactId, {
+          text: trimmed,
+          imageUrl: pendingImage.url,
+          imageName: pendingImage.name,
+        });
+        if (ok !== false && isMountedRef.current) {
+          setPendingImageForContact(contactId, null);
+          setDraftForContact(contactId, '');
+          setMediaNotice(null);
+        }
+        return;
+      }
+
+      const ok = await onSendMessage(contactId, trimmed);
+      if (ok !== false && isMountedRef.current) {
+        setDraftForContact(contactId, '');
         setMediaNotice(null);
       }
-      return;
+    } finally {
+      if (isMountedRef.current) {
+        setIsSending(false);
+      }
     }
+  }
 
-    const ok = await onSendMessage(activeThread.contactId, trimmed);
-    if (ok !== false) {
-      setDraft('');
-      setMediaNotice(null);
+  async function handleIcebreakerClick(contactId: string, suggestion: string) {
+    if (isSending) return;
+    setIsSending(true);
+    try {
+      await onSendMessage(contactId, suggestion);
+    } finally {
+      if (isMountedRef.current) {
+        setIsSending(false);
+      }
+    }
+  }
+
+  async function handleRetryFailedAudio() {
+    if (!activeThread || !failedAudio || isSending) return;
+    const contactId = activeThread.contactId;
+    setIsSending(true);
+    setMediaNotice(null);
+    try {
+      const ok = await onSendMessage(contactId, {
+        text: '',
+        audioUrl: failedAudio.url,
+        audioDurationLabel: failedAudio.durationLabel,
+      });
+      if (ok !== false && isMountedRef.current) {
+        setFailedAudioForContact(contactId, null);
+      } else if (isMountedRef.current) {
+        setMediaNotice('Não foi possível reenviar o áudio agora. Tente novamente em instantes.');
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsSending(false);
+      }
     }
   }
 
   function handlePhotoPick(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
+    if (!file || !activeThread) return;
+    const targetContactId = activeThread.contactId;
 
     if (!file.type.startsWith('image/')) {
       setMediaNotice('Selecione um arquivo de imagem válido (JPG, PNG ou WebP).');
@@ -130,9 +207,14 @@ export function SimplifiedChatRF07({
     }
 
     const reader = new FileReader();
+    reader.onerror = () => {
+      if (isMountedRef.current) {
+        setMediaNotice('Não foi possível ler a foto escolhida. Tente selecionar outra imagem.');
+      }
+    };
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setPendingImage({ url: reader.result, name: file.name });
+      if (typeof reader.result === 'string' && isMountedRef.current) {
+        setPendingImageForContact(targetContactId, { url: reader.result, name: file.name });
         setMediaNotice(null);
       }
     };
@@ -140,7 +222,7 @@ export function SimplifiedChatRF07({
   }
 
   async function handleStartRecording() {
-    if (!activeThread) return;
+    if (!activeThread || isSending) return;
     setMediaNotice(null);
 
     if (
@@ -157,6 +239,10 @@ export function SimplifiedChatRF07({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       audioChunksRef.current = [];
       cancelRecordingFlagRef.current = false;
@@ -184,14 +270,39 @@ export function SimplifiedChatRF07({
 
         const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
         const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            onSendMessage(targetContactId, {
-              text: '',
-              audioUrl: reader.result,
-              audioDurationLabel: durationLabel,
-            });
+        reader.onerror = () => {
+          if (isMountedRef.current) {
+            setMediaNotice('Não foi possível preparar o áudio gravado. Tente gravar novamente.');
           }
+        };
+        reader.onloadend = () => {
+          if (typeof reader.result !== 'string' || !isMountedRef.current) return;
+          const audioDataUrl = reader.result;
+          void (async () => {
+            setIsSending(true);
+            try {
+              const ok = await onSendMessage(targetContactId, {
+                text: '',
+                audioUrl: audioDataUrl,
+                audioDurationLabel: durationLabel,
+              });
+              if (ok === false && isMountedRef.current) {
+                setFailedAudioForContact(targetContactId, {
+                  url: audioDataUrl,
+                  durationLabel,
+                });
+                setMediaNotice(
+                  'Não foi possível enviar o áudio agora. Ele foi mantido abaixo para você tentar novamente.'
+                );
+              } else if (isMountedRef.current) {
+                setFailedAudioForContact(targetContactId, null);
+              }
+            } finally {
+              if (isMountedRef.current) {
+                setIsSending(false);
+              }
+            }
+          })();
         };
         reader.readAsDataURL(blob);
       };
@@ -206,9 +317,11 @@ export function SimplifiedChatRF07({
       }, 1000);
     } catch {
       cleanupRecordingStream();
-      setMediaNotice(
-        'Não foi possível acessar o microfone. Verifique a permissão no navegador e tente novamente.'
-      );
+      if (isMountedRef.current) {
+        setMediaNotice(
+          'Não foi possível acessar o microfone. Verifique a permissão no navegador e tente novamente.'
+        );
+      }
     }
   }
 
@@ -397,7 +510,8 @@ export function SimplifiedChatRF07({
                         key={suggestion}
                         type="button"
                         className="chat-icebreaker-btn"
-                        onClick={() => onSendMessage(activeThread.contactId, suggestion)}
+                        disabled={isSending}
+                        onClick={() => void handleIcebreakerClick(activeThread.contactId, suggestion)}
                       >
                         “{suggestion}”
                       </button>
@@ -455,7 +569,38 @@ export function SimplifiedChatRF07({
               </div>
             )}
 
-            {pendingImage && (
+            {failedAudio && activeContactId && (
+              <div className="wa-attachment-bar" role="status">
+                <div className="wa-attachment-bar__info">
+                  <div>
+                    <strong>Áudio pendente ({failedAudio.durationLabel})</strong>
+                    <span className="wa-attachment-bar__name">
+                      O envio falhou. Você pode tentar novamente.
+                    </span>
+                  </div>
+                </div>
+                <div className="wa-recording-actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary wa-attachment-bar__cancel"
+                    disabled={isSending}
+                    onClick={() => setFailedAudioForContact(activeContactId, null)}
+                  >
+                    Descartar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary wa-attachment-bar__cancel"
+                    disabled={isSending}
+                    onClick={() => void handleRetryFailedAudio()}
+                  >
+                    {isSending ? 'Enviando...' : 'Reenviar áudio'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pendingImage && activeContactId && (
               <div className="wa-attachment-bar">
                 <div className="wa-attachment-bar__info">
                   <img
@@ -471,7 +616,8 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="btn btn--secondary wa-attachment-bar__cancel"
-                  onClick={() => setPendingImage(null)}
+                  disabled={isSending}
+                  onClick={() => setPendingImageForContact(activeContactId, null)}
                 >
                   Remover foto
                 </button>
@@ -516,6 +662,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="wa-media-btn"
+                  disabled={isSending}
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Enviar foto"
                   title="Enviar foto"
@@ -539,6 +686,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="wa-media-btn"
+                  disabled={isSending}
                   onClick={handleStartRecording}
                   aria-label="Gravar mensagem de voz"
                   title="Gravar áudio"
@@ -573,15 +721,19 @@ export function SimplifiedChatRF07({
                       : `Digite uma mensagem para ${activeThread.contactName.split(' ')[0]}...`
                   }
                   value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
+                  onChange={(event) => {
+                    if (activeContactId) {
+                      setDraftForContact(activeContactId, event.target.value);
+                    }
+                  }}
                   autoComplete="off"
                 />
                 <button
                   type="submit"
                   className="btn btn--primary wa-composer__send"
-                  disabled={!canSubmit}
+                  disabled={!canSubmit || isSending}
                 >
-                  <span>Enviar</span>
+                  <span>{isSending ? 'Enviando...' : 'Enviar'}</span>
                   <svg
                     viewBox="0 0 24 24"
                     width="18"
