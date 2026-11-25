@@ -1,8 +1,13 @@
 package br.com.beyondtime.chat;
 
 import br.com.beyondtime.auth.domain.User;
+import br.com.beyondtime.auth.domain.UserStatus;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.chat.domain.ChatMatch;
+import br.com.beyondtime.chat.domain.ChatUserBlock;
 import br.com.beyondtime.chat.domain.UserChatKey;
+import br.com.beyondtime.chat.repository.ChatMatchRepository;
+import br.com.beyondtime.chat.repository.ChatUserBlockRepository;
 import br.com.beyondtime.chat.repository.UserChatKeyRepository;
 import br.com.beyondtime.shared.security.JwtService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,9 +26,11 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
@@ -51,6 +58,12 @@ class ChatE2eeIntegrationTest {
 
     @Autowired
     private UserChatKeyRepository userChatKeyRepository;
+
+    @Autowired
+    private ChatMatchRepository chatMatchRepository;
+
+    @Autowired
+    private ChatUserBlockRepository chatUserBlockRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -235,7 +248,9 @@ class ChatE2eeIntegrationTest {
                 .andExpect(jsonPath("$.publicKeyJwk").exists())
                 .andExpect(jsonPath("$.encryptedPrivateKey").doesNotExist());
 
-        // 3. User A abre conversa com User B
+        // 3. Match mútuo ativo existe antes de abrir conversa com User B (AUD-010)
+        chatMatchRepository.save(new ChatMatch(userA.getId(), userB.getId(), BigDecimal.valueOf(85.00), (short) 2));
+
         MvcResult convResult = mockMvc.perform(post("/api/v1/chat/conversations/with/" + userB.getId())
                         .header("Authorization", tokenA))
                 .andExpect(status().isOk())
@@ -316,5 +331,62 @@ class ChatE2eeIntegrationTest {
                         .content("{\"text\":\"Oi, tudo bem? Vamos tomar um cafe?\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.alert").value(false));
+    }
+
+    @Test
+    void deveBloquearAberturaDeConversaSemMatchAtivoOuComUsuarioInativoSemEnumerarUsuarios() throws Exception {
+        // 1. Sem match entre A e B -> 403 CONVERSATION_NOT_ALLOWED (não cria match)
+        MvcResult noMatchResult = mockMvc.perform(post("/api/v1/chat/conversations/with/" + userB.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_ALLOWED"))
+                .andReturn();
+
+        // 2. UUID inexistente -> exatamente o mesmo 403 e código (não enumera usuários)
+        MvcResult unknownUserResult = mockMvc.perform(post("/api/v1/chat/conversations/with/" + UUID.randomUUID())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_ALLOWED"))
+                .andReturn();
+        assertThat(objectMapper.readTree(unknownUserResult.getResponse().getContentAsString()).get("detail").asText())
+                .isEqualTo(objectMapper.readTree(noMatchResult.getResponse().getContentAsString()).get("detail").asText());
+
+        // 3. Match ativo com usuário DELETED -> 403
+        User deletedTarget = createUser("deletado-" + UUID.randomUUID().toString().substring(0, 8) + "@beyondtime.test", LocalDate.of(1960, 1, 1));
+        chatMatchRepository.save(new ChatMatch(userA.getId(), deletedTarget.getId(), BigDecimal.valueOf(80.00), (short) 1));
+        deletedTarget.anonymizeAndMarkDeleted(OffsetDateTime.now());
+        userRepository.save(deletedTarget);
+
+        mockMvc.perform(post("/api/v1/chat/conversations/with/" + deletedTarget.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_ALLOWED"));
+
+        // 4. Match ativo com usuário SUSPENDED_PREVENTIVE -> 403
+        User suspendedTarget = createUser("suspenso-" + UUID.randomUUID().toString().substring(0, 8) + "@beyondtime.test", LocalDate.of(1961, 2, 2));
+        chatMatchRepository.save(new ChatMatch(userA.getId(), suspendedTarget.getId(), BigDecimal.valueOf(80.00), (short) 1));
+        suspendedTarget.setStatus(UserStatus.SUSPENDED_PREVENTIVE);
+        userRepository.save(suspendedTarget);
+
+        mockMvc.perform(post("/api/v1/chat/conversations/with/" + suspendedTarget.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_ALLOWED"));
+
+        // 5. Usuário bloqueado com match ativo -> 403 CONTACT_BLOCKED
+        chatMatchRepository.save(new ChatMatch(userA.getId(), userC.getId(), BigDecimal.valueOf(90.00), (short) 2));
+        chatUserBlockRepository.save(new ChatUserBlock(userA.getId(), userC.getId(), true, "Bloqueio teste"));
+
+        mockMvc.perform(post("/api/v1/chat/conversations/with/" + userC.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CONTACT_BLOCKED"));
+
+        // 6. Match ativo entre usuários ativos e sem bloqueio -> 200 OK
+        chatMatchRepository.save(new ChatMatch(userA.getId(), userB.getId(), BigDecimal.valueOf(88.00), (short) 3));
+        mockMvc.perform(post("/api/v1/chat/conversations/with/" + userB.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.conversationId").exists());
     }
 }

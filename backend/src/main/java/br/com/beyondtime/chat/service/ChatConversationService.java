@@ -102,10 +102,6 @@ public class ChatConversationService {
             );
         }
 
-        if (!userRepository.existsById(otherUserId)) {
-            throw new ResourceNotFoundException("Contato", otherUserId);
-        }
-
         if (chatUserBlockRepository.existsBlockBetween(currentUserId, otherUserId)) {
             throw new BusinessException(
                     "CONTACT_BLOCKED",
@@ -114,18 +110,26 @@ public class ChatConversationService {
             );
         }
 
+        boolean currentActive = userRepository.findById(currentUserId)
+                .map(User::isActive)
+                .orElse(false);
+        boolean otherActive = userRepository.findById(otherUserId)
+                .map(User::isActive)
+                .orElse(false);
+
         UUID userA = currentUserId.toString().compareTo(otherUserId.toString()) < 0 ? currentUserId : otherUserId;
         UUID userB = currentUserId.toString().compareTo(otherUserId.toString()) < 0 ? otherUserId : currentUserId;
 
-        ChatMatch match = chatMatchRepository.findByPair(userA, userB)
-                .orElseGet(() -> chatMatchRepository.save(
-                        new ChatMatch(userA, userB, BigDecimal.valueOf(85.00), (short) 0)
-                ));
+        ChatMatch match = (currentActive && otherActive)
+                ? chatMatchRepository.findByPair(userA, userB)
+                        .filter(m -> "ACTIVE".equalsIgnoreCase(m.getStatus()))
+                        .orElse(null)
+                : null;
 
-        if (!"ACTIVE".equalsIgnoreCase(match.getStatus())) {
+        if (match == null) {
             throw new BusinessException(
-                    "MATCH_INACTIVE",
-                    "Esta conexão não está ativa para troca de mensagens.",
+                    "CONVERSATION_NOT_ALLOWED",
+                    "Você precisa ter uma conexão ativa com esta pessoa para iniciar a conversa.",
                     HttpStatus.FORBIDDEN
             );
         }
