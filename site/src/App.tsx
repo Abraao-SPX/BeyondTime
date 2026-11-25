@@ -27,7 +27,7 @@ import type {
   LegalPageId,
   SocialOnboardingDraft,
 } from './types/auth';
-import { sanitizeTextInput } from './utils/validation';
+import { calculateAgeFromBirthDate, sanitizeTextInput } from './utils/validation';
 
 const DELETE_COUNTDOWN_SECONDS = 5;
 
@@ -73,6 +73,7 @@ const DEV_PREVIEW_PROFILE: ServerProfile = {
   fullName: 'Maria Helena',
   bio: 'Amo caminhar na Orla de Atalaia e conversar tomando um bom café.',
   city: 'Aracaju',
+  age: 64,
   goal: 'Amizade',
   hobbies: ['caminhada', 'cafe-e-prosa', 'mpb', 'leitura', 'forro'],
   avatarUrl: '/assets/perfil-helena.svg',
@@ -393,6 +394,11 @@ export function App() {
   const savedProfile = authSession ? loadUserProfile(authSession.userId) : null;
   const rawFullName = serverProfile?.fullName || savedProfile?.fullName;
   const displayFullName = rawFullName ? sanitizeTextInput(rawFullName) : undefined;
+  const displayAge =
+    (typeof serverProfile?.age === 'number' && serverProfile.age >= 50 ? serverProfile.age : null) ??
+    (serverProfile?.birthDate ? calculateAgeFromBirthDate(serverProfile.birthDate) : null) ??
+    (savedProfile?.age && savedProfile.age >= 50 ? savedProfile.age : null) ??
+    (savedProfile?.birthDate ? calculateAgeFromBirthDate(savedProfile.birthDate) : null);
   const rawCity = serverProfile?.city || savedProfile?.city;
   const displayCity = rawCity ? sanitizeTextInput(rawCity) : undefined;
   const rawGoal = serverProfile?.goal || savedProfile?.goal;
@@ -462,6 +468,7 @@ export function App() {
         onToggleAccessibility={() => setIsAccessibilityOpen(true)}
         highContrast={highContrast}
         onToggleHighContrast={toggleHighContrast}
+        showBackButton={!isShowingWorkspace}
       />
 
       <main className="auth-main" id="conteudo">
@@ -517,6 +524,7 @@ export function App() {
                   authSession={authSession}
                   serverProfile={serverProfile}
                   displayFullName={displayFullName ?? ''}
+                  displayAge={displayAge}
                   displayCity={displayCity}
                   displayGoal={displayGoal}
                   displayHobbies={displayHobbies}

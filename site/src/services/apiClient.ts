@@ -292,6 +292,8 @@ export interface ServerProfile {
   firstName: string;
   bio: string | null;
   city: string;
+  age?: number | null;
+  birthDate?: string | null;
   hobbies: string[];
   goal: string;
   avatarUrl?: string | null;

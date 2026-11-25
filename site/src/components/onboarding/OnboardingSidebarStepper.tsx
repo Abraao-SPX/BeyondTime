@@ -18,11 +18,13 @@ const STEP_LIST: readonly StepMeta[] = [
 
 interface OnboardingSidebarStepperProps {
   currentStep: OnboardingStep;
+  isCompleted?: boolean;
   onStepClick?: (step: OnboardingStep) => void;
 }
 
 export function OnboardingSidebarStepper({
   currentStep,
+  isCompleted = false,
   onStepClick,
 }: OnboardingSidebarStepperProps) {
   return (
@@ -30,16 +32,22 @@ export function OnboardingSidebarStepper({
       <div className="onboarding-stepper__header">
         <h2 className="onboarding-stepper__title">Sua caminhada até aqui:</h2>
         <span className="onboarding-stepper__counter">
-          Passo <strong>{currentStep}</strong> de 7
+          {isCompleted ? (
+            <strong>Cadastro concluído</strong>
+          ) : (
+            <>
+              Passo <strong>{currentStep}</strong> de 7
+            </>
+          )}
         </span>
       </div>
 
       <ol className="onboarding-stepper__list">
         {STEP_LIST.map((item) => {
-          const isDone = item.number < currentStep;
-          const isCurrent = item.number === currentStep;
-          const isPending = item.number > currentStep;
-          const canClick = isDone && Boolean(onStepClick);
+          const isDone = isCompleted || item.number < currentStep;
+          const isCurrent = !isCompleted && item.number === currentStep;
+          const isPending = !isCompleted && item.number > currentStep;
+          const canClick = !isCompleted && isDone && Boolean(onStepClick);
 
           return (
             <li

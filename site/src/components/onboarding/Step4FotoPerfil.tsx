@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { resizeAndPrepareAvatarFile } from '../../services/profileStorage';
+import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 
 interface Step4FotoPerfilProps {
   photoPreviewUrl: string | null;
@@ -17,6 +18,7 @@ export function Step4FotoPerfil({
 }: Step4FotoPerfilProps) {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -116,6 +118,23 @@ export function Step4FotoPerfil({
         </span>
       </button>
 
+      <div className="photo-verification-banner">
+        <div className="photo-verification-banner__text">
+          <strong>Verificação facial pelo celular (opcional)</strong>
+          <p>
+            Em breve você poderá confirmar sua identidade apontando a câmera do celular para um
+            código. Veja como vai funcionar.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={() => setShowQrModal(true)}
+        >
+          Ver como funciona
+        </button>
+      </div>
+
       {photoFileName !== null && photoError === null && (
         <p className="photo-selected-name" aria-live="polite">
           Arquivo selecionado: {photoFileName}
@@ -146,6 +165,8 @@ export function Step4FotoPerfil({
           <span className="underline-bold">Adicionar foto mais tarde</span>
         </button>
       </div>
+
+      {showQrModal && <FacialVerificationQrModal onClose={() => setShowQrModal(false)} />}
     </div>
   );
 }

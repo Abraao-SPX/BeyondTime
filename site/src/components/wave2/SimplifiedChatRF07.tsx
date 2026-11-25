@@ -8,6 +8,7 @@ interface SimplifiedChatRF07Props {
   activeThreadId: string | null;
   onSelectThread: (contactId: string) => void;
   onSendMessage: (contactId: string, payload: string | OutgoingMessagePayload) => void;
+  onRequestBlock: (thread: ChatThread) => void;
   onGoToDiscover: () => void;
 }
 
@@ -24,6 +25,7 @@ export function SimplifiedChatRF07({
   activeThreadId,
   onSelectThread,
   onSendMessage,
+  onRequestBlock,
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
   const [draft, setDraft] = useState('');
@@ -291,7 +293,9 @@ export function SimplifiedChatRF07({
                         {thread.unreadCount > 0 && (
                           <span
                             className="chat-unread-badge"
-                            aria-label={`${thread.unreadCount} mensagens não lidas`}
+                            aria-label={`${thread.unreadCount} ${
+                              thread.unreadCount === 1 ? 'mensagem não lida' : 'mensagens não lidas'
+                            }`}
                           >
                             {thread.unreadCount}
                           </span>
@@ -346,6 +350,14 @@ export function SimplifiedChatRF07({
                   </p>
                 </div>
               </div>
+
+              <button
+                type="button"
+                className="btn btn--secondary chat-block-btn"
+                onClick={() => onRequestBlock(activeThread)}
+              >
+                Bloquear contato
+              </button>
             </header>
 
             <div className="wa-safety-bar" role="note">

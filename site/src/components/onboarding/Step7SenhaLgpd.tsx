@@ -7,6 +7,7 @@ import {
   validatePasswordMatch,
 } from '../../utils/validation';
 import { PasswordInput } from '../PasswordInput';
+import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 
 interface Step7SenhaLgpdProps {
   formData: OnboardingFormData;
@@ -38,6 +39,7 @@ export function Step7SenhaLgpd({
   onFinishToLogin,
 }: Step7SenhaLgpdProps) {
   const [formError, setFormError] = useState<string | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -119,6 +121,23 @@ export function Step7SenhaLgpd({
           </p>
         </div>
 
+        <div className="photo-verification-banner" style={{ margin: '20px 0' }}>
+          <div className="photo-verification-banner__text">
+            <strong>Verificação facial pelo celular (opcional)</strong>
+            <p>
+              Em breve você poderá confirmar sua identidade com a câmera do celular e receber o
+              Selo de Verificado 50+. Você poderá fazer isso depois, em Meu Perfil.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => setShowQrModal(true)}
+          >
+            Ver como funciona
+          </button>
+        </div>
+
         <div className="action-stack action-stack--compact">
           <button
             type="button"
@@ -135,6 +154,8 @@ export function Step7SenhaLgpd({
             Editar perfil
           </button>
         </div>
+
+        {showQrModal && <FacialVerificationQrModal onClose={() => setShowQrModal(false)} />}
       </div>
     );
   }

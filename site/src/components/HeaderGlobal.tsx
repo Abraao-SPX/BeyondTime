@@ -7,6 +7,7 @@ interface HeaderGlobalProps {
   onToggleAccessibility?: () => void;
   highContrast?: boolean;
   onToggleHighContrast?: () => void;
+  showBackButton?: boolean;
 }
 
 export function HeaderGlobal({
@@ -15,6 +16,7 @@ export function HeaderGlobal({
   onToggleAccessibility,
   highContrast = false,
   onToggleHighContrast,
+  showBackButton = true,
 }: HeaderGlobalProps) {
   function handleBrandClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
@@ -113,13 +115,15 @@ export function HeaderGlobal({
             </button>
           )}
 
-          <button
-            type="button"
-            className="site-header__home-btn"
-            onClick={handleBackClick}
-          >
-            Voltar
-          </button>
+          {showBackButton && (
+            <button
+              type="button"
+              className="site-header__home-btn"
+              onClick={handleBackClick}
+            >
+              Voltar
+            </button>
+          )}
         </div>
       </div>
     </header>

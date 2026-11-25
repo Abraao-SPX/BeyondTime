@@ -34,6 +34,7 @@ interface DiscoverScreenProps {
   userName?: string;
   userCity: string;
   userHobbies: string[];
+  blockedProfileIds?: string[];
   onMutualConnection: (profile: RankedDiscoveryProfile, openChatNow: boolean) => void;
 }
 
@@ -47,18 +48,28 @@ export function DiscoverScreen({
   userName = 'Você',
   userCity,
   userHobbies,
+  blockedProfileIds,
   onMutualConnection,
 }: DiscoverScreenProps) {
   const { palette, fs } = useTheme();
 
-  const rankedProfiles = useMemo(
-    () => rankProfilesByAffinity(SEED_DISCOVERY_PROFILES, userCity, userHobbies),
-    [userCity, userHobbies]
-  );
+  const rankedProfiles = useMemo(() => {
+    const list = rankProfilesByAffinity(SEED_DISCOVERY_PROFILES, userCity, userHobbies);
+    if (!blockedProfileIds || blockedProfileIds.length === 0) return list;
+    const blockedSet = new Set(blockedProfileIds);
+    return list.filter((p) => !blockedSet.has(p.id));
+  }, [userCity, userHobbies, blockedProfileIds]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageErrorMap, setImageErrorMap] = useState<Record<string, boolean>>({});
   const [matchedProfile, setMatchedProfile] = useState<RankedDiscoveryProfile | null>(null);
+
+  useEffect(() => {
+    setCurrentIndex((prev) => {
+      if (rankedProfiles.length === 0) return 0;
+      return prev >= rankedProfiles.length ? rankedProfiles.length - 1 : prev;
+    });
+  }, [rankedProfiles.length]);
 
   // Animação da tela de conexão: os dois perfis deslizam um em direção ao outro até se juntarem
   const leftAvatarX = useRef(new Animated.Value(-84)).current;

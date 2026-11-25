@@ -50,3 +50,13 @@ export interface ChatConversation {
   lastTimestamp: string;
   messages: ChatMessage[];
 }
+
+export interface BlockedContactMobile {
+  id: string;
+  fullName: string;
+  age: number;
+  city: string;
+  photoUrl: string;
+  blockedAt: string;
+  reason?: string;
+}

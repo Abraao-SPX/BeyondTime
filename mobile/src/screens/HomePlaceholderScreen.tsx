@@ -13,9 +13,12 @@ import { HOBBIES_CATALOG } from '../constants/hobbiesTaxonomy';
 import { SUPPORT_EMAIL, TOUCH_TARGET_MIN } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
 import type { OnboardingData } from '../types/onboarding';
+import type { BlockedContactMobile } from '../types/social';
 
 interface HomePlaceholderScreenProps {
   userData: OnboardingData;
+  blockedContacts?: BlockedContactMobile[];
+  onUnblockContact?: (id: string) => void;
   onRepeatFacialVerification: () => void;
   onSignOut: () => void;
 }
@@ -27,6 +30,8 @@ interface HomePlaceholderScreenProps {
  */
 export function HomePlaceholderScreen({
   userData,
+  blockedContacts,
+  onUnblockContact,
   onRepeatFacialVerification,
   onSignOut,
 }: HomePlaceholderScreenProps) {
@@ -166,6 +171,58 @@ export function HomePlaceholderScreen({
           </View>
         </View>
 
+        {/* Contatos Bloqueados (RF-08) */}
+        {blockedContacts && blockedContacts.length > 0 && (
+          <View
+            style={[
+              styles.sectionCard,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: palette.textPrimary, fontSize: fs(18) }]}>
+              Contatos bloqueados ({blockedContacts.length})
+            </Text>
+            <Text style={[styles.sectionSubtitle, { color: palette.textSecondary, fontSize: fs(14) }]}>
+              Essas pessoas estão ocultas do seu feed e das suas conversas.
+            </Text>
+
+            <View style={styles.blockedList}>
+              {blockedContacts.map((contact) => (
+                <View
+                  key={contact.id}
+                  style={[
+                    styles.blockedItem,
+                    { borderColor: palette.border, backgroundColor: palette.background },
+                  ]}
+                >
+                  <View style={styles.blockedInfo}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.blockedName, { color: palette.textPrimary, fontSize: fs(16) }]}
+                    >
+                      {contact.fullName}, {contact.age}
+                    </Text>
+                    <Text style={[styles.blockedMeta, { color: palette.textSecondary, fontSize: fs(13) }]}>
+                      {contact.city} • Bloqueado em {contact.blockedAt}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={() => onUnblockContact?.(contact.id)}
+                    style={[styles.unblockBtn, { borderColor: palette.border }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Desbloquear ${contact.fullName}`}
+                  >
+                    <Text style={[styles.unblockBtnText, { color: palette.textPrimary, fontSize: fs(13) }]}>
+                      Desbloquear
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         <View style={styles.actions}>
           <AccessibleButton
             label={
@@ -285,6 +342,45 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: 12,
+  },
+  sectionSubtitle: {
+    lineHeight: 20,
+    marginTop: -4,
+  },
+  blockedList: {
+    gap: 10,
+    marginTop: 4,
+  },
+  blockedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+  },
+  blockedInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  blockedName: {
+    fontWeight: '700',
+  },
+  blockedMeta: {
+    fontWeight: '500',
+  },
+  unblockBtn: {
+    minHeight: TOUCH_TARGET_MIN,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  unblockBtnText: {
+    fontWeight: '600',
   },
   footerNote: {
     textAlign: 'center',

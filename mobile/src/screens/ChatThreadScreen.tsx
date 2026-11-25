@@ -3,6 +3,7 @@ import {
   BackHandler,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -31,6 +32,7 @@ interface ChatThreadScreenProps {
     text: string,
     options?: SendMessageOptions
   ) => void;
+  onBlockContact?: (profileId: string, fullName: string) => void;
 }
 
 const SAMPLE_CHAT_PHOTOS = [
@@ -65,10 +67,12 @@ export function ChatThreadScreen({
   conversation,
   onBackToList,
   onSendMessage,
+  onBlockContact,
 }: ChatThreadScreenProps) {
   const { palette, isDark, fs } = useTheme();
   const [draft, setDraft] = useState('');
   const [imgError, setImgError] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
 
   // Gravação de voz acessível (toque único, sem precisar ficar segurando)
   const [isRecording, setIsRecording] = useState(false);
@@ -215,6 +219,20 @@ export function ChatThreadScreen({
             </Text>
           </View>
         </View>
+
+        {onBlockContact && (
+          <TouchableOpacity
+            onPress={() => setShowBlockModal(true)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={`Bloquear ${conversation.fullName}`}
+            style={[styles.blockHeaderBtn, { borderColor: palette.border }]}
+          >
+            <Text style={[styles.blockHeaderBtnText, { color: palette.textSecondary }]}>
+              Bloquear
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Faixa suave e discreta contra pedidos financeiros */}
@@ -615,6 +633,65 @@ export function ChatThreadScreen({
           </TouchableOpacity>
         </View>
       )}
+
+      {showBlockModal && (
+        <Modal
+          visible={showBlockModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowBlockModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.blockModalBox,
+                { backgroundColor: palette.surface, borderColor: palette.border },
+              ]}
+            >
+              <View style={[styles.blockBadge, { backgroundColor: palette.primarySoft }]}>
+                <Text style={[styles.blockBadgeText, { color: palette.primaryText }]}>
+                  Segurança e Privacidade
+                </Text>
+              </View>
+
+              <Text style={[styles.blockModalTitle, { color: palette.textPrimary, fontSize: fs(20) }]}>
+                Bloquear {conversation.fullName}?
+              </Text>
+
+              <Text style={[styles.blockModalBody, { color: palette.textSecondary, fontSize: fs(15) }]}>
+                Ao confirmar, essa conversa será encerrada e vocês não verão mais o perfil um do outro no aplicativo. Essa pessoa não receberá nenhum aviso.
+              </Text>
+
+              <View style={styles.blockModalActions}>
+                <TouchableOpacity
+                  onPress={() => setShowBlockModal(false)}
+                  style={[styles.modalCancelBtn, { borderColor: palette.border }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancelar e manter contato"
+                >
+                  <Text style={[styles.modalCancelBtnText, { color: palette.textPrimary, fontSize: fs(15) }]}>
+                    Cancelar
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowBlockModal(false);
+                    onBlockContact?.(conversation.profileId, conversation.fullName);
+                  }}
+                  style={[styles.modalConfirmBlockBtn, { backgroundColor: '#8B1E28' }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Confirmar bloqueio"
+                >
+                  <Text style={[styles.modalConfirmBlockBtnText, { fontSize: fs(15) }]}>
+                    Confirmar bloqueio
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -870,5 +947,79 @@ const styles = StyleSheet.create({
     borderRadius: 27,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  blockHeaderBtn: {
+    minHeight: TOUCH_TARGET_MIN,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blockHeaderBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  blockModalBox: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 22,
+    gap: 14,
+  },
+  blockBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  blockBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  blockModalTitle: {
+    fontWeight: '800',
+  },
+  blockModalBody: {
+    lineHeight: 22,
+  },
+  blockModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  modalCancelBtnText: {
+    fontWeight: '600',
+  },
+  modalConfirmBlockBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  modalConfirmBlockBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });
