@@ -15,7 +15,7 @@
 import { gcm } from '@noble/ciphers/aes';
 import { p256 } from '@noble/curves/p256';
 import { hkdf } from '@noble/hashes/hkdf';
-import { pbkdf2 } from '@noble/hashes/pbkdf2';
+import { pbkdf2Async } from '@noble/hashes/pbkdf2';
 import { sha256 } from '@noble/hashes/sha256';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system';
@@ -310,27 +310,35 @@ function getVaultPassphraseV2(session: AuthSession): string {
   return `beyondtime-vault-v2:${session.userId}:${session.email.trim().toLowerCase()}`;
 }
 
-function deriveVaultWrappingKey(
+async function deriveVaultWrappingKey(
   passphrase: string,
   salt: Uint8Array,
   iterations: number
-): Uint8Array {
+): Promise<Uint8Array> {
   const safeIterations = Math.max(100000, iterations || VAULT_KDF_ITERATIONS);
-  return pbkdf2(sha256, utf8ToBytes(passphrase), salt, { c: safeIterations, dkLen: 32 });
+  return pbkdf2Async(sha256, utf8ToBytes(passphrase), salt, {
+    c: safeIterations,
+    dkLen: 32,
+    asyncTick: 10,
+  });
 }
 
-function wrapPrivateKeyJwk(
+async function wrapPrivateKeyJwk(
   session: AuthSession,
   privateKeyJwk: EcJwk
-): {
+): Promise<{
   encryptedPrivateKey: string;
   kdfSalt: string;
   kdfIv: string;
   kdfIterations: number;
-} {
+}> {
   const salt = getSecureRandomBytes(16);
   const iv = getSecureRandomBytes(12);
-  const wrappingKey = deriveVaultWrappingKey(getVaultPassphraseV2(session), salt, VAULT_KDF_ITERATIONS);
+  const wrappingKey = await deriveVaultWrappingKey(
+    getVaultPassphraseV2(session),
+    salt,
+    VAULT_KDF_ITERATIONS
+  );
   const plaintext = utf8ToBytes(JSON.stringify(privateKeyJwk));
   const encrypted = gcm(wrappingKey, iv).encrypt(plaintext);
   return {
@@ -341,7 +349,7 @@ function wrapPrivateKeyJwk(
   };
 }
 
-function tryUnwrapPrivateKeyJwk(
+async function tryUnwrapPrivateKeyJwk(
   session: AuthSession,
   vault: {
     encryptedPrivateKey: string;
@@ -349,7 +357,7 @@ function tryUnwrapPrivateKeyJwk(
     kdfIv: string;
     kdfIterations: number;
   }
-): EcJwk | null {
+): Promise<EcJwk | null> {
   const salt = base64ToBytes(vault.kdfSalt);
   const iv = base64ToBytes(vault.kdfIv);
   const cipher = base64ToBytes(vault.encryptedPrivateKey);
@@ -357,14 +365,14 @@ function tryUnwrapPrivateKeyJwk(
 
   for (const passphrase of passphrases) {
     try {
-      const wrappingKey = deriveVaultWrappingKey(passphrase, salt, vault.kdfIterations);
+      const wrappingKey = await deriveVaultWrappingKey(passphrase, salt, vault.kdfIterations);
       const decrypted = gcm(wrappingKey, iv).decrypt(cipher);
       const parsed = JSON.parse(bytesToUtf8(decrypted)) as EcJwk;
       if (parsed.kty === 'EC' && parsed.crv === 'P-256' && parsed.d) {
         return parsed;
       }
     } catch {
-      // tenta próxima derivação compatível
+      // só tenta v1 se v2 falhar
     }
   }
   return null;
@@ -395,7 +403,7 @@ export async function ensureUserChatKeyPair(
             keyVersion: serverVault.keyVersion || localStored.keyVersion || 1,
           };
         }
-        const wrapped = wrapPrivateKeyJwk(session, localStored.privateKeyJwk);
+        const wrapped = await wrapPrivateKeyJwk(session, localStored.privateKeyJwk);
         const saved = await vaultApi.upsertMyVault(session, {
           publicKeyJwk: JSON.stringify(localStored.publicKeyJwk),
           ...wrapped,
@@ -412,7 +420,7 @@ export async function ensureUserChatKeyPair(
 
     // Novo dispositivo: tenta restaurar o cofre existente do servidor antes de gerar chave nova
     if (serverVault) {
-      const restoredPrivJwk = tryUnwrapPrivateKeyJwk(session, serverVault);
+      const restoredPrivJwk = await tryUnwrapPrivateKeyJwk(session, serverVault);
       if (restoredPrivJwk) {
         const privBytes = privateKeyJwkToBytes(restoredPrivJwk);
         if (privBytes) {
@@ -441,7 +449,7 @@ export async function ensureUserChatKeyPair(
     // Primeiro acesso sem cofre válido: gera novo par ECDH P-256 sem depender de globalThis.crypto (AUD-006)
     const privateKeyBytes = generateHermesSafeP256PrivateKey();
     const { publicKeyJwk, privateKeyJwk } = buildJwkPairFromPrivateBytes(privateKeyBytes);
-    const wrapped = wrapPrivateKeyJwk(session, privateKeyJwk);
+    const wrapped = await wrapPrivateKeyJwk(session, privateKeyJwk);
     const saved = await vaultApi.upsertMyVault(session, {
       publicKeyJwk: JSON.stringify(publicKeyJwk),
       ...wrapped,
