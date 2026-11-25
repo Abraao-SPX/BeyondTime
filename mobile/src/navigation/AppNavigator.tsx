@@ -74,8 +74,19 @@ function parseGoal(goal?: string): RelationshipGoal {
 }
 
 function getFriendlyApiError(error: unknown, fallback: string): string {
-  if (error instanceof ApiError && error.message) {
-    return error.message;
+  if (error instanceof ApiError) {
+    if (error.code === 'CONVERSATION_NOT_ALLOWED') {
+      return 'Você precisa ter uma conexão ativa com esta pessoa para iniciar a conversa.';
+    }
+    if (error.code === 'INVALID_CHAT_MEDIA') {
+      return 'Não foi possível anexar esta foto ou mensagem de voz. Tente enviar novamente.';
+    }
+    if (error.status === 413 || error.code === 'MEDIA_TOO_LARGE') {
+      return 'O arquivo escolhido é muito grande (máximo 8 MB). Escolha uma foto ou grave um áudio menor.';
+    }
+    if (error.message) {
+      return error.message;
+    }
   }
   return fallback;
 }
@@ -284,6 +295,9 @@ export function AppNavigator() {
       try {
         myKeyPairRef.current = await initMobileChatE2ee(session);
         if (cancelled) return;
+        if (myKeyPairRef.current?.warningMessage) {
+          setWave2Error(myKeyPairRef.current.warningMessage);
+        }
 
         const [discDtos, convDtos, blockDtos] = await Promise.all([
           fetchDiscoveryProfiles(session, { limit: 30 }),
@@ -379,6 +393,16 @@ export function AppNavigator() {
             };
           })
         );
+      },
+      onError: (friendlyMessage: string) => {
+        if (!cancelled && isSessionCurrent(session)) {
+          setWave2Error(friendlyMessage);
+        }
+      },
+      onReconnect: () => {
+        if (!cancelled && isSessionCurrent(session)) {
+          void reloadConversations(session);
+        }
       },
     });
     stompRef.current = stomp;
