@@ -73,6 +73,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/locations/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/hobbies", "/api/v1/hobbies/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/profiles/avatars/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/biometrics/handoff/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/biometrics/handoff/*/complete").permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/login",

@@ -358,6 +358,26 @@ export interface VerifyBiometricsResponse {
   livenessPassed: boolean;
 }
 
+export interface CreateBiometricHandoffResponse {
+  handoffToken: string;
+  expiresAt: string;
+  ttlSeconds: number;
+}
+
+export interface BiometricHandoffStatusResponse {
+  status: 'PENDING' | 'COMPLETED' | 'EXPIRED';
+  verifiedBadge50plus: boolean;
+  expiresAt: string;
+  completedAt?: string | null;
+}
+
+export interface BiometricHandoffSessionInfoResponse {
+  userId: string;
+  firstName: string;
+  status: 'PENDING' | 'COMPLETED' | 'EXPIRED';
+  expiresAt: string;
+}
+
 export async function verifyMyBiometrics(
   session: AuthSession,
   biometricToken: string
@@ -369,6 +389,48 @@ export async function verifyMyBiometrics(
       body: JSON.stringify({ biometricToken }),
     },
     session.accessToken
+  );
+}
+
+export async function createBiometricHandoff(
+  session: AuthSession
+): Promise<CreateBiometricHandoffResponse> {
+  return requestJson<CreateBiometricHandoffResponse>(
+    '/api/v1/profiles/me/biometrics/handoff',
+    { method: 'POST' },
+    session.accessToken
+  );
+}
+
+export async function fetchBiometricHandoffStatus(
+  session: AuthSession,
+  handoffToken: string
+): Promise<BiometricHandoffStatusResponse> {
+  return requestJson<BiometricHandoffStatusResponse>(
+    `/api/v1/profiles/me/biometrics/handoff/${encodeURIComponent(handoffToken)}/status`,
+    {},
+    session.accessToken
+  );
+}
+
+export async function fetchPublicBiometricHandoff(
+  handoffToken: string
+): Promise<BiometricHandoffSessionInfoResponse> {
+  return requestJson<BiometricHandoffSessionInfoResponse>(
+    `/api/v1/biometrics/handoff/${encodeURIComponent(handoffToken)}`
+  );
+}
+
+export async function completeBiometricHandoff(
+  handoffToken: string,
+  biometricToken: string
+): Promise<VerifyBiometricsResponse> {
+  return requestJson<VerifyBiometricsResponse>(
+    `/api/v1/biometrics/handoff/${encodeURIComponent(handoffToken)}/complete`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ biometricToken }),
+    }
   );
 }
 

@@ -9,6 +9,7 @@ import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
 import { AuthenticatedWorkspace } from './components/wave2/AuthenticatedWorkspace';
+import { MobileFacialHandoffPage } from './components/wave2/MobileFacialHandoffPage';
 import { useHighContrast } from './hooks/useHighContrast';
 import {
   ApiError,
@@ -30,6 +31,11 @@ import type {
 import { calculateAgeFromBirthDate, sanitizeTextInput } from './utils/validation';
 
 const DELETE_COUNTDOWN_SECONDS = 5;
+
+export function isMobileFacialHandoffPath(pathname: string): boolean {
+  const cleanPath = pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  return cleanPath === '/verificar-rosto' || cleanPath === '/verify-face';
+}
 
 export function parseLegalPageFromPath(pathname: string): LegalPageId | null {
   const cleanPath = pathname.toLowerCase().replace(/\/+$/, '') || '/';
@@ -82,6 +88,9 @@ const DEV_PREVIEW_PROFILE: ServerProfile = {
 };
 
 export function App() {
+  const [isMobileFacialHandoff] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? isMobileFacialHandoffPath(window.location.pathname) : false
+  );
   const [legalPage, setLegalPage] = useState<LegalPageId | null>(() =>
     typeof window !== 'undefined' ? parseLegalPageFromPath(window.location.pathname) : null
   );
@@ -427,6 +436,10 @@ export function App() {
         />
       </>
     );
+  }
+
+  if (isMobileFacialHandoff) {
+    return <MobileFacialHandoffPage />;
   }
 
   if (showLanding) {

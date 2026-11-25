@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
+  createBiometricHandoff,
+  fetchBiometricHandoffStatus,
   loadAuthSession,
   verifyMyBiometrics,
   type VerifyBiometricsResponse,
 } from '../../services/apiClient';
+import {
+  isMobileDevice,
+  recordAndSubmitLiveness,
+  resolveBiometricsBaseUrl,
+} from '../../utils/biometricCapture';
 
 interface FacialVerificationQrModalProps {
   firstName?: string;
@@ -12,50 +19,39 @@ interface FacialVerificationQrModalProps {
   onVerified?: (result: VerifyBiometricsResponse) => void;
 }
 
-interface ChallengePayload {
-  session_token: string;
-  colors: string[];
-  flash_duration_ms: number;
-}
-
-interface BiometricsServiceResponse {
-  success?: boolean;
-  verified?: boolean;
-  is_live?: boolean;
-  jwt_token?: string | null;
-  reason?: string;
-  status?: string;
-  error?: string;
-  detail?: string;
-}
-
-const COLOR_HEX: Record<string, string> = {
-  VERMELHO: '#FF0000',
-  AZUL: '#0000FF',
-  VERDE: '#00FF00',
-};
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * Modal oficial de Verificação Facial Biométrica (RF-11 — Selo de Verificado 50+).
  *
- * Permite duas vias acessíveis para o público 50+:
- * 1. Verificação direta pela câmera do dispositivo (webcam ou celular) com prova de vida
- *    por flash espectral de cores + YuNet/SFace/MiniFASNetV2 + concessão real do selo no Spring Boot.
- * 2. QR Code para abrir a verificação no celular caso o computador não tenha câmera.
+ * Comportamento inteligente por dispositivo:
+ * - No PC/Desktop: abre direto no QR Code com sessão efêmera de handoff (5 min, uso único).
+ *   O usuário aponta a câmera do celular, faz a verificação no navegador (sem baixar app nem logar de novo)
+ *   e o PC detecta automaticamente a aprovação em tempo real via polling.
+ * - No celular (navegador): abre direto na câmera frontal.
+ * - No PC sem celular por perto: oferece plano B discreto ("Usar a câmera deste computador").
  */
 export function FacialVerificationQrModal({
   firstName,
   onClose,
   onVerified,
 }: FacialVerificationQrModalProps) {
-  const [activeMode, setActiveMode] = useState<'camera' | 'qr'>('camera');
+  const defaultMode = useMemo<'qr' | 'camera'>(() => (isMobileDevice() ? 'camera' : 'qr'), []);
+  const [activeMode, setActiveMode] = useState<'qr' | 'camera'>(defaultMode);
+
+  // Estado do fluxo QR Handoff (PC -> Celular sem app)
   const [qrSvg, setQrSvg] = useState<string>('');
+  const [handoffToken, setHandoffToken] = useState<string | null>(null);
+  const [handoffState, setHandoffState] = useState<
+    'creating' | 'waiting' | 'approved' | 'expired' | 'unauthenticated' | 'error'
+  >('creating');
+  const [handoffMessage, setHandoffMessage] = useState<string>(
+    'Gerando código QR seguro para o seu celular...'
+  );
+
+  // Estado do fluxo câmera local (celular ou webcam no PC)
   const [cameraActive, setCameraActive] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'recording' | 'processing' | 'approved' | 'error'>('idle');
+  const [cameraPhase, setCameraPhase] = useState<'idle' | 'recording' | 'processing' | 'approved' | 'error'>('idle');
   const [flashColor, setFlashColor] = useState<string | null>(null);
-  const [feedbackMessage, setFeedbackMessage] = useState<string>(
+  const [cameraMessage, setCameraMessage] = useState<string>(
     'Posicione seu rosto de frente em um local iluminado e clique em "Iniciar verificação".'
   );
 
@@ -63,20 +59,9 @@ export function FacialVerificationQrModal({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const notifiedVerifiedRef = useRef(false);
 
-  const biometricsBaseUrl = useMemo(() => {
-    const configured = import.meta.env.VITE_BIOMETRIA_API_URL as string | undefined;
-    return configured && configured.trim().length > 0
-      ? configured.trim().replace(/\/+$/, '')
-      : '/biometrics';
-  }, []);
-
-  const verificationUrl = useMemo(() => {
-    const configured = import.meta.env.VITE_FACIAL_VERIFICATION_URL as string | undefined;
-    return configured && configured.trim().length > 0
-      ? configured.trim()
-      : window.location.origin;
-  }, []);
+  const biometricsBaseUrl = useMemo(() => resolveBiometricsBaseUrl(), []);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -93,15 +78,66 @@ export function FacialVerificationQrModal({
 
   useEffect(() => {
     closeButtonRef.current?.focus();
-    return () => {
-      stopCamera();
-    };
+    return () => stopCamera();
   }, [stopCamera]);
+
+  // Cria uma nova sessão de handoff QR no backend quando em modo QR
+  const initQrHandoff = useCallback(async () => {
+    const session = loadAuthSession();
+    if (!session?.accessToken || !session?.userId || session.userId === 'dev-preview-50plus') {
+      setHandoffToken(null);
+      setHandoffState('unauthenticated');
+      setHandoffMessage(
+        'Conclua seu cadastro ou faça login para gerar seu código QR pessoal de verificação facial.'
+      );
+      return;
+    }
+
+    setHandoffState('creating');
+    setHandoffMessage('Gerando código QR seguro para o seu celular...');
+
+    try {
+      const created = await createBiometricHandoff(session);
+      setHandoffToken(created.handoffToken);
+      setHandoffState('waiting');
+      setHandoffMessage(
+        'Aguardando você apontar a câmera do celular para o código ao lado (válido por 5 minutos).'
+      );
+    } catch (err) {
+      setHandoffToken(null);
+      setHandoffState('error');
+      setHandoffMessage(
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível gerar o código QR agora. Tente novamente.'
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeMode === 'qr') {
+      void initQrHandoff();
+    }
+  }, [activeMode, initQrHandoff]);
+
+  // Renderiza o SVG do QR Code apontando para /verificar-rosto?t=<handoffToken>
+  const qrTargetUrl = useMemo(() => {
+    const configuredOrigin = (import.meta.env.VITE_FACIAL_VERIFICATION_URL as string | undefined)
+      ?.trim()
+      .replace(/\/+$/, '');
+    const baseOrigin =
+      configuredOrigin && configuredOrigin.length > 0 ? configuredOrigin : window.location.origin;
+
+    if (handoffToken) {
+      return `${baseOrigin}/verificar-rosto?t=${encodeURIComponent(handoffToken)}`;
+    }
+    return baseOrigin;
+  }, [handoffToken]);
 
   useEffect(() => {
     let isMounted = true;
     QRCode.toString(
-      verificationUrl,
+      qrTargetUrl,
       {
         type: 'svg',
         margin: 2,
@@ -116,24 +152,73 @@ export function FacialVerificationQrModal({
     return () => {
       isMounted = false;
     };
-  }, [verificationUrl]);
+  }, [qrTargetUrl]);
+
+  // Polling leve (2,5s) no PC para detectar automaticamente quando o celular concluir
+  useEffect(() => {
+    if (activeMode !== 'qr' || handoffState !== 'waiting' || !handoffToken) {
+      return;
+    }
+    const session = loadAuthSession();
+    if (!session?.accessToken) return;
+
+    let cancelled = false;
+    const interval = window.setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const statusRes = await fetchBiometricHandoffStatus(session, handoffToken);
+        if (cancelled) return;
+
+        if (statusRes.status === 'COMPLETED' || statusRes.verifiedBadge50plus) {
+          setHandoffState('approved');
+          setHandoffMessage(
+            'Verificação concluída pelo celular! Seu perfil agora possui o Selo de Verificado 50+.'
+          );
+          if (!notifiedVerifiedRef.current) {
+            notifiedVerifiedRef.current = true;
+            onVerified?.({
+              success: true,
+              message: 'Selo de Verificado 50+ concedido com sucesso.',
+              profileId: '',
+              userId: session.userId,
+              verifiedBadge50plus: true,
+              verificationStatus: 'VERIFIED',
+              verifiedAt: statusRes.completedAt ?? new Date().toISOString(),
+              livenessPassed: true,
+            });
+          }
+        } else if (statusRes.status === 'EXPIRED') {
+          setHandoffState('expired');
+          setHandoffMessage('Este código QR expirou. Clique em "Gerar novo código" para continuar.');
+        }
+      } catch {
+        // Ignora erro transitório de rede durante o polling
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeMode, handoffState, handoffToken, onVerified]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') handleClose();
+      if (event.key === 'Escape' && cameraPhase !== 'recording' && cameraPhase !== 'processing') {
+        handleClose();
+      }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [handleClose]);
+  }, [cameraPhase, handleClose]);
 
   const startCamera = useCallback(async (): Promise<MediaStream | null> => {
-    if (streamRef.current) {
-      return streamRef.current;
-    }
+    if (streamRef.current) return streamRef.current;
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setPhase('error');
-      setFeedbackMessage(
-        'Seu navegador não suporta captura de câmera aqui. Use a aba "Pelo celular (QR Code)".'
+      setCameraPhase('error');
+      setCameraMessage(
+        'Seu navegador não suporta captura de câmera aqui. Use a opção "Pelo celular (QR Code)".'
       );
       return null;
     }
@@ -150,20 +235,20 @@ export function FacialVerificationQrModal({
       setCameraActive(true);
       return stream;
     } catch {
-      setPhase('error');
-      setFeedbackMessage(
-        'Não foi possível acessar a câmera. Permita o uso da câmera no navegador ou use a aba "Pelo celular (QR Code)".'
+      setCameraPhase('error');
+      setCameraMessage(
+        'Não foi possível acessar a câmera deste dispositivo. Permita a câmera ou use "Pelo celular (QR Code)".'
       );
       return null;
     }
   }, []);
 
-  const runLiveVerification = useCallback(async () => {
+  const runLiveCameraVerification = useCallback(async () => {
     const session = loadAuthSession();
     if (!session?.accessToken || !session?.userId) {
-      setPhase('error');
-      setFeedbackMessage(
-        'Finalize seu login ou cadastro primeiro para que o Selo de Verificado 50+ seja vinculado à sua conta.'
+      setCameraPhase('error');
+      setCameraMessage(
+        'Finalize seu login ou cadastro primeiro para vincular o Selo de Verificado 50+ à sua conta.'
       );
       return;
     }
@@ -171,110 +256,46 @@ export function FacialVerificationQrModal({
     const stream = await startCamera();
     if (!stream) return;
 
-    if (typeof MediaRecorder === 'undefined') {
-      setPhase('error');
-      setFeedbackMessage(
-        'Este navegador não suporta gravação de vídeo para prova de vida. Use o aplicativo no celular.'
-      );
-      return;
-    }
-
-    setPhase('recording');
-    setFeedbackMessage('Preparando desafio de prova de vida...');
-
+    setCameraPhase('recording');
     try {
-      // 1. Solicita desafio dinâmico de cores
-      const chRes = await fetch(`${biometricsBaseUrl}/challenge`);
-      if (!chRes.ok) {
-        throw new Error(`Serviço de biometria indisponível (HTTP ${chRes.status}).`);
-      }
-      const challenge = (await chRes.json()) as ChallengePayload;
-
-      // 2. Grava vídeo curto durante o flash espectral de cores
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-        ? 'video/webm;codecs=vp8'
-        : MediaRecorder.isTypeSupported('video/webm')
-          ? 'video/webm'
-          : '';
-
-      const chunks: BlobPart[] = [];
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-      };
-
-      const recordingDone = new Promise<Blob>((resolve) => {
-        recorder.onstop = () => {
-          resolve(new Blob(chunks, { type: mimeType || 'video/webm' }));
-        };
+      const biometricJwt = await recordAndSubmitLiveness({
+        stream,
+        biometricsBaseUrl,
+        userId: session.userId,
+        firstName: (firstName || session.email.split('@')[0] || 'Usuário').trim(),
+        onStatus: (msg) => {
+          setCameraMessage(msg);
+          if (msg.includes('Validando')) setCameraPhase('processing');
+        },
+        onFlashColor: setFlashColor,
       });
 
-      setFeedbackMessage('Olhe para a câmera sem se mexer enquanto as cores piscam...');
-      recorder.start();
-      await sleep(250);
-      setFlashColor('#000000');
-      await sleep(300);
-
-      for (const color of challenge.colors) {
-        setFlashColor(COLOR_HEX[color] || '#FFFFFF');
-        await sleep(challenge.flash_duration_ms || 500);
-      }
-
-      setFlashColor('#000000');
-      await sleep(350);
-      recorder.stop();
-      setFlashColor(null);
-
-      const videoBlob = await recordingDone;
-      setPhase('processing');
-      setFeedbackMessage('Validando prova de vida (MiniFASNet V2) e identidade facial...');
-
-      // 3. Envia ao microsserviço Python (reconhecimento-facial)
-      const form = new FormData();
-      form.append('expected_colors', challenge.colors.join(','));
-      form.append('session_token', challenge.session_token);
-      form.append('user_id', session.userId);
-      form.append('name', (firstName || session.email.split('@')[0] || 'Usuário').trim());
-      form.append('video', videoBlob, 'liveness.webm');
-
-      const bioRes = await fetch(`${biometricsBaseUrl}/register`, {
-        method: 'POST',
-        body: form,
-      });
-      const bioData = (await bioRes.json().catch(() => ({}))) as BiometricsServiceResponse;
-
-      if (bioRes.status === 429) {
-        throw new Error('Muitas tentativas seguidas. Aguarde 1 minuto e tente novamente.');
-      }
-      if (!bioRes.ok || !bioData.success || !bioData.jwt_token) {
-        throw new Error(
-          bioData.reason || bioData.detail || bioData.error || 'Prova de vida não aprovada. Tente em um local mais iluminado.'
-        );
-      }
-
-      // 4. Envia o token biométrico assinado ao backend Java para conceder o Selo de Verificado 50+
-      setFeedbackMessage('Gravando Selo de Verificado 50+ no seu perfil...');
-      const verifiedResponse = await verifyMyBiometrics(session, bioData.jwt_token);
+      setCameraPhase('processing');
+      setCameraMessage('Gravando Selo de Verificado 50+ no seu perfil...');
+      const verifiedResponse = await verifyMyBiometrics(session, biometricJwt);
 
       stopCamera();
-      setPhase('approved');
-      setFeedbackMessage(
+      setCameraPhase('approved');
+      setCameraMessage(
         verifiedResponse.message || 'Parabéns! Seu perfil recebeu o Selo de Verificado 50+.'
       );
-      onVerified?.(verifiedResponse);
+      if (!notifiedVerifiedRef.current) {
+        notifiedVerifiedRef.current = true;
+        onVerified?.(verifiedResponse);
+      }
     } catch (err) {
       setFlashColor(null);
-      setPhase('error');
-      const message =
+      setCameraPhase('error');
+      setCameraMessage(
         err instanceof Error
           ? err.message
-          : 'Não foi possível concluir a verificação facial agora.';
-      setFeedbackMessage(message);
+          : 'Não foi possível concluir a verificação facial agora.'
+      );
     }
   }, [biometricsBaseUrl, firstName, onVerified, startCamera, stopCamera]);
+
+  const isBusy = cameraPhase === 'recording' || cameraPhase === 'processing';
+  const isApproved = handoffState === 'approved' || cameraPhase === 'approved';
 
   return (
     <div
@@ -283,7 +304,7 @@ export function FacialVerificationQrModal({
       aria-modal="true"
       aria-labelledby={titleId}
       onClick={(event) => {
-        if (event.target === event.currentTarget && phase !== 'recording' && phase !== 'processing') {
+        if (event.target === event.currentTarget && !isBusy) {
           handleClose();
         }
       }}
@@ -321,45 +342,108 @@ export function FacialVerificationQrModal({
           </div>
 
           <h2 id={titleId} className="facial-qr-modal__title">
-            Validação facial com prova de vida
+            {activeMode === 'qr'
+              ? 'Verificação facial pelo celular'
+              : 'Verificação facial pela câmera'}
           </h2>
           <p className="facial-qr-modal__subtitle">
-            Confirme que você é uma pessoa real em 3 segundos para receber o Selo de Verificado 50+.
+            {activeMode === 'qr'
+              ? 'Aponte a câmera do celular para o código abaixo. Não precisa baixar aplicativo nem fazer login novamente.'
+              : 'Confirme que você é uma pessoa real em 3 segundos para receber o Selo de Verificado 50+.'}
           </p>
-
-          <div
-            role="tablist"
-            aria-label="Forma de verificação facial"
-            style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeMode === 'camera'}
-              className={`btn ${activeMode === 'camera' ? 'btn--primary' : 'btn--secondary'}`}
-              style={{ minHeight: '48px' }}
-              onClick={() => setActiveMode('camera')}
-            >
-              Usar câmera agora
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeMode === 'qr'}
-              className={`btn ${activeMode === 'qr' ? 'btn--primary' : 'btn--secondary'}`}
-              style={{ minHeight: '48px' }}
-              onClick={() => {
-                stopCamera();
-                setActiveMode('qr');
-              }}
-            >
-              Pelo celular (QR Code)
-            </button>
-          </div>
         </header>
 
         <div className="facial-qr-modal__body">
-          {activeMode === 'camera' ? (
+          {activeMode === 'qr' ? (
+            <>
+              <div className="facial-qr-modal__grid">
+                <div className="facial-qr-modal__qr-container">
+                  <div
+                    className="facial-qr-modal__qr-box"
+                    role="img"
+                    aria-label="Código QR da verificação facial pelo navegador do celular"
+                    style={{
+                      opacity: handoffState === 'expired' || handoffState === 'creating' ? 0.35 : 1,
+                    }}
+                    dangerouslySetInnerHTML={{ __html: qrSvg }}
+                  />
+                  <span className="facial-qr-modal__qr-hint">
+                    {handoffState === 'approved'
+                      ? 'Verificação aprovada!'
+                      : 'Sem aplicativo — abre direto no navegador'}
+                  </span>
+                </div>
+
+                <div className="facial-qr-modal__steps">
+                  <ol className="facial-qr-modal__steps-list">
+                    <li className="facial-qr-modal__step-item">
+                      <span className="facial-qr-modal__step-num" aria-hidden="true">1</span>
+                      <div>
+                        <strong>Abra a câmera do celular</strong>
+                        <p>Aponte a câmera diretamente para o código QR na tela do computador.</p>
+                      </div>
+                    </li>
+                    <li className="facial-qr-modal__step-item">
+                      <span className="facial-qr-modal__step-num" aria-hidden="true">2</span>
+                      <div>
+                        <strong>Toque no link que aparecer</strong>
+                        <p>Ele abre a página segura no navegador do celular, sem baixar app.</p>
+                      </div>
+                    </li>
+                    <li className="facial-qr-modal__step-item">
+                      <span className="facial-qr-modal__step-num" aria-hidden="true">3</span>
+                      <div>
+                        <strong>Faça a prova de vida rápida</strong>
+                        <p>Assim que terminar no celular, esta tela atualiza sozinha com seu selo.</p>
+                      </div>
+                    </li>
+                  </ol>
+
+                  <div className="facial-qr-modal__status-box" role="status" aria-live="polite">
+                    <span>{handoffMessage}</span>
+                  </div>
+                </div>
+              </div>
+
+              <footer
+                className="facial-qr-modal__actions"
+                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  {(handoffState === 'expired' || handoffState === 'error') && (
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      style={{ minHeight: '48px' }}
+                      onClick={() => void initQrHandoff()}
+                    >
+                      Gerar novo código
+                    </button>
+                  )}
+                  {!isApproved && (
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      style={{ minHeight: '48px' }}
+                      onClick={() => setActiveMode('camera')}
+                    >
+                      Usar a câmera deste computador
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  ref={closeButtonRef}
+                  type="button"
+                  className="btn btn--primary"
+                  style={{ minHeight: '48px' }}
+                  onClick={handleClose}
+                >
+                  {isApproved ? 'Concluir' : 'Voltar'}
+                </button>
+              </footer>
+            </>
+          ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
               <div
                 style={{
@@ -391,97 +475,62 @@ export function FacialVerificationQrModal({
                 />
                 {!cameraActive && (
                   <p style={{ color: '#F9FAFB', padding: '16px', textAlign: 'center', margin: 0 }}>
-                    {phase === 'approved'
+                    {cameraPhase === 'approved'
                       ? 'Selo de Verificado 50+ aprovado!'
-                      : 'Clique abaixo para ativar sua câmera frontal e iniciar a prova de vida.'}
+                      : 'Clique abaixo para ativar a câmera e iniciar a prova de vida.'}
                   </p>
                 )}
               </div>
 
               <div className="facial-qr-modal__status-box" role="status" aria-live="polite">
-                <span>{feedbackMessage}</span>
+                <span>{cameraMessage}</span>
               </div>
 
-              <footer className="facial-qr-modal__actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                {phase !== 'approved' && (
+              <footer
+                className="facial-qr-modal__actions"
+                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}
+              >
+                {cameraPhase !== 'approved' && (
                   <button
                     type="button"
                     className="btn btn--primary"
                     style={{ minHeight: '48px' }}
-                    disabled={phase === 'recording' || phase === 'processing'}
-                    onClick={runLiveVerification}
+                    disabled={isBusy}
+                    onClick={runLiveCameraVerification}
                   >
-                    {phase === 'recording'
+                    {cameraPhase === 'recording'
                       ? 'Gravando prova de vida...'
-                      : phase === 'processing'
+                      : cameraPhase === 'processing'
                         ? 'Validando biometria...'
                         : 'Iniciar verificação'}
+                  </button>
+                )}
+                {!isApproved && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    style={{ minHeight: '48px' }}
+                    disabled={isBusy}
+                    onClick={() => {
+                      stopCamera();
+                      setActiveMode('qr');
+                    }}
+                  >
+                    Fazer pelo celular (QR Code)
                   </button>
                 )}
                 <button
                   ref={closeButtonRef}
                   type="button"
-                  className={phase === 'approved' ? 'btn btn--primary' : 'btn btn--secondary'}
+                  className={isApproved ? 'btn btn--primary' : 'btn btn--secondary'}
                   style={{ minHeight: '48px' }}
-                  disabled={phase === 'recording' || phase === 'processing'}
+                  disabled={isBusy}
                   onClick={handleClose}
                 >
-                  {phase === 'approved' ? 'Concluir' : 'Voltar'}
+                  {isApproved ? 'Concluir' : 'Voltar'}
                 </button>
               </footer>
             </div>
-          ) : (
-            <>
-              <div className="facial-qr-modal__grid">
-                <div className="facial-qr-modal__qr-container">
-                  <div
-                    className="facial-qr-modal__qr-box"
-                    role="img"
-                    aria-label="Código QR da verificação facial pelo celular"
-                    dangerouslySetInnerHTML={{ __html: qrSvg }}
-                  />
-                  <span className="facial-qr-modal__qr-hint">Código de verificação BeyondTime</span>
-                </div>
-
-                <div className="facial-qr-modal__steps">
-                  <ol className="facial-qr-modal__steps-list">
-                    <li className="facial-qr-modal__step-item">
-                      <span className="facial-qr-modal__step-num" aria-hidden="true">1</span>
-                      <div>
-                        <strong>Abra a câmera do celular</strong>
-                        <p>Aponte a câmera diretamente para a tela do computador.</p>
-                      </div>
-                    </li>
-                    <li className="facial-qr-modal__step-item">
-                      <span className="facial-qr-modal__step-num" aria-hidden="true">2</span>
-                      <div>
-                        <strong>Toque no link que aparecer</strong>
-                        <p>Ele abre a página segura de verificação no celular.</p>
-                      </div>
-                    </li>
-                    <li className="facial-qr-modal__step-item">
-                      <span className="facial-qr-modal__step-num" aria-hidden="true">3</span>
-                      <div>
-                        <strong>Posicione seu rosto</strong>
-                        <p>A prova de vida confirma que você é real e libera o Selo de Verificado 50+.</p>
-                      </div>
-                    </li>
-                  </ol>
-                </div>
-              </div>
-
-              <footer className="facial-qr-modal__actions">
-                <button
-                  ref={closeButtonRef}
-                  type="button"
-                  className="btn btn--primary"
-                  style={{ minHeight: '48px' }}
-                  onClick={handleClose}
-                >
-                  Voltar
-                </button>
-              </footer>
-            </>
           )}
         </div>
       </div>

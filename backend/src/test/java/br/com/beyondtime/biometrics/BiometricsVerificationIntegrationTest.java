@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -216,5 +217,79 @@ class BiometricsVerificationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new VerifyBiometricsRequest(token))))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Deve concluir handoff PC -> navegador do celular via QR Code (uso único) e conceder Selo 50+")
+    void shouldCompleteQrHandoffEndToEndAndBlockReuse() throws Exception {
+        // 1. PC cria sessão efêmera de handoff
+        MvcResult createRes = mockMvc.perform(post("/api/v1/profiles/me/biometrics/handoff")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.handoffToken").isNotEmpty())
+                .andExpect(jsonPath("$.ttlSeconds").value(300))
+                .andReturn();
+
+        String handoffToken = objectMapper.readTree(createRes.getResponse().getContentAsString())
+                .get("handoffToken").asText();
+
+        // 2. Celular lê dados mínimos da sessão sem precisar de Bearer JWT
+        mockMvc.perform(get("/api/v1/biometrics/handoff/" + handoffToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(userId.toString()))
+                .andExpect(jsonPath("$.firstName").value("Maria"))
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        // 3. PC consulta status antes da conclusão -> PENDING
+        mockMvc.perform(get("/api/v1/profiles/me/biometrics/handoff/" + handoffToken + "/status")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.verifiedBadge50plus").value(false));
+
+        // 4. Celular envia biometricToken assinado pelo microsserviço Python
+        long exp = Instant.now().plusSeconds(3600).getEpochSecond();
+        String biometricToken = generateBiometricToken(userId.toString(), true, 0.19, exp);
+
+        mockMvc.perform(post("/api/v1/biometrics/handoff/" + handoffToken + "/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VerifyBiometricsRequest(biometricToken))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.verifiedBadge50plus").value(true));
+
+        // 5. PC consulta status após conclusão -> COMPLETED + selo ativo
+        mockMvc.perform(get("/api/v1/profiles/me/biometrics/handoff/" + handoffToken + "/status")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.verifiedBadge50plus").value(true));
+
+        // 6. Tentativa de reutilizar o mesmo QR Code -> 410 Gone
+        String anotherToken = generateBiometricToken(userId.toString(), true, 0.20, exp);
+        mockMvc.perform(post("/api/v1/biometrics/handoff/" + handoffToken + "/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VerifyBiometricsRequest(anotherToken))))
+                .andExpect(status().isGone());
+    }
+
+    @Test
+    @DisplayName("Deve bloquear tentativa de concluir handoff com token biométrico de outro usuário")
+    void shouldRejectHandoffCompletionForDifferentUser() throws Exception {
+        MvcResult createRes = mockMvc.perform(post("/api/v1/profiles/me/biometrics/handoff")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String handoffToken = objectMapper.readTree(createRes.getResponse().getContentAsString())
+                .get("handoffToken").asText();
+
+        long exp = Instant.now().plusSeconds(3600).getEpochSecond();
+        String otherUserBioToken = generateBiometricToken(UUID.randomUUID().toString(), true, 0.15, exp);
+
+        mockMvc.perform(post("/api/v1/biometrics/handoff/" + handoffToken + "/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VerifyBiometricsRequest(otherUserBioToken))))
+                .andExpect(status().isForbidden());
     }
 }

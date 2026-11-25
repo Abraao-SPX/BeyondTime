@@ -492,7 +492,8 @@ public class AuthService {
         safeDelete("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?", user.getId(), user.getId());
         safeDelete("DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?", user.getId(), user.getId());
 
-        // Exclusão de embeddings biométricos no microsserviço RF11 (LGPD / RF14)
+        // Exclusão de sessões temporárias de handoff e embeddings biométricos no microsserviço RF11 (LGPD / RF14)
+        safeDelete("DELETE FROM biometric_handoff_sessions WHERE user_id = ?", user.getId());
         if (biometricServiceClient != null) {
             biometricServiceClient.deleteUserBiometricsQuietly(user.getId());
         }
