@@ -55,7 +55,14 @@ public class ChatMessageService {
         );
 
         ChatMessageType type = request.messageType() != null ? request.messageType() : ChatMessageType.TEXT;
-        if ((type == ChatMessageType.IMAGE || type == ChatMessageType.AUDIO) && request.mediaId() != null) {
+        if (type == ChatMessageType.IMAGE || type == ChatMessageType.AUDIO) {
+            if (request.mediaId() == null) {
+                throw new BusinessException(
+                        "INVALID_CHAT_MEDIA",
+                        "Mensagens de foto ou áudio exigem o identificador da mídia cifrada (mediaId).",
+                        HttpStatus.BAD_REQUEST
+                );
+            }
             boolean validMedia = encryptedChatMediaRepository.findById(request.mediaId())
                     .map(media -> media.getConversationId().equals(request.conversationId())
                             && media.getUploaderUserId().equals(senderId))

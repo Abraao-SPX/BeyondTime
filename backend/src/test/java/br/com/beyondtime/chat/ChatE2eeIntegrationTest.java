@@ -541,4 +541,30 @@ class ChatE2eeIntegrationTest {
         assertThat(usedBiometricUnlockJtiRepository.existsById(jti)).isFalse();
         assertThat(Files.exists(expectedEncFile)).isFalse();
     }
+
+    @Test
+    void deveExigirMediaIdParaMensagensDeFotoOuAudio() throws Exception {
+        chatMatchRepository.save(new ChatMatch(userA.getId(), userB.getId(), BigDecimal.valueOf(90.00), (short) 1));
+        MvcResult convResult = mockMvc.perform(post("/api/v1/chat/conversations/with/" + userB.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andReturn();
+        String conversationId = objectMapper.readTree(convResult.getResponse().getContentAsString())
+                .get("conversationId").asText();
+
+        Map<String, Object> missingMediaPayload = Map.of(
+                "conversationId", conversationId,
+                "ciphertext", "Y2lwaGVydGV4dF9zZW1fbWlkaWE=",
+                "iv", "MTJfYnl0ZXNfaXZfZ2Nt",
+                "messageType", "AUDIO",
+                "senderKeyVersion", 1
+        );
+
+        mockMvc.perform(post("/api/v1/chat/conversations/" + conversationId + "/messages")
+                        .header("Authorization", tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(missingMediaPayload)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_CHAT_MEDIA"));
+    }
 }

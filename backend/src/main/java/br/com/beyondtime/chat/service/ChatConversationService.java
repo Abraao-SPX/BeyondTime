@@ -35,6 +35,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.Period;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -220,7 +221,7 @@ public class ChatConversationService {
                 .orElse("Contato BeyondTime");
 
         Integer contactAge = userOpt.map(User::getBirthDate)
-                .map(birthDate -> Period.between(birthDate, LocalDate.now()).getYears())
+                .map(birthDate -> Period.between(birthDate, LocalDate.now(ZoneId.of("America/Maceio"))).getYears())
                 .orElse(null);
 
         String contactCity = profileOpt.map(Profile::getCityId)

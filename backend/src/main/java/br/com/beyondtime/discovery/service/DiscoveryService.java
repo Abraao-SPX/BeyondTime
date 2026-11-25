@@ -44,6 +44,7 @@ import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.Period;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -697,7 +698,7 @@ public class DiscoveryService {
         if (birthDate == null) {
             return 50;
         }
-        return Period.between(birthDate, LocalDate.now()).getYears();
+        return Period.between(birthDate, LocalDate.now(ZoneId.of("America/Maceio"))).getYears();
     }
 
     private String normalizeCityFilter(String cityFilter) {

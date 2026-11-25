@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.Period;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -176,7 +177,7 @@ public class BlockService {
                 .orElse("Usuário BeyondTime");
 
         Integer age = userOpt.map(User::getBirthDate)
-                .map(bd -> Period.between(bd, LocalDate.now()).getYears())
+                .map(bd -> Period.between(bd, LocalDate.now(ZoneId.of("America/Maceio"))).getYears())
                 .orElse(null);
 
         String city = profileOpt.map(Profile::getCityId)

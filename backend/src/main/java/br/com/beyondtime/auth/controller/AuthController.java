@@ -87,7 +87,7 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
-            @RequestBody(required = false) LogoutRequest request) {
+            @Valid @RequestBody(required = false) LogoutRequest request) {
         AuthenticatedUser user = requireAuthenticatedUser(currentUser);
         authService.logout(user.userId(), request);
         return ResponseEntity.noContent().build();
