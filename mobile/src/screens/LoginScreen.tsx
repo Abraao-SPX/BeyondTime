@@ -65,14 +65,12 @@ export function LoginScreen({
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [serverUnavailable, setServerUnavailable] = useState(false);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [recoverySent, setRecoverySent] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
 
   const handleSubmitLogin = async () => {
     setErrorMessage(null);
-    setServerUnavailable(false);
     setSocialNotice(null);
     if (!contact.trim()) {
       setErrorMessage('Por favor, informe seu e-mail ou telefone para continuar.');
@@ -94,9 +92,6 @@ export function LoginScreen({
       }
       onLoginSuccess(contact.trim(), session, profile);
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.code === 'NETWORK_ERROR') {
-        setServerUnavailable(true);
-      }
       const msg =
         err instanceof Error
           ? err.message
@@ -105,32 +100,6 @@ export function LoginScreen({
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handleEnterPreviewMode = () => {
-    const emailValue = contact.trim() || 'marlene@email.com';
-    const demoSession: AuthSession = {
-      accessToken: '',
-      refreshToken: '',
-      tokenType: 'Bearer',
-      expiresInSeconds: 0,
-      userId: 'preview-user',
-      email: emailValue,
-      role: 'USER',
-    };
-    const demoProfile: ServerProfile = {
-      id: 'preview-profile',
-      userId: 'preview-user',
-      fullName: 'Marlene',
-      firstName: 'Marlene',
-      bio: null,
-      city: 'Aracaju, SE',
-      hobbies: ['mpb', 'caminhada', 'forro', 'cafe-e-prosa'],
-      goal: 'amizade',
-      verificationStatus: 'VERIFIED',
-      verifiedBadge50plus: true,
-    };
-    onLoginSuccess(emailValue, demoSession, demoProfile);
   };
 
   const handleSocialLogin = (provider: 'Google' | 'Facebook') => {
@@ -307,15 +276,6 @@ export function LoginScreen({
                 <Text style={[styles.errorText, { color: palette.errorText, fontSize: fs(15) }]}>
                   {errorMessage}
                 </Text>
-                {serverUnavailable ? (
-                  <View style={{ marginTop: 12 }}>
-                    <AccessibleButton
-                      label="Entrar no modo demonstração"
-                      variant="secondary"
-                      onPress={handleEnterPreviewMode}
-                    />
-                  </View>
-                ) : null}
               </View>
             ) : null}
 
@@ -421,15 +381,6 @@ export function LoginScreen({
                 <Text style={[styles.errorText, { color: palette.errorText, fontSize: fs(15) }]}>
                   {errorMessage}
                 </Text>
-                {serverUnavailable ? (
-                  <View style={{ marginTop: 12 }}>
-                    <AccessibleButton
-                      label="Entrar no modo demonstração"
-                      variant="secondary"
-                      onPress={handleEnterPreviewMode}
-                    />
-                  </View>
-                ) : null}
               </View>
             ) : null}
 
