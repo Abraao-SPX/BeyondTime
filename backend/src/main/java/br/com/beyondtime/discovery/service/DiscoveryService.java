@@ -33,6 +33,7 @@ import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -263,24 +264,8 @@ public class DiscoveryService {
         UUID userB = currentUserId.toString().compareTo(targetUserId.toString()) < 0 ? targetUserId : currentUserId;
 
         short commonCount = (short) Math.min(affinitySummary.sharedHobbyNames().size(), Short.MAX_VALUE);
-        ChatMatch match = matchRepository.findByPair(userA, userB)
-                .map(existing -> {
-                    existing.reactivateWithAffinity(affinitySummary.affinityDecimal(), commonCount);
-                    return matchRepository.save(existing);
-                })
-                .orElseGet(() -> matchRepository.save(
-                        new ChatMatch(userA, userB, affinitySummary.affinityDecimal(), commonCount)
-                ));
-
-        Conversation conversation = conversationRepository.findByMatchId(match.getId())
-                .map(existing -> {
-                    if (!"ACTIVE".equalsIgnoreCase(existing.getStatus())) {
-                        existing.markStatus("ACTIVE");
-                        return conversationRepository.save(existing);
-                    }
-                    return existing;
-                })
-                .orElseGet(() -> conversationRepository.save(new Conversation(match.getId())));
+        ChatMatch match = findOrCreateActiveMatch(userA, userB, affinitySummary.affinityDecimal(), commonCount);
+        Conversation conversation = findOrCreateActiveConversation(match.getId());
 
         return new MatchInteractionResponse(
                 "LIKE",
@@ -292,6 +277,43 @@ public class DiscoveryService {
                 affinitySummary.sharedHobbyNames(),
                 affinitySummary.targetProfileDto()
         );
+    }
+
+    private ChatMatch findOrCreateActiveMatch(
+            UUID userA,
+            UUID userB,
+            BigDecimal affinityDecimal,
+            short commonCount) {
+        return matchRepository.findByPair(userA, userB)
+                .map(existing -> {
+                    existing.reactivateWithAffinity(affinityDecimal, commonCount);
+                    return matchRepository.save(existing);
+                })
+                .orElseGet(() -> {
+                    try {
+                        return matchRepository.saveAndFlush(new ChatMatch(userA, userB, affinityDecimal, commonCount));
+                    } catch (DataIntegrityViolationException ex) {
+                        return matchRepository.findByPair(userA, userB).orElseThrow(() -> ex);
+                    }
+                });
+    }
+
+    private Conversation findOrCreateActiveConversation(UUID matchId) {
+        return conversationRepository.findByMatchId(matchId)
+                .map(existing -> {
+                    if (!"ACTIVE".equalsIgnoreCase(existing.getStatus())) {
+                        existing.markStatus("ACTIVE");
+                        return conversationRepository.save(existing);
+                    }
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    try {
+                        return conversationRepository.saveAndFlush(new Conversation(matchId));
+                    } catch (DataIntegrityViolationException ex) {
+                        return conversationRepository.findByMatchId(matchId).orElseThrow(() -> ex);
+                    }
+                });
     }
 
     @Transactional

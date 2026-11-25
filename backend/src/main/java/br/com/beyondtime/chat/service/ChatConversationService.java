@@ -26,6 +26,7 @@ import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -135,7 +136,13 @@ public class ChatConversationService {
         }
 
         Conversation conversation = conversationRepository.findByMatchId(match.getId())
-                .orElseGet(() -> conversationRepository.save(new Conversation(match.getId())));
+                .orElseGet(() -> {
+                    try {
+                        return conversationRepository.saveAndFlush(new Conversation(match.getId()));
+                    } catch (DataIntegrityViolationException ex) {
+                        return conversationRepository.findByMatchId(match.getId()).orElseThrow(() -> ex);
+                    }
+                });
 
         return buildSummary(currentUserId, match, conversation);
     }
