@@ -89,11 +89,16 @@ function formatAudioDurationLabel(seconds?: number | null): string | undefined {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+const MAX_ENCRYPTED_MEDIA_BYTES = 8 * 1024 * 1024;
+const MAX_AUDIO_DURATION_SECONDS = 600;
+
 function parseDurationLabelToSeconds(label?: string): number {
   if (!label) return 1;
   const match = /^(\d+):(\d{2})$/.exec(label.trim());
   if (!match) return 1;
-  return Math.max(1, Number(match[1]) * 60 + Number(match[2]));
+  const parsed = Number(match[1]) * 60 + Number(match[2]);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(MAX_AUDIO_DURATION_SECONDS, Math.floor(parsed));
 }
 
 type PendingBlockTarget = Pick<BlockedContact, 'id' | 'fullName' | 'age' | 'city' | 'avatarUrl'>;
@@ -705,14 +710,20 @@ export function AuthenticatedWorkspace({
         messageType = isAudio ? 'AUDIO' : 'IMAGE';
         const res = await fetch(mediaDataUrl);
         const rawBytes = new Uint8Array(await res.arrayBuffer());
-        const mimeMatch = /^data:([^;]+);/i.exec(mediaDataUrl);
-        mediaMimeType = mimeMatch?.[1] || (isAudio ? 'audio/webm' : 'image/jpeg');
+        const mimeMatch = /^data:([^;,]+)/i.exec(mediaDataUrl);
+        mediaMimeType = mimeMatch?.[1] || (isAudio ? 'audio/mp4' : 'image/jpeg');
         const encryptedMedia = await encryptMediaBytes(
           rawBytes,
           myKeyPairRef.current,
           peerKey,
           conversationId
         );
+        if (encryptedMedia.encryptedBytes.byteLength > MAX_ENCRYPTED_MEDIA_BYTES) {
+          throw new ApiError(
+            'O arquivo escolhido ficou grande demais para envio (limite de 8 MB). Tente uma foto ou áudio menor.',
+            413
+          );
+        }
         const uploaded = await uploadEncryptedChatMedia(
           authSession,
           conversationId,

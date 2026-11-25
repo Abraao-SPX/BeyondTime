@@ -16,10 +16,42 @@ interface SimplifiedChatRF07Props {
 }
 
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_AUDIO_RECORDING_SECONDS = 600;
+const AUDIO_MIME_CANDIDATES = [
+  'audio/mp4',
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+];
+
+function pickSupportedAudioMimeType(): string | undefined {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return undefined;
+  }
+  return AUDIO_MIME_CANDIDATES.find((mime) => {
+    try {
+      return MediaRecorder.isTypeSupported(mime);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function canBrowserPlayAudioUrl(audioUrl: string): boolean {
+  if (typeof document === 'undefined') return true;
+  const match = /^data:(audio\/[^;,]+)/i.exec(audioUrl);
+  if (!match) return true;
+  const probe = document.createElement('audio');
+  if (typeof probe.canPlayType !== 'function') return true;
+  return probe.canPlayType(match[1]) !== '';
+}
 
 function formatSeconds(totalSeconds: number): string {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
+  const safe = Number.isFinite(totalSeconds)
+    ? Math.min(MAX_AUDIO_RECORDING_SECONDS, Math.max(0, Math.floor(totalSeconds)))
+    : 0;
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
@@ -43,6 +75,7 @@ export function SimplifiedChatRF07({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [mediaNotice, setMediaNotice] = useState<string | null>(null);
+  const [unplayableAudioIds, setUnplayableAudioIds] = useState<Record<string, boolean>>({});
 
   const isMountedRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -247,7 +280,10 @@ export function SimplifiedChatRF07({
       audioChunksRef.current = [];
       cancelRecordingFlagRef.current = false;
 
-      const recorder = new MediaRecorder(stream);
+      const preferredMime = pickSupportedAudioMimeType();
+      const recorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
       const targetContactId = activeThread.contactId;
@@ -260,7 +296,11 @@ export function SimplifiedChatRF07({
 
       recorder.onstop = () => {
         const wasCancelled = cancelRecordingFlagRef.current;
-        const durationLabel = formatSeconds(Math.max(1, recordingSecondsRef.current));
+        const clampedSeconds = Math.min(
+          MAX_AUDIO_RECORDING_SECONDS,
+          Math.max(1, Number.isFinite(recordingSecondsRef.current) ? recordingSecondsRef.current : 1)
+        );
+        const durationLabel = formatSeconds(clampedSeconds);
         const chunks = [...audioChunksRef.current];
         cleanupRecordingStream();
 
@@ -268,7 +308,8 @@ export function SimplifiedChatRF07({
           return;
         }
 
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const resolvedMime = (recorder.mimeType || preferredMime || 'audio/mp4').split(';')[0];
+        const blob = new Blob(chunks, { type: resolvedMime });
         const reader = new FileReader();
         reader.onerror = () => {
           if (isMountedRef.current) {
@@ -314,6 +355,10 @@ export function SimplifiedChatRF07({
       recordingTimerRef.current = window.setInterval(() => {
         recordingSecondsRef.current += 1;
         setRecordingSeconds(recordingSecondsRef.current);
+        if (recordingSecondsRef.current >= MAX_AUDIO_RECORDING_SECONDS) {
+          setMediaNotice('Limite de 10 minutos atingido. Enviando seu áudio.');
+          handleStopAndSendRecording();
+        }
       }, 1000);
     } catch {
       cleanupRecordingStream();
@@ -537,12 +582,21 @@ export function SimplifiedChatRF07({
                           <span className="chat-bubble__audio-label">
                             Mensagem de voz ({msg.audioDurationLabel || '00:01'})
                           </span>
-                          <audio
-                            controls
-                            src={msg.audioUrl}
-                            className="chat-bubble__audio"
-                            aria-label="Reproduzir mensagem de voz"
-                          />
+                          {unplayableAudioIds[msg.id] || !canBrowserPlayAudioUrl(msg.audioUrl) ? (
+                            <p className="chat-bubble__text">
+                              Este áudio não pode ser tocado neste navegador.
+                            </p>
+                          ) : (
+                            <audio
+                              controls
+                              src={msg.audioUrl}
+                              className="chat-bubble__audio"
+                              aria-label="Reproduzir mensagem de voz"
+                              onError={() =>
+                                setUnplayableAudioIds((prev) => ({ ...prev, [msg.id]: true }))
+                              }
+                            />
+                          )}
                         </div>
                       )}
                       {msg.text && <p className="chat-bubble__text">{msg.text}</p>}
