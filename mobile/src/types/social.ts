@@ -28,14 +28,20 @@ export interface ChatMessage {
   timestamp: string;
   kind?: 'text' | 'audio' | 'photo';
   audioDurationSec?: number;
+  audioUri?: string;
   photoUrl?: string;
+  mediaId?: string | null;
+  mediaIv?: string | null;
+  mediaMimeType?: string | null;
   read?: boolean;
 }
 
 export interface SendMessageOptions {
   kind?: 'text' | 'audio' | 'photo';
   audioDurationSec?: number;
+  audioUri?: string;
   photoUrl?: string;
+  mimeType?: string;
 }
 
 export interface ChatConversation {
@@ -48,6 +54,8 @@ export interface ChatConversation {
   photoUrl: string;
   verified: boolean;
   sharedHobbyIds: string[];
+  contactPublicKeyJwk?: string | null;
+  contactHasChatKey?: boolean;
   unreadCount: number;
   lastTimestamp: string;
   messages: ChatMessage[];

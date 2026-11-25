@@ -5,7 +5,19 @@
  */
 
 import { Client, type IMessage } from '@stomp/stompjs';
-import { ApiError, type AuthSession } from './authService';
+import * as FileSystem from 'expo-file-system';
+import { Platform } from 'react-native';
+import { ApiError, refreshSession, type AuthSession } from './authService';
+import {
+  base64ToBytes,
+  bytesToBase64,
+  decryptMediaBytes,
+  decryptMessageText,
+  encryptMediaBytes,
+  encryptMessageText,
+  ensureUserChatKeyPair,
+  type LocalChatKeyPair,
+} from './chatE2eeCrypto';
 import type {
   BlockedContactMobile,
   ChatConversation,
@@ -161,8 +173,42 @@ export interface ReadReceiptEventDto {
   readAt: string;
 }
 
+export interface UpsertChatKeyVaultDto {
+  publicKeyJwk: string;
+  encryptedPrivateKey: string;
+  kdfSalt: string;
+  kdfIv: string;
+  kdfIterations: number;
+  keyAlgorithm: string;
+}
+
+export interface ChatKeyVaultResponseDto {
+  userId: string;
+  publicKeyJwk: string;
+  encryptedPrivateKey: string;
+  kdfSalt: string;
+  kdfIv: string;
+  kdfIterations: number;
+  keyAlgorithm: string;
+  keyVersion: number;
+}
+
+export interface PublicChatKeyDto {
+  userId: string;
+  publicKeyJwk: string;
+  keyAlgorithm: string;
+  keyVersion: number;
+}
+
+export interface ChatMediaUploadResponseDto {
+  mediaId: string;
+  conversationId: string;
+  mediaType: BackendChatMessageType;
+  sizeBytes: number;
+}
+
 // ==========================================================================
-// Helper HTTP autenticado (Authorization: Bearer <accessToken>)
+// Helper HTTP autenticado (Authorization: Bearer <accessToken> + refresh 401)
 // ==========================================================================
 
 interface ProblemDetailPayload {
@@ -172,35 +218,74 @@ interface ProblemDetailPayload {
   errors?: Record<string, string>;
 }
 
+let inFlightRefreshPromise: Promise<AuthSession | null> | null = null;
+
+async function tryRefreshAuthSession(session: AuthSession): Promise<AuthSession | null> {
+  if (!session.refreshToken) return null;
+  if (!inFlightRefreshPromise) {
+    inFlightRefreshPromise = refreshSession(session.refreshToken)
+      .then((refreshed) => {
+        session.accessToken = refreshed.accessToken;
+        session.refreshToken = refreshed.refreshToken;
+        session.expiresInSeconds = refreshed.expiresInSeconds;
+        return refreshed;
+      })
+      .catch(() => null)
+      .finally(() => {
+        inFlightRefreshPromise = null;
+      });
+  }
+  return inFlightRefreshPromise;
+}
+
+async function fetchWithAutoRefresh(
+  session: AuthSession,
+  path: string,
+  buildInit: (accessToken: string) => RequestInit
+): Promise<Response> {
+  const execute = async (token: string): Promise<Response> => {
+    try {
+      return await fetch(`${API_BASE_URL}${path}`, buildInit(token));
+    } catch {
+      throw new ApiError(
+        'Não foi possível conectar ao servidor BeyondTime. Verifique sua internet e tente novamente.',
+        0,
+        'NETWORK_ERROR'
+      );
+    }
+  };
+
+  let response = await execute(session.accessToken);
+  if (response.status === 401 && session.refreshToken) {
+    const refreshed = await tryRefreshAuthSession(session);
+    if (refreshed?.accessToken) {
+      response = await execute(refreshed.accessToken);
+    }
+  }
+  return response;
+}
+
 async function authedRequest<T>(
   session: AuthSession,
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${session.accessToken}`,
-  };
-  if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
-  if (options.headers && typeof options.headers === 'object' && !Array.isArray(options.headers)) {
-    Object.assign(headers, options.headers as Record<string, string>);
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithAutoRefresh(session, path, (token) => {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+    if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (options.headers && typeof options.headers === 'object' && !Array.isArray(options.headers)) {
+      Object.assign(headers, options.headers as Record<string, string>);
+    }
+    return {
       ...options,
       headers,
-    });
-  } catch {
-    throw new ApiError(
-      'Não foi possível conectar ao servidor BeyondTime. Verifique sua internet e tente novamente.',
-      0,
-      'NETWORK_ERROR'
-    );
-  }
+    };
+  });
 
   if (!response.ok) {
     let message = `Não foi possível concluir a operação agora (código ${response.status}).`;
@@ -226,206 +311,38 @@ async function authedRequest<T>(
 }
 
 // ==========================================================================
-// Codec compatível com React Native / Hermes (sem exigir window.crypto.subtle)
+// Criptografia E2EE (ECDH P-256 + AES-256-GCM) interoperável Mobile <-> Web
 // ==========================================================================
 
-const RN_BASE64_IV_MARKER = 'bt-rn-b64-v1';
-const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+export type { LocalChatKeyPair };
 
-function utf8ToBytes(str: string): Uint8Array {
-  const bytes: number[] = [];
-  for (let i = 0; i < str.length; i += 1) {
-    let codePoint = str.charCodeAt(i);
-    if (codePoint >= 0xd800 && codePoint <= 0xdbff && i + 1 < str.length) {
-      const next = str.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        codePoint = ((codePoint - 0xd800) << 10) + (next - 0xdc00) + 0x10000;
-        i += 1;
-      }
-    }
-    if (codePoint < 0x80) {
-      bytes.push(codePoint);
-    } else if (codePoint < 0x800) {
-      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
-    } else if (codePoint < 0x10000) {
-      bytes.push(
-        0xe0 | (codePoint >> 12),
-        0x80 | ((codePoint >> 6) & 0x3f),
-        0x80 | (codePoint & 0x3f)
-      );
-    } else {
-      bytes.push(
-        0xf0 | (codePoint >> 18),
-        0x80 | ((codePoint >> 12) & 0x3f),
-        0x80 | ((codePoint >> 6) & 0x3f),
-        0x80 | (codePoint & 0x3f)
-      );
-    }
-  }
-  return new Uint8Array(bytes);
-}
-
-function bytesToUtf8(bytes: Uint8Array): string {
-  let out = '';
-  let i = 0;
-  while (i < bytes.length) {
-    const b1 = bytes[i++];
-    if (b1 < 0x80) {
-      out += String.fromCharCode(b1);
-    } else if ((b1 & 0xe0) === 0xc0 && i < bytes.length) {
-      const b2 = bytes[i++];
-      out += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f));
-    } else if ((b1 & 0xf0) === 0xe0 && i + 1 < bytes.length) {
-      const b2 = bytes[i++];
-      const b3 = bytes[i++];
-      out += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f));
-    } else if ((b1 & 0xf8) === 0xf0 && i + 2 < bytes.length) {
-      const b2 = bytes[i++];
-      const b3 = bytes[i++];
-      const b4 = bytes[i++];
-      const cp =
-        (((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f)) -
-        0x10000;
-      out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
-    } else {
-      out += '\uFFFD';
-    }
-  }
-  return out;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let result = '';
-  const len = bytes.length;
-  for (let i = 0; i < len; i += 3) {
-    const a = bytes[i];
-    const b = i + 1 < len ? bytes[i + 1] : 0;
-    const c = i + 2 < len ? bytes[i + 2] : 0;
-    const triple = (a << 16) | (b << 8) | c;
-    result += BASE64_CHARS[(triple >> 18) & 63];
-    result += BASE64_CHARS[(triple >> 12) & 63];
-    result += i + 1 < len ? BASE64_CHARS[(triple >> 6) & 63] : '=';
-    result += i + 2 < len ? BASE64_CHARS[triple & 63] : '=';
-  }
-  return result;
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const clean = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
-  const outputLen = Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
-  const out = new Uint8Array(outputLen);
-  let outIdx = 0;
-
-  for (let i = 0; i < clean.length; i += 4) {
-    const c1 = BASE64_CHARS.indexOf(clean[i]);
-    const c2 = BASE64_CHARS.indexOf(clean[i + 1]);
-    const c3 = clean[i + 2] === '=' ? 0 : BASE64_CHARS.indexOf(clean[i + 2]);
-    const c4 = clean[i + 3] === '=' ? 0 : BASE64_CHARS.indexOf(clean[i + 3]);
-    if (c1 < 0 || c2 < 0 || c3 < 0 || c4 < 0) continue;
-
-    const triple = (c1 << 18) | (c2 << 12) | (c3 << 6) | c4;
-    if (outIdx < outputLen) out[outIdx++] = (triple >> 16) & 255;
-    if (outIdx < outputLen) out[outIdx++] = (triple >> 8) & 255;
-    if (outIdx < outputLen) out[outIdx++] = triple & 255;
-  }
-  return out;
-}
-
-function getSubtleCrypto(): SubtleCrypto | null {
-  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
-  if (cryptoObj && typeof cryptoObj.subtle?.digest === 'function') {
-    return cryptoObj.subtle;
-  }
-  return null;
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
-async function deriveConversationFallbackAesKey(
-  subtle: SubtleCrypto,
-  conversationId: string
-): Promise<CryptoKey> {
-  const seed = utf8ToBytes(`beyondtime-conv-v1:${conversationId}`);
-  const digest = await subtle.digest('SHA-256', toArrayBuffer(seed));
-  return subtle.importKey('raw', digest, { name: 'AES-GCM', length: 256 }, false, [
-    'encrypt',
-    'decrypt',
-  ]);
+export async function initMobileChatE2ee(session: AuthSession): Promise<LocalChatKeyPair | null> {
+  return ensureUserChatKeyPair(session, {
+    fetchMyVault: fetchMyChatKeyVault,
+    upsertMyVault: upsertMyChatKeyVault,
+  });
 }
 
 export async function encodeChatPayload(
   plaintext: string,
-  conversationId: string
+  conversationId: string,
+  myKeyPair: LocalChatKeyPair | null = null,
+  peerPublicKeyJwk: string | null | undefined = null
 ): Promise<{ ciphertext: string; iv: string; senderKeyVersion: number }> {
-  const subtle = getSubtleCrypto();
-  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
-
-  if (subtle && cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
-    try {
-      const ivBytes = cryptoObj.getRandomValues(new Uint8Array(12));
-      const aesKey = await deriveConversationFallbackAesKey(subtle, conversationId);
-      const plainBytes = utf8ToBytes(plaintext);
-      const encrypted = await subtle.encrypt(
-        { name: 'AES-GCM', iv: toArrayBuffer(ivBytes) },
-        aesKey,
-        toArrayBuffer(plainBytes)
-      );
-      return {
-        ciphertext: bytesToBase64(new Uint8Array(encrypted)),
-        iv: bytesToBase64(ivBytes),
-        senderKeyVersion: 1,
-      };
-    } catch {
-      // fallback seguro abaixo para ambientes sem AES-GCM nativo
-    }
-  }
-
-  return {
-    ciphertext: bytesToBase64(utf8ToBytes(plaintext)),
-    iv: RN_BASE64_IV_MARKER,
-    senderKeyVersion: 1,
-  };
+  return encryptMessageText(plaintext, myKeyPair, peerPublicKeyJwk, conversationId);
 }
 
 export async function decodeChatPayload(
   ciphertext: string,
   iv: string,
-  conversationId: string
+  conversationId: string,
+  myKeyPair: LocalChatKeyPair | null = null,
+  peerPublicKeyJwk: string | null | undefined = null
 ): Promise<string> {
-  if (!ciphertext || !iv) return '';
-
-  if (iv === RN_BASE64_IV_MARKER) {
-    try {
-      return bytesToUtf8(base64ToBytes(ciphertext));
-    } catch {
-      return '[Mensagem protegida]';
-    }
-  }
-
-  const subtle = getSubtleCrypto();
-  if (subtle) {
-    try {
-      const ivBytes = base64ToBytes(iv);
-      const cipherBytes = base64ToBytes(ciphertext);
-      const aesKey = await deriveConversationFallbackAesKey(subtle, conversationId);
-      const decrypted = await subtle.decrypt(
-        { name: 'AES-GCM', iv: toArrayBuffer(ivBytes) },
-        aesKey,
-        toArrayBuffer(cipherBytes)
-      );
-      return bytesToUtf8(new Uint8Array(decrypted));
-    } catch {
-      // continua para tentativa segura abaixo
-    }
-  }
-
-  return '[Mensagem protegida]';
+  return decryptMessageText(ciphertext, iv, myKeyPair, peerPublicKeyJwk, conversationId);
 }
+
+export { encryptMediaBytes, decryptMediaBytes, bytesToBase64, base64ToBytes };
 
 // ==========================================================================
 // Formatadores e Mappers DTO -> Tipos Mobile (mobile/src/types/social.ts)
@@ -527,9 +444,17 @@ export function mapBlockDtoToBlockedContact(dto: BlockedContactDto): BlockedCont
 
 export async function mapMessageDtoToChatMessage(
   dto: EncryptedMessageDto,
-  currentUserId: string
+  currentUserId: string,
+  myKeyPair: LocalChatKeyPair | null = null,
+  peerPublicKeyJwk: string | null | undefined = null
 ): Promise<ChatMessage> {
-  const decodedText = await decodeChatPayload(dto.ciphertext, dto.iv, dto.conversationId);
+  const decodedText = await decodeChatPayload(
+    dto.ciphertext,
+    dto.iv,
+    dto.conversationId,
+    myKeyPair,
+    peerPublicKeyJwk
+  );
   const kind = mapMessageTypeToKind(dto.messageType);
 
   let text = decodedText;
@@ -555,17 +480,28 @@ export async function mapMessageDtoToChatMessage(
     kind,
     audioDurationSec: dto.mediaDurationSeconds ?? undefined,
     photoUrl,
+    mediaId: dto.mediaId ?? null,
+    mediaIv: dto.mediaIv ?? null,
+    mediaMimeType: dto.mediaMimeType ?? null,
     read: Boolean(dto.readAt),
   };
 }
 
 export async function mapConversationDtoToChatConversation(
   dto: ConversationSummaryDto,
-  currentUserId: string
+  currentUserId: string,
+  myKeyPair: LocalChatKeyPair | null = null
 ): Promise<ChatConversation> {
   const messages: ChatMessage[] = [];
   if (dto.lastMessage) {
-    messages.push(await mapMessageDtoToChatMessage(dto.lastMessage, currentUserId));
+    messages.push(
+      await mapMessageDtoToChatMessage(
+        dto.lastMessage,
+        currentUserId,
+        myKeyPair,
+        dto.contactPublicKeyJwk ?? null
+      )
+    );
   }
 
   return {
@@ -578,6 +514,8 @@ export async function mapConversationDtoToChatConversation(
     photoUrl: resolveApiAssetUrl(dto.contactAvatarUrl),
     verified: Boolean(dto.contactVerified),
     sharedHobbyIds: dto.sharedHobbies || [],
+    contactPublicKeyJwk: dto.contactPublicKeyJwk ?? null,
+    contactHasChatKey: Boolean(dto.contactHasChatKey),
     unreadCount: Number(dto.unreadCount || 0),
     lastTimestamp: dto.lastMessage
       ? formatIsoTimeToBr(dto.lastMessage.sentAt)
@@ -729,6 +667,209 @@ export async function markConversationReadRest(
     `/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/read`,
     { method: 'POST' }
   );
+}
+
+// ==========================================================================
+// Endpoints RF-07 (Cofre de Chaves E2EE e Mídia Binária Cifrada)
+// ==========================================================================
+
+export async function fetchMyChatKeyVault(
+  session: AuthSession
+): Promise<ChatKeyVaultResponseDto | null> {
+  try {
+    const result = await authedRequest<ChatKeyVaultResponseDto | undefined>(
+      session,
+      '/api/v1/chat/keys/me',
+      { method: 'GET' }
+    );
+    return result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertMyChatKeyVault(
+  session: AuthSession,
+  payload: UpsertChatKeyVaultDto
+): Promise<ChatKeyVaultResponseDto> {
+  return authedRequest<ChatKeyVaultResponseDto>(session, '/api/v1/chat/keys/me', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchUserPublicChatKey(
+  session: AuthSession,
+  userId: string
+): Promise<PublicChatKeyDto | null> {
+  try {
+    return await authedRequest<PublicChatKeyDto>(
+      session,
+      `/api/v1/chat/keys/${encodeURIComponent(userId)}`,
+      { method: 'GET' }
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function readLocalUriAsBytes(uri: string): Promise<Uint8Array> {
+  if (uri.startsWith('data:')) {
+    const commaIdx = uri.indexOf(',');
+    const b64 = commaIdx >= 0 ? uri.slice(commaIdx + 1) : '';
+    return base64ToBytes(b64);
+  }
+  if (Platform.OS === 'web' || /^https?:\/\//i.test(uri) || uri.startsWith('blob:')) {
+    const res = await fetch(uri);
+    const buffer = await res.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+  const b64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return base64ToBytes(b64);
+}
+
+export async function uploadEncryptedChatMedia(
+  session: AuthSession,
+  conversationId: string,
+  mediaType: 'IMAGE' | 'AUDIO',
+  encryptedBytes: Uint8Array
+): Promise<ChatMediaUploadResponseDto> {
+  let tempFileUri: string | null = null;
+  try {
+    const buildFormData = async (): Promise<FormData> => {
+      const formData = new FormData();
+      formData.append('conversationId', conversationId);
+      formData.append('mediaType', mediaType);
+
+      if (Platform.OS === 'web') {
+        const copy = new Uint8Array(encryptedBytes.byteLength);
+        copy.set(encryptedBytes);
+        const blob = new Blob([copy.buffer], { type: 'application/octet-stream' });
+        formData.append('file', blob, `media-${Date.now()}.enc`);
+      } else {
+        const cacheBase = FileSystem.cacheDirectory || FileSystem.documentDirectory || '';
+        tempFileUri = `${cacheBase}bt-upload-${Date.now()}-${Math.random().toString(36).slice(2)}.enc`;
+        await FileSystem.writeAsStringAsync(tempFileUri, bytesToBase64(encryptedBytes), {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        formData.append('file', {
+          uri: tempFileUri,
+          name: `media-${Date.now()}.enc`,
+          type: 'application/octet-stream',
+        } as unknown as Blob);
+      }
+      return formData;
+    };
+
+    const formData = await buildFormData();
+    const response = await fetchWithAutoRefresh(session, '/api/v1/chat/media', (token) => ({
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    }));
+
+    if (!response.ok) {
+      let message = `Não foi possível enviar a mídia agora (código ${response.status}).`;
+      try {
+        const data = (await response.json()) as ProblemDetailPayload;
+        message = data.detail || data.title || message;
+      } catch {
+        // ignora payload não-JSON
+      }
+      throw new ApiError(message, response.status);
+    }
+
+    return (await response.json()) as ChatMediaUploadResponseDto;
+  } finally {
+    if (tempFileUri) {
+      void FileSystem.deleteAsync(tempFileUri, { idempotent: true }).catch(() => undefined);
+    }
+  }
+}
+
+export async function downloadEncryptedChatMedia(
+  session: AuthSession,
+  mediaId: string
+): Promise<Uint8Array> {
+  const response = await fetchWithAutoRefresh(
+    session,
+    `/api/v1/chat/media/${encodeURIComponent(mediaId)}`,
+    (token) => ({
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      `Não foi possível carregar a mídia da conversa (código ${response.status}).`,
+      response.status
+    );
+  }
+
+  const buffer = await response.arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+function getFileExtensionForMime(mimeType?: string | null, kind?: 'photo' | 'audio'): string {
+  const lower = (mimeType || '').toLowerCase();
+  if (lower.includes('png')) return 'png';
+  if (lower.includes('webp')) return 'webp';
+  if (lower.includes('jpeg') || lower.includes('jpg')) return 'jpg';
+  if (lower.includes('mp4') || lower.includes('m4a')) return 'm4a';
+  if (lower.includes('webm')) return 'webm';
+  if (lower.includes('ogg')) return 'ogg';
+  if (lower.includes('mpeg') || lower.includes('mp3')) return 'mp3';
+  return kind === 'audio' ? 'm4a' : 'jpg';
+}
+
+export async function decryptChatMediaToUri(
+  session: AuthSession,
+  mediaId: string,
+  mediaIv: string,
+  conversationId: string,
+  myKeyPair: LocalChatKeyPair | null,
+  peerPublicKeyJwk: string | null | undefined,
+  mimeType: string | null | undefined,
+  kind: 'photo' | 'audio'
+): Promise<string | null> {
+  try {
+    const encryptedBytes = await downloadEncryptedChatMedia(session, mediaId);
+    const plainBytes = await decryptMediaBytes(
+      encryptedBytes,
+      mediaIv,
+      myKeyPair,
+      peerPublicKeyJwk,
+      conversationId
+    );
+    if (!plainBytes) return null;
+
+    const resolvedMime =
+      mimeType || (kind === 'audio' ? 'audio/mp4' : 'image/jpeg');
+    if (Platform.OS === 'web') {
+      return `data:${resolvedMime};base64,${bytesToBase64(plainBytes)}`;
+    }
+
+    const cacheBase = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+    if (!cacheBase) {
+      return `data:${resolvedMime};base64,${bytesToBase64(plainBytes)}`;
+    }
+    const ext = getFileExtensionForMime(resolvedMime, kind);
+    const localUri = `${cacheBase}bt-media-${mediaId}.${ext}`;
+    await FileSystem.writeAsStringAsync(localUri, bytesToBase64(plainBytes), {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return localUri;
+  } catch {
+    return null;
+  }
 }
 
 // ==========================================================================

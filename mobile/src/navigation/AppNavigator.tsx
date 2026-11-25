@@ -21,12 +21,15 @@ import { ApiError, logoutAccount, type AuthSession } from '../services/authServi
 import {
   createBlockContact,
   createChatStompConnection,
+  decryptChatMediaToUri,
   deleteBlockContact,
   encodeChatPayload,
+  encryptMediaBytes,
   fetchBlockedContacts,
   fetchChatConversations,
   fetchConversationMessages,
   fetchDiscoveryProfiles,
+  initMobileChatE2ee,
   mapBlockDtoToBlockedContact,
   mapConversationDtoToChatConversation,
   mapDiscoveryDtoToRankedProfile,
@@ -34,10 +37,13 @@ import {
   mapMessageDtoToChatMessage,
   markConversationReadRest,
   openOrCreateConversation,
+  readLocalUriAsBytes,
   sendEncryptedMessageRest,
   sendMatchInteraction,
+  uploadEncryptedChatMedia,
   type ChatStompConnection,
   type EncryptedMessageDto,
+  type LocalChatKeyPair,
   type ReadReceiptEventDto,
   type SendEncryptedMessageDto,
 } from '../services/wave2ApiService';
@@ -108,6 +114,7 @@ export function AppNavigator() {
   const [wave2Error, setWave2Error] = useState<string | null>(null);
 
   const stompRef = useRef<ChatStompConnection | null>(null);
+  const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const activeConversationIdRef = useRef<string | null>(activeConversationId);
   const conversationsRef = useRef<ChatConversation[]>(conversations);
   const activeSessionRef = useRef<AuthSession | null>(authSession);
@@ -118,12 +125,38 @@ export function AppNavigator() {
 
   const isSessionCurrent = useCallback((session: AuthSession): boolean => {
     const current = activeSessionRef.current;
-    return (
-      current !== null &&
-      current.userId === session.userId &&
-      current.accessToken === session.accessToken
-    );
+    return current !== null && current.userId === session.userId;
   }, []);
+
+  const hydrateMessageMedia = useCallback(
+    async (
+      session: AuthSession,
+      conversationId: string,
+      msg: ChatMessage,
+      peerPublicKeyJwk: string | null | undefined
+    ): Promise<ChatMessage> => {
+      if (!msg.mediaId || !msg.mediaIv) return msg;
+      if (msg.kind === 'photo' && msg.photoUrl) return msg;
+      if (msg.kind === 'audio' && msg.audioUri) return msg;
+      if (msg.kind !== 'photo' && msg.kind !== 'audio') return msg;
+
+      const resolvedUri = await decryptChatMediaToUri(
+        session,
+        msg.mediaId,
+        msg.mediaIv,
+        conversationId,
+        myKeyPairRef.current,
+        peerPublicKeyJwk,
+        msg.mediaMimeType,
+        msg.kind
+      );
+      if (!resolvedUri) return msg;
+      return msg.kind === 'photo'
+        ? { ...msg, photoUrl: resolvedUri }
+        : { ...msg, audioUri: resolvedUri };
+    },
+    []
+  );
 
   const blockedProfileIds = useMemo(
     () => blockedContacts.map((b) => b.id),
@@ -167,7 +200,9 @@ export function AppNavigator() {
       const convDtos = await fetchChatConversations(session);
       if (!isSessionCurrent(session)) return;
       const mapped = await Promise.all(
-        convDtos.map((dto) => mapConversationDtoToChatConversation(dto, session.userId))
+        convDtos.map((dto) =>
+          mapConversationDtoToChatConversation(dto, session.userId, myKeyPairRef.current)
+        )
       );
       if (!isSessionCurrent(session)) return;
       setConversations((prev) => {
@@ -246,6 +281,9 @@ export function AppNavigator() {
       setIsLoadingWave2(true);
       setWave2Error(null);
       try {
+        myKeyPairRef.current = await initMobileChatE2ee(session);
+        if (cancelled) return;
+
         const [discDtos, convDtos, blockDtos] = await Promise.all([
           fetchDiscoveryProfiles(session, { limit: 30 }),
           fetchChatConversations(session),
@@ -256,7 +294,9 @@ export function AppNavigator() {
         setRemoteDiscoveryProfiles(discDtos.map(mapDiscoveryDtoToRankedProfile));
         setBlockedContacts(blockDtos.map(mapBlockDtoToBlockedContact));
         const mappedConvs = await Promise.all(
-          convDtos.map((dto) => mapConversationDtoToChatConversation(dto, session.userId))
+          convDtos.map((dto) =>
+            mapConversationDtoToChatConversation(dto, session.userId, myKeyPairRef.current)
+          )
         );
         if (!cancelled) {
           setConversations(mappedConvs);
@@ -283,13 +323,27 @@ export function AppNavigator() {
       onMessage: (incoming: EncryptedMessageDto) => {
         void (async () => {
           if (cancelled) return;
-          const mappedMsg = await mapMessageDtoToChatMessage(incoming, session.userId);
-          if (cancelled) return;
-
-          const hasConv = conversationsRef.current.some(
+          const existingConv = conversationsRef.current.find(
             (c) => c.id === incoming.conversationId
           );
-          if (!hasConv) {
+          const peerKey = existingConv?.contactPublicKeyJwk ?? null;
+          const baseMsg = await mapMessageDtoToChatMessage(
+            incoming,
+            session.userId,
+            myKeyPairRef.current,
+            peerKey
+          );
+          if (cancelled) return;
+
+          const mappedMsg = await hydrateMessageMedia(
+            session,
+            incoming.conversationId,
+            baseMsg,
+            peerKey
+          );
+          if (cancelled) return;
+
+          if (!existingConv) {
             await reloadConversations(session);
           }
 
@@ -335,7 +389,7 @@ export function AppNavigator() {
         stompRef.current = null;
       }
     };
-  }, [appendMessageDeduplicated, authSession, reloadConversations, route]);
+  }, [appendMessageDeduplicated, authSession, hydrateMessageMedia, reloadConversations, route]);
 
   // Suporte defensivo ao botão físico Voltar no Android
   useEffect(() => {
@@ -360,6 +414,7 @@ export function AppNavigator() {
   const handleResetAndExit = () => {
     const currentSession = authSession;
     activeSessionRef.current = null;
+    myKeyPairRef.current = null;
     if (stompRef.current) {
       stompRef.current.disconnect();
       stompRef.current = null;
@@ -445,8 +500,18 @@ export function AppNavigator() {
         try {
           const dtos = await fetchConversationMessages(session, conversationId, 100);
           if (!isSessionCurrent(session)) return;
+          const convObj = conversationsRef.current.find((c) => c.id === conversationId);
+          const peerKey = convObj?.contactPublicKeyJwk ?? null;
+          const decodedBase = await Promise.all(
+            dtos.map((dto) =>
+              mapMessageDtoToChatMessage(dto, session.userId, myKeyPairRef.current, peerKey)
+            )
+          );
+          if (!isSessionCurrent(session)) return;
           const decoded = await Promise.all(
-            dtos.map((dto) => mapMessageDtoToChatMessage(dto, session.userId))
+            decodedBase.map((msg) =>
+              hydrateMessageMedia(session, conversationId, msg, peerKey)
+            )
           );
           if (!isSessionCurrent(session)) return;
           setConversations((prev) =>
@@ -480,7 +545,7 @@ export function AppNavigator() {
         }
       })();
     },
-    [authSession, isSessionCurrent]
+    [authSession, hydrateMessageMedia, isSessionCurrent]
   );
 
   const handleMutualConnection = (
@@ -499,7 +564,8 @@ export function AppNavigator() {
           if (!isSessionCurrent(session)) return;
           const mappedConv = await mapConversationDtoToChatConversation(
             convDto,
-            session.userId
+            session.userId,
+            myKeyPairRef.current
           );
           if (!isSessionCurrent(session)) return;
           targetConvId = mappedConv.id;
@@ -539,12 +605,59 @@ export function AppNavigator() {
     const session = authSession;
 
     try {
-      const rawPayload =
-        options?.kind === 'photo' && options.photoUrl
-          ? JSON.stringify({ caption: text, photoUrl: options.photoUrl })
-          : text;
+      const targetConv = conversationsRef.current.find((c) => c.id === conversationId);
+      const peerKey = targetConv?.contactPublicKeyJwk ?? null;
 
-      const encoded = await encodeChatPayload(rawPayload, conversationId);
+      let mediaId: string | null = null;
+      let mediaIv: string | null = null;
+      let mediaMimeType: string | null = null;
+
+      if (options?.kind === 'photo' && options.photoUrl) {
+        const plainBytes = await readLocalUriAsBytes(options.photoUrl);
+        if (!isSessionCurrent(session)) return false;
+        const encryptedMedia = await encryptMediaBytes(
+          plainBytes,
+          myKeyPairRef.current,
+          peerKey,
+          conversationId
+        );
+        const uploaded = await uploadEncryptedChatMedia(
+          session,
+          conversationId,
+          'IMAGE',
+          encryptedMedia.encryptedBytes
+        );
+        if (!isSessionCurrent(session)) return false;
+        mediaId = uploaded.mediaId;
+        mediaIv = encryptedMedia.mediaIv;
+        mediaMimeType = options.mimeType || 'image/jpeg';
+      } else if (options?.kind === 'audio' && options.audioUri) {
+        const plainBytes = await readLocalUriAsBytes(options.audioUri);
+        if (!isSessionCurrent(session)) return false;
+        const encryptedMedia = await encryptMediaBytes(
+          plainBytes,
+          myKeyPairRef.current,
+          peerKey,
+          conversationId
+        );
+        const uploaded = await uploadEncryptedChatMedia(
+          session,
+          conversationId,
+          'AUDIO',
+          encryptedMedia.encryptedBytes
+        );
+        if (!isSessionCurrent(session)) return false;
+        mediaId = uploaded.mediaId;
+        mediaIv = encryptedMedia.mediaIv;
+        mediaMimeType = options.mimeType || 'audio/mp4';
+      }
+
+      const encoded = await encodeChatPayload(
+        text,
+        conversationId,
+        myKeyPairRef.current,
+        peerKey
+      );
       if (!isSessionCurrent(session)) return false;
 
       const payload: SendEncryptedMessageDto = {
@@ -552,6 +665,9 @@ export function AppNavigator() {
         ciphertext: encoded.ciphertext,
         iv: encoded.iv,
         messageType: mapKindToMessageType(options?.kind),
+        mediaId,
+        mediaIv,
+        mediaMimeType,
         mediaDurationSeconds:
           options?.kind === 'audio' ? options.audioDurationSec ?? 1 : null,
         senderKeyVersion: encoded.senderKeyVersion,
@@ -561,7 +677,17 @@ export function AppNavigator() {
       if (!sentViaStomp) {
         const savedDto = await sendEncryptedMessageRest(session, payload);
         if (!isSessionCurrent(session)) return false;
-        const mappedMsg = await mapMessageDtoToChatMessage(savedDto, session.userId);
+        const baseMsg = await mapMessageDtoToChatMessage(
+          savedDto,
+          session.userId,
+          myKeyPairRef.current,
+          peerKey
+        );
+        const mappedMsg: ChatMessage = {
+          ...baseMsg,
+          photoUrl: options?.kind === 'photo' ? options.photoUrl : baseMsg.photoUrl,
+          audioUri: options?.kind === 'audio' ? options.audioUri : baseMsg.audioUri,
+        };
         if (!isSessionCurrent(session)) return false;
         appendMessageDeduplicated(conversationId, mappedMsg, false);
       }

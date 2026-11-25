@@ -207,6 +207,13 @@ export async function confirmPasswordReset(
   });
 }
 
+export async function refreshSession(refreshToken: string): Promise<AuthSession> {
+  return requestJson<AuthSession>('/api/v1/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken: refreshToken.trim() }),
+  });
+}
+
 export async function logoutAccount(session: AuthSession | null): Promise<void> {
   if (!session?.accessToken) return;
   try {
