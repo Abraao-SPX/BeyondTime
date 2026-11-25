@@ -79,6 +79,11 @@ services:
       BEYONDTIME_MAIL_FROM: ${BEYONDTIME_MAIL_FROM:-nao-responda@beyondtime.com.br}
       PASSWORD_RESET_EXPOSE_DEBUG_CODE: ${PASSWORD_RESET_EXPOSE_DEBUG_CODE:-false}
       AVATARS_UPLOAD_DIR: /app/uploads/avatars
+      CHAT_MEDIA_UPLOAD_DIR: /app/uploads/chat-media
+      ANTIFRAUD_API_URL: http://anjo-da-guarda:8000
+      CHAT_VAULT_KEK: ${CHAT_VAULT_KEK:-}
+      BIOMETRIA_API_URL: http://reconhecimento-facial:8000
+      BIOMETRIA_INTERNAL_API_KEY: ${BIOMETRIA_INTERNAL_API_KEY:-}
     volumes:
       - avatars_data:/app/uploads
     depends_on:

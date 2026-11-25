@@ -19,6 +19,7 @@ import {
 } from '../utils/validation';
 import { SocialAuthGrid } from './SocialAuthGrid';
 import { SocialBirthDateModal } from './SocialBirthDateModal';
+import { PasswordInput } from './PasswordInput';
 
 function fromIsoBirthDateToBr(isoDate: string): string {
   const parts = isoDate.trim().split('-');
@@ -41,8 +42,7 @@ export function TelaLogin({
   onAuthSuccess,
 }: TelaLoginProps) {
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const rememberMe = false;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -115,8 +115,9 @@ export function TelaLogin({
           setFeedbackMessage(null);
         }
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || `Erro ao autenticar com ${provider}.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : `Erro ao autenticar com ${provider}.`;
+      setErrorMessage(msg);
       setFeedbackMessage(null);
     } finally {
       setIsSocialSubmitting(false);
@@ -286,7 +287,7 @@ export function TelaLogin({
               if (errorMessage) setErrorMessage(null);
             }}
             aria-invalid={errorMessage !== null ? 'true' : undefined}
-            aria-describedby="login-contact-error"
+            aria-describedby={errorMessage !== null ? 'login-contact-error' : undefined}
           />
         </div>
 
@@ -294,67 +295,23 @@ export function TelaLogin({
           <label className="form-label" htmlFor="login-password">
             Senha
           </label>
-          <div className="password-field">
-            <input
-              id="login-password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              className="form-input form-input--password"
-              autoComplete="current-password"
-              placeholder="Digite sua senha"
-              value={password}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                if (errorMessage) setErrorMessage(null);
-              }}
-            />
-            <button
-              type="button"
-              className="btn-eye"
-              onClick={() => setShowPassword((prev) => !prev)}
-              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-            >
-              {showPassword ? 'Ocultar' : 'Mostrar'}
-            </button>
-          </div>
+          <PasswordInput
+            id="login-password"
+            name="password"
+            autoComplete="current-password"
+            placeholder="Digite sua senha"
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (errorMessage) setErrorMessage(null);
+            }}
+          />
+        </div>
           {errorMessage !== null && (
             <p id="login-contact-error" className="form-error" role="alert">
               {errorMessage}
             </p>
           )}
-        </div>
-
-        <div className="form-group" style={{ marginTop: '4px', marginBottom: '16px' }}>
-          <label
-            htmlFor="login-remember-me"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '12px',
-              minHeight: '48px',
-              cursor: 'pointer',
-              fontSize: '15px',
-              color: 'var(--text-primary)',
-            }}
-          >
-            <input
-              id="login-remember-me"
-              name="rememberMe"
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              style={{
-                width: '22px',
-                height: '22px',
-                minWidth: '22px',
-                minHeight: '22px',
-                accentColor: 'var(--brand-primary)',
-                cursor: 'pointer',
-              }}
-            />
-            <span>Manter conectado neste dispositivo</span>
-          </label>
-        </div>
 
         <button
           type="submit"

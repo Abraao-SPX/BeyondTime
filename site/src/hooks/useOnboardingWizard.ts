@@ -13,6 +13,7 @@ import {
 const EMPTY_FORM_DATA: OnboardingFormData = {
   contact: '',
   fullName: '',
+  preferredName: '',
   birthDate: '',
   city: 'Aracaju (SE)',
   photoPreviewUrl: null,
@@ -84,6 +85,13 @@ export function useOnboardingWizard() {
     setStep((prev) => (prev > 1 ? ((prev - 1) as OnboardingStep) : prev));
   }
 
+  function goToStep(targetStep: OnboardingStep) {
+    if (targetStep >= 1 && targetStep <= 7) {
+      setStep(targetStep);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
   function completeOnboarding() {
     const calculatedAge = calculateAgeFromBirthDate(formData.birthDate);
     if (calculatedAge === null || calculatedAge < MIN_ALLOWED_AGE) {
@@ -142,6 +150,7 @@ export function useOnboardingWizard() {
     toggleHobby,
     goNext,
     goBack,
+    goToStep,
     completeOnboarding,
     startEditingProfile,
     resetWizard,

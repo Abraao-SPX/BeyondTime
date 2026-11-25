@@ -2,6 +2,7 @@ import type { OnboardingStep } from '../../types/auth';
 
 interface OnboardingStepHeaderProps {
   step: OnboardingStep;
+  isCompleted?: boolean;
   onBack?: () => void;
 }
 
@@ -17,14 +18,17 @@ const STEP_PERCENTAGES: Record<OnboardingStep, number> = {
 
 export function OnboardingStepHeader({
   step,
+  isCompleted = false,
   onBack,
 }: OnboardingStepHeaderProps) {
   const percent = STEP_PERCENTAGES[step];
 
   return (
     <div className="register-progress">
-      {step === 1 ? (
-        <span className="register-progress__welcome">Boas-vindas</span>
+      {!onBack ? (
+        <span className="register-progress__welcome">
+          {isCompleted ? 'Cadastro concluído' : step === 1 ? 'Boas-vindas' : 'Seu perfil'}
+        </span>
       ) : (
         <button
           type="button"

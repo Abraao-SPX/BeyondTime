@@ -71,21 +71,23 @@ export async function authenticateWithFirebasePopup(
       photoUrl: userCredential.user.photoURL || null,
       provider: providerName,
     };
-  } catch (error: any) {
-    if (error?.code === 'auth/popup-closed-by-user') {
+  } catch (error: unknown) {
+    const err = error as { code?: string; message?: string } | undefined;
+    if (err?.code === 'auth/popup-closed-by-user') {
       throw new Error('A janela de login social foi fechada antes de concluir a autenticação.');
     }
-    if (error?.code === 'auth/cancelled-popup-request') {
+    if (err?.code === 'auth/cancelled-popup-request') {
       throw new Error('Operação de login cancelada.');
     }
-    if (error?.code === 'auth/popup-blocked') {
+    if (err?.code === 'auth/popup-blocked') {
       throw new Error('A janela pop-up foi bloqueada pelo navegador. Permita pop-ups para entrar.');
     }
-    if (error?.code === 'auth/account-exists-with-different-credential') {
+    if (err?.code === 'auth/account-exists-with-different-credential') {
       throw new Error('Já existe uma conta cadastrada com este e-mail através de outro método de acesso.');
     }
+    const message = error instanceof Error ? error.message : err?.message;
     throw new Error(
-      error?.message || 'Falha ao autenticar com provedor social via Firebase. Tente novamente.'
+      message || 'Falha ao autenticar com provedor social via Firebase. Tente novamente.'
     );
   }
 }

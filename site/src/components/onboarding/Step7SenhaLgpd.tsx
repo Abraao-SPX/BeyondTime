@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { LegalDocKey, OnboardingFormData, SocialProvider } from '../../types/auth';
+import type { OnboardingFormData, SocialProvider } from '../../types/auth';
 import {
   calculateAgeFromBirthDate,
   MIN_PASSWORD_LENGTH,
   validatePasswordMatch,
 } from '../../utils/validation';
+import { PasswordInput } from '../PasswordInput';
+import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 
 interface Step7SenhaLgpdProps {
   formData: OnboardingFormData;
@@ -22,51 +24,6 @@ interface Step7SenhaLgpdProps {
   onFinishToLogin: () => void;
 }
 
-const LEGAL_PREVIEWS: Record<LegalDocKey, string> = {
-  terms:
-    'Termos de Uso: o BeyondTime é uma plataforma 50+ para conexões respeitosas, com diretrizes claras contra fraudes, assédio e solicitações financeiras.',
-  privacy:
-    'Política de Privacidade e Segurança: seus dados pessoais e preferências são tratados conforme a LGPD, sem exibição pública de endereço ou telefone.',
-};
-
-function EyeIcon({ visible }: { visible: boolean }) {
-  if (visible) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="btn-eye__icon"
-        aria-hidden="true"
-      >
-        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94" />
-        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19" />
-        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-        <path d="M1 1l22 22" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="btn-eye__icon"
-      aria-hidden="true"
-    >
-      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
 export function Step7SenhaLgpd({
   formData,
   isCompleted,
@@ -81,10 +38,8 @@ export function Step7SenhaLgpd({
   onEditProfile,
   onFinishToLogin,
 }: Step7SenhaLgpdProps) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -121,10 +76,6 @@ export function Step7SenhaLgpd({
 
     setFormError(null);
     onComplete();
-  }
-
-  function handleToggleLegalPreview(docKey: LegalDocKey) {
-    setActiveLegalDoc((current) => (current === docKey ? null : docKey));
   }
 
   if (isCompleted) {
@@ -170,6 +121,23 @@ export function Step7SenhaLgpd({
           </p>
         </div>
 
+        <div className="photo-verification-banner" style={{ margin: '20px 0' }}>
+          <div className="photo-verification-banner__text">
+            <strong>Verificação facial pelo celular (opcional)</strong>
+            <p>
+              Em breve você poderá confirmar sua identidade com a câmera do celular e receber o
+              Selo de Verificado 50+. Você poderá fazer isso depois, em Meu Perfil.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => setShowQrModal(true)}
+          >
+            Ver como funciona
+          </button>
+        </div>
+
         <div className="action-stack action-stack--compact">
           <button
             type="button"
@@ -186,6 +154,8 @@ export function Step7SenhaLgpd({
             Editar perfil
           </button>
         </div>
+
+        {showQrModal && <FacialVerificationQrModal onClose={() => setShowQrModal(false)} />}
       </div>
     );
   }
@@ -219,32 +189,19 @@ export function Step7SenhaLgpd({
               <label className="form-label" htmlFor="step7-password">
                 {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
               </label>
-              <div className="password-row">
-                <input
-                  ref={passwordInputRef}
-                  id="step7-password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  className="form-input form-input--password"
-                  autoComplete="new-password"
-                  placeholder="Digite sua senha"
-                  value={formData.password}
-                  onChange={(event) => {
-                    onPasswordChange(event.target.value);
-                    if (formError !== null) setFormError(null);
-                  }}
-                  aria-describedby="step7-password-help"
-                />
-                <button
-                  type="button"
-                  className="btn-eye"
-                  aria-label="Mostrar ou ocultar senha"
-                  aria-pressed={showPassword}
-                  onClick={() => setShowPassword((prev) => !prev)}
-                >
-                  <EyeIcon visible={showPassword} />
-                </button>
-              </div>
+              <PasswordInput
+                ref={passwordInputRef}
+                id="step7-password"
+                name="password"
+                autoComplete="new-password"
+                placeholder="Digite sua senha"
+                value={formData.password}
+                onChange={(event) => {
+                  onPasswordChange(event.target.value);
+                  if (formError !== null) setFormError(null);
+                }}
+                aria-describedby="step7-password-help"
+              />
               <p id="step7-password-help" className="form-helper">
                 Mínimo de {MIN_PASSWORD_LENGTH} caracteres, com letra maiúscula, minúscula, número e caractere especial (ex.: . , @ ! #).
               </p>
@@ -254,30 +211,17 @@ export function Step7SenhaLgpd({
               <label className="form-label" htmlFor="step7-confirm-password">
                 Confirmar senha
               </label>
-              <div className="password-row">
-                <input
-                  id="step7-confirm-password"
-                  name="confirmPassword"
-                  type={showConfirm ? 'text' : 'password'}
-                  className="form-input form-input--password"
-                  autoComplete="new-password"
-                  placeholder="Digite a senha novamente"
-                  value={formData.confirmPassword}
-                  onChange={(event) => {
-                    onConfirmPasswordChange(event.target.value);
-                    if (formError !== null) setFormError(null);
-                  }}
-                />
-                <button
-                  type="button"
-                  className="btn-eye"
-                  aria-label="Mostrar ou ocultar confirmação de senha"
-                  aria-pressed={showConfirm}
-                  onClick={() => setShowConfirm((prev) => !prev)}
-                >
-                  <EyeIcon visible={showConfirm} />
-                </button>
-              </div>
+              <PasswordInput
+                id="step7-confirm-password"
+                name="confirmPassword"
+                autoComplete="new-password"
+                placeholder="Digite a senha novamente"
+                value={formData.confirmPassword}
+                onChange={(event) => {
+                  onConfirmPasswordChange(event.target.value);
+                  if (formError !== null) setFormError(null);
+                }}
+              />
               {passwordsMatch && (
                 <p className="password-match" aria-live="polite">
                   As senhas coincidem
@@ -315,49 +259,29 @@ export function Step7SenhaLgpd({
               )}
             </span>
             <span className="lgpd-checkbox-text">
-              Li e aceito os <strong>Termos de Uso</strong> e a{' '}
-              <strong>Política de Privacidade e Segurança</strong> do BeyondTime.
+              Li e aceito os{' '}
+              <a
+                href="/termos"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lgpd-inline-link"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Termos de Uso
+              </a>{' '}
+              e a{' '}
+              <a
+                href="/privacidade"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lgpd-inline-link"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Política de Privacidade e Segurança
+              </a>{' '}
+              do BeyondTime.
             </span>
           </label>
-
-          <div className="lgpd-doc-buttons">
-            <button
-              type="button"
-              className="btn-legal-outline"
-              onClick={() => handleToggleLegalPreview('terms')}
-            >
-              Termos de Uso
-            </button>
-            <button
-              type="button"
-              className="btn-legal-outline"
-              onClick={() => handleToggleLegalPreview('privacy')}
-            >
-              Política de Privacidade e Segurança
-            </button>
-            <a
-              href="/privacidade"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-legal-outline"
-              style={{
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                color: 'var(--brand-primary)',
-              }}
-              title="Abre a Política de Privacidade e Proteção de Dados completa em nova aba"
-            >
-              Ler Política Completa (LGPD) ↗
-            </a>
-          </div>
-
-          {activeLegalDoc !== null && (
-            <p className="form-feedback" aria-live="polite">
-              {LEGAL_PREVIEWS[activeLegalDoc]}
-            </p>
-          )}
         </div>
 
         {formError !== null && (

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   ApiError,
@@ -37,6 +37,7 @@ import { Step4FotoPerfil } from './onboarding/Step4FotoPerfil';
 import { Step5Interesses } from './onboarding/Step5Interesses';
 import { Step6Objetivo } from './onboarding/Step6Objetivo';
 import { Step7SenhaLgpd } from './onboarding/Step7SenhaLgpd';
+import { OnboardingSidebarStepper } from './onboarding/OnboardingSidebarStepper';
 import { SocialAuthGrid } from './SocialAuthGrid';
 
 interface CriarMinhaContaProps {
@@ -51,6 +52,8 @@ interface CriarMinhaContaProps {
   isEditMode?: boolean;
   onProfileSaved?: (profile: ServerProfile) => void;
   onCancelEdit?: () => void;
+  prefill?: { goal?: ConnectionGoal; city?: string } | null;
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
 function toIsoBirthDate(brDate: string): string {
@@ -117,6 +120,8 @@ export function CriarMinhaConta({
   isEditMode = false,
   onProfileSaved,
   onCancelEdit,
+  prefill = null,
+  onDirtyChange,
 }: CriarMinhaContaProps) {
   // SEC-ALTA-08: Se o usuário já estiver autenticado (recuperação de perfil órfão 404 ou edição),
   // inicia diretamente na etapa 2 (Dados Pessoais) sem forçar re-registro
@@ -140,16 +145,25 @@ export function CriarMinhaConta({
     contact: existingSession?.email || contact,
     fullName: initialProfile?.fullName || socialDraft?.fullName || '',
     birthDate: socialDraft?.birthDate || '',
-    city: initialProfile?.city || 'Aracaju (SE)',
+    city: initialProfile?.city || prefill?.city || 'Aracaju (SE)',
     photoPreviewUrl:
       resolveApiAssetUrl(initialProfile?.avatarUrl) || socialDraft?.photoUrl || null,
     photoFileName: null,
     hobbies: mapServerHobbiesToLabels(initialProfile?.hobbies),
-    goal: normalizeGoal(initialProfile?.goal),
+    goal: normalizeGoal(initialProfile?.goal || prefill?.goal),
     password: '',
     confirmPassword: '',
     acceptedLgpd: Boolean(existingSession),
   });
+
+  useEffect(() => {
+    const isDirty =
+      step > 1 ||
+      contact.trim().length > 0 ||
+      formData.fullName.trim().length > 0 ||
+      formData.hobbies.length > 0;
+    onDirtyChange?.(isDirty);
+  }, [step, contact, formData.fullName, formData.hobbies.length, onDirtyChange]);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -178,8 +192,9 @@ export function CriarMinhaConta({
         `Conta ${provider} conectada com sucesso! Prossiga com seus dados e data de nascimento.`
       );
       setStep(2);
-    } catch (err: any) {
-      setStep1Error(err?.message || `Erro ao conectar com ${provider}. Tente novamente.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : `Erro ao conectar com ${provider}. Tente novamente.`;
+      setStep1Error(msg);
       setFeedbackMessage(null);
     } finally {
       setIsSubmitting(false);
@@ -309,9 +324,27 @@ export function CriarMinhaConta({
   const canGoBack = !isCompleted && (isEditMode ? step >= 2 : step > (existingSession ? 2 : 1));
 
   return (
-    <section id="view-register" className="auth-view" aria-labelledby="register-title">
+    <div className="onboarding-split-container">
+      <aside className="onboarding-split__sidebar">
+        <OnboardingSidebarStepper
+          currentStep={step}
+          isCompleted={isCompleted}
+          onStepClick={
+            isCompleted || isSubmitting
+              ? undefined
+              : (targetStep) => {
+                  if (targetStep < step) {
+                    setStep(targetStep);
+                  }
+                }
+          }
+        />
+      </aside>
+
+      <section id="view-register" className="auth-view onboarding-split__main" aria-labelledby="register-title">
       <OnboardingStepHeader
         step={step}
+        isCompleted={isCompleted}
         onBack={canGoBack ? handleBack : undefined}
       />
 
@@ -477,6 +510,7 @@ export function CriarMinhaConta({
           )}
         </>
       )}
-    </section>
+      </section>
+    </div>
   );
 }

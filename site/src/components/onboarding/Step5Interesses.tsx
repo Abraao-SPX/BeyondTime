@@ -19,7 +19,7 @@ export function Step5Interesses({
   onNext,
 }: Step5InteressesProps) {
   const [activeCategory, setActiveCategory] =
-    useState<HobbyCategory>('Arte e Cultura');
+    useState<HobbyCategory>('Música e Dança');
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {

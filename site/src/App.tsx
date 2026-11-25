@@ -4,10 +4,12 @@ import { CriarMinhaConta } from './components/CriarMinhaConta';
 import { DefensiveModalRF06 } from './components/DefensiveModalRF06';
 import { FooterGlobal } from './components/FooterGlobal';
 import { HeaderGlobal } from './components/HeaderGlobal';
-import { LandingPage } from './components/LandingPage';
+import { LandingPageHome as LandingPage, type OnboardingPrefill } from './components/LandingPageHome';
 import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
+import { AuthenticatedWorkspace } from './components/wave2/AuthenticatedWorkspace';
+import { useHighContrast } from './hooks/useHighContrast';
 import {
   ApiError,
   clearAuthSession,
@@ -25,7 +27,7 @@ import type {
   LegalPageId,
   SocialOnboardingDraft,
 } from './types/auth';
-import { sanitizeTextInput } from './utils/validation';
+import { calculateAgeFromBirthDate, sanitizeTextInput } from './utils/validation';
 
 const DELETE_COUNTDOWN_SECONDS = 5;
 
@@ -47,13 +49,52 @@ export function parseLegalPageFromPath(pathname: string): LegalPageId | null {
   return null;
 }
 
+const IS_DEV_ONDA2_PREVIEW =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('preview') === 'onda2';
+
+const DEV_PREVIEW_SESSION: AuthSession = {
+  accessToken: 'dev-preview-token',
+  refreshToken: 'dev-preview-refresh',
+  tokenType: 'Bearer',
+  expiresInSeconds: 3600,
+  userId: 'dev-preview-50plus',
+  email: 'maria50@beyondtime.com.br',
+  role: 'USER',
+  authProvider: 'email',
+  rememberMe: false,
+};
+
+const DEV_PREVIEW_PROFILE: ServerProfile = {
+  id: 'dev-preview-profile',
+  userId: 'dev-preview-50plus',
+  firstName: 'Maria',
+  fullName: 'Maria Helena',
+  bio: 'Amo caminhar na Orla de Atalaia e conversar tomando um bom café.',
+  city: 'Aracaju',
+  age: 64,
+  goal: 'Amizade',
+  hobbies: ['caminhada', 'cafe-e-prosa', 'mpb', 'leitura', 'forro'],
+  avatarUrl: '/assets/perfil-helena.svg',
+  verificationStatus: 'VERIFIED',
+  verifiedBadge50plus: true,
+};
+
 export function App() {
   const [legalPage, setLegalPage] = useState<LegalPageId | null>(() =>
     typeof window !== 'undefined' ? parseLegalPageFromPath(window.location.pathname) : null
   );
-  const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession());
-  const [showLanding, setShowLanding] = useState<boolean>(() => loadAuthSession() === null);
-  const [serverProfile, setServerProfile] = useState<ServerProfile | null>(null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() =>
+    IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_SESSION : loadAuthSession()
+  );
+  const [showLanding, setShowLanding] = useState<boolean>(() =>
+    IS_DEV_ONDA2_PREVIEW ? false : loadAuthSession() === null
+  );
+  const { highContrast, toggleHighContrast } = useHighContrast();
+  const [serverProfile, setServerProfile] = useState<ServerProfile | null>(() =>
+    IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_PROFILE : null
+  );
   const [activeView, setActiveView] = useState<AuthViewId>('login');
   const [contacts, setContacts] = useState<Record<AuthViewId, string>>({
     login: '',
@@ -61,6 +102,9 @@ export function App() {
     recover: '',
   });
   const [pendingView, setPendingView] = useState<AuthViewId | null>(null);
+  const [pendingBackToLanding, setPendingBackToLanding] = useState(false);
+  const [onboardingPrefill, setOnboardingPrefill] = useState<OnboardingPrefill | null>(null);
+  const [isRegisterDirty, setIsRegisterDirty] = useState(false);
   const lastTriggerRef = useRef<HTMLElement | null>(null);
 
   // SEC-MED-08 / RF-09: Painel de Acessibilidade Dinâmica
@@ -125,6 +169,9 @@ export function App() {
   }
 
   function hasUnsavedData(viewId: AuthViewId): boolean {
+    if (viewId === 'register' && isRegisterDirty) {
+      return true;
+    }
     return contacts[viewId].trim().length > 0;
   }
 
@@ -140,17 +187,33 @@ export function App() {
     setActiveView(targetView);
   }
 
+  function handleBackToLanding() {
+    if (hasUnsavedData(activeView)) {
+      setPendingBackToLanding(true);
+      return;
+    }
+    setShowLanding(true);
+  }
+
   function handleKeepEditing() {
     setPendingView(null);
+    setPendingBackToLanding(false);
     lastTriggerRef.current?.focus();
     lastTriggerRef.current = null;
   }
 
   function handleConfirmDiscard() {
     const target = pendingView;
+    const shouldGoLanding = pendingBackToLanding;
     updateContact(activeView, '');
+    setIsRegisterDirty(false);
     setPendingView(null);
+    setPendingBackToLanding(false);
     lastTriggerRef.current = null;
+    if (shouldGoLanding) {
+      setShowLanding(true);
+      return;
+    }
     if (target !== null) {
       setActiveView(target);
     }
@@ -166,7 +229,10 @@ export function App() {
     setContacts({ login: '', register: '', recover: '' });
   }
 
-  function handleOpenAuthFromLanding(targetView: AuthViewId) {
+  function handleOpenAuthFromLanding(targetView: AuthViewId, prefill?: OnboardingPrefill) {
+    if (prefill) {
+      setOnboardingPrefill(prefill);
+    }
     setActiveView(targetView);
     setShowLanding(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -179,6 +245,10 @@ export function App() {
       setIsProfileMissing(false);
       setIsEditingProfile(false);
       setOrphanNotice(null);
+      return;
+    }
+    if (import.meta.env.DEV && authSession.userId === 'dev-preview-50plus') {
+      setIsLoadingProfile(false);
       return;
     }
     let active = true;
@@ -324,6 +394,11 @@ export function App() {
   const savedProfile = authSession ? loadUserProfile(authSession.userId) : null;
   const rawFullName = serverProfile?.fullName || savedProfile?.fullName;
   const displayFullName = rawFullName ? sanitizeTextInput(rawFullName) : undefined;
+  const displayAge =
+    (typeof serverProfile?.age === 'number' && serverProfile.age >= 50 ? serverProfile.age : null) ??
+    (serverProfile?.birthDate ? calculateAgeFromBirthDate(serverProfile.birthDate) : null) ??
+    (savedProfile?.age && savedProfile.age >= 50 ? savedProfile.age : null) ??
+    (savedProfile?.birthDate ? calculateAgeFromBirthDate(savedProfile.birthDate) : null);
   const rawCity = serverProfile?.city || savedProfile?.city;
   const displayCity = rawCity ? sanitizeTextInput(rawCity) : undefined;
   const rawGoal = serverProfile?.goal || savedProfile?.goal;
@@ -347,6 +422,8 @@ export function App() {
           isOpen={isAccessibilityOpen}
           onClose={() => setIsAccessibilityOpen(false)}
           onToggleOpen={() => setIsAccessibilityOpen((prev) => !prev)}
+          highContrast={highContrast}
+          onToggleHighContrast={toggleHighContrast}
         />
       </>
     );
@@ -356,7 +433,9 @@ export function App() {
     return (
       <>
         <LandingPage
-          isAuthenticated={authSession !== null}
+          highContrast={highContrast}
+          onToggleHighContrast={toggleHighContrast}
+          onToggleAccessibility={() => setIsAccessibilityOpen(true)}
           onOpenAuth={handleOpenAuthFromLanding}
           onOpenLegalPage={handleOpenLegalPage}
         />
@@ -364,10 +443,18 @@ export function App() {
           isOpen={isAccessibilityOpen}
           onClose={() => setIsAccessibilityOpen(false)}
           onToggleOpen={() => setIsAccessibilityOpen((prev) => !prev)}
+          highContrast={highContrast}
+          onToggleHighContrast={toggleHighContrast}
         />
       </>
     );
   }
+
+  const isShowingWorkspace =
+    authSession !== null && !isLoadingProfile && !isProfileMissing && !isEditingProfile;
+  const isShowingOnboarding =
+    (authSession !== null && !isLoadingProfile && (isProfileMissing || isEditingProfile)) ||
+    (authSession === null && activeView === 'register');
 
   return (
     <div className="app-shell">
@@ -377,12 +464,23 @@ export function App() {
 
       <HeaderGlobal
         onNavigate={handleNavigate}
-        onBackToLanding={() => setShowLanding(true)}
+        onBackToLanding={handleBackToLanding}
         onToggleAccessibility={() => setIsAccessibilityOpen(true)}
+        highContrast={highContrast}
+        onToggleHighContrast={toggleHighContrast}
+        showBackButton={!isShowingWorkspace}
       />
 
       <main className="auth-main" id="conteudo">
-        <div className="auth-card">
+        <div
+          className={`auth-card${
+            isShowingWorkspace
+              ? ' auth-card--workspace'
+              : isShowingOnboarding
+                ? ' auth-card--wide'
+                : ''
+          }`}
+        >
           {authSession ? (
             isLoadingProfile ? (
               <section className="completion-summary" aria-live="polite" aria-busy="true">
@@ -421,72 +519,20 @@ export function App() {
                 onCancelEdit={() => setIsEditingProfile(false)}
               />
             ) : (
-              <section className="completion-summary" aria-live="polite">
-                <p className="defensive-modal__badge">Sessão autenticada (JWT)</p>
-                <h1 className="auth-card__title">
-                  Bem-vindo(a){displayFullName ? `, ${displayFullName}` : ' ao BeyondTime'}
-                </h1>
-                <p className="auth-card__subtitle">
-                  Sua conta está conectada com segurança ao servidor BeyondTime.
-                </p>
-
-                {displayAvatarUrl && (
-                  <div className="photo-preview">
-                    <img
-                      src={displayAvatarUrl}
-                      alt="Foto do seu perfil BeyondTime"
-                      className="photo-preview__img"
-                    />
-                  </div>
-                )}
-
-                <div className="summary-box">
-                  <p>
-                    <strong>E-mail:</strong> {authSession.email}
-                  </p>
-                  <p>
-                    <strong>ID da conta:</strong> {authSession.userId}
-                  </p>
-                  {displayCity && (
-                    <p>
-                      <strong>Cidade:</strong> {displayCity}
-                    </p>
-                  )}
-                  {displayGoal && (
-                    <p>
-                      <strong>Objetivo:</strong> {displayGoal}
-                    </p>
-                  )}
-                  {displayHobbies && displayHobbies.length > 0 && (
-                    <p>
-                      <strong>Interesses:</strong> {displayHobbies.join(', ')}
-                    </p>
-                  )}
-                </div>
-
-                <div className="action-stack action-stack--compact">
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={() => setIsEditingProfile(true)}
-                  >
-                    Editar meu perfil, foto e hobbies
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={handleLogout}
-                  >
-                    Sair da conta
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--danger-outline"
-                    onClick={handleOpenDeleteAccountModal}
-                  >
-                    Excluir minha conta e dados (LGPD)
-                  </button>
-                </div>
+              <>
+                <AuthenticatedWorkspace
+                  authSession={authSession}
+                  serverProfile={serverProfile}
+                  displayFullName={displayFullName ?? ''}
+                  displayAge={displayAge}
+                  displayCity={displayCity}
+                  displayGoal={displayGoal}
+                  displayHobbies={displayHobbies}
+                  displayAvatarUrl={displayAvatarUrl}
+                  onEditProfile={() => setIsEditingProfile(true)}
+                  onRequestDeleteAccount={handleOpenDeleteAccountModal}
+                  onLogout={handleLogout}
+                />
 
                 {isDeleteModalOpen && (
                   <div
@@ -568,7 +614,7 @@ export function App() {
                     </div>
                   </div>
                 )}
-              </section>
+              </>
             )
           ) : (
             <>
@@ -592,6 +638,8 @@ export function App() {
                   onContactChange={(value) => updateContact('register', value)}
                   onNavigate={handleNavigate}
                   onAuthSuccess={handleAuthSuccess}
+                  prefill={onboardingPrefill}
+                  onDirtyChange={setIsRegisterDirty}
                 />
               )}
 
@@ -608,7 +656,7 @@ export function App() {
       </main>
 
       <DefensiveModalRF06
-        isOpen={pendingView !== null}
+        isOpen={pendingView !== null || pendingBackToLanding}
         onKeepEditing={handleKeepEditing}
         onConfirmDiscard={handleConfirmDiscard}
       />
@@ -619,6 +667,8 @@ export function App() {
         isOpen={isAccessibilityOpen}
         onClose={() => setIsAccessibilityOpen(false)}
         onToggleOpen={() => setIsAccessibilityOpen((prev) => !prev)}
+        highContrast={highContrast}
+        onToggleHighContrast={toggleHighContrast}
       />
     </div>
   );
