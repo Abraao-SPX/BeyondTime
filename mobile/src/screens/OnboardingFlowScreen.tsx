@@ -194,7 +194,7 @@ export function OnboardingFlowScreen({
       }
       if (age < 50) {
         setErrorMessage(
-          'O BeyondTime é uma comunidade exclusiva para pessoas com 50 anos ou mais (RF-02).'
+          'O BeyondTime é uma comunidade exclusiva para pessoas com 50 anos ou mais.'
         );
         return;
       }
@@ -906,6 +906,7 @@ export function OnboardingFlowScreen({
             <TouchableOpacity
               onPress={() => updateField('acceptedTerms', !data.acceptedTerms)}
               accessibilityRole="checkbox"
+              accessibilityLabel="Concordo com os Termos de Uso e a Política de Privacidade"
               accessibilityState={{ checked: data.acceptedTerms }}
               style={styles.termsRow}
             >
@@ -923,23 +924,49 @@ export function OnboardingFlowScreen({
                 ) : null}
               </View>
               <Text style={[styles.termsText, { color: palette.textSecondary, fontSize: fs(15) }]}>
-                Li e concordo com os{' '}
-                <Text
-                  onPress={() => setLegalModal('termos')}
-                  style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}
-                >
-                  Termos de Uso
-                </Text>{' '}
-                e a{' '}
-                <Text
-                  onPress={() => setLegalModal('privacidade')}
-                  style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}
-                >
-                  Política de Privacidade (LGPD)
-                </Text>
-                .
+                Li e concordo com os Termos de Uso e a Política de Privacidade (LGPD).
               </Text>
             </TouchableOpacity>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setLegalModal('termos')}
+                accessibilityRole="button"
+                accessibilityLabel="Ler Termos de Uso"
+                style={{
+                  minHeight: TOUCH_TARGET_MIN,
+                  paddingHorizontal: 14,
+                  justifyContent: 'center',
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: palette.borderStrong,
+                  backgroundColor: palette.surface,
+                }}
+              >
+                <Text style={{ color: palette.primaryText, fontSize: fs(14), fontWeight: '700' }}>
+                  Ler Termos de Uso
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setLegalModal('privacidade')}
+                accessibilityRole="button"
+                accessibilityLabel="Ler Política de Privacidade"
+                style={{
+                  minHeight: TOUCH_TARGET_MIN,
+                  paddingHorizontal: 14,
+                  justifyContent: 'center',
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: palette.borderStrong,
+                  backgroundColor: palette.surface,
+                }}
+              >
+                <Text style={{ color: palette.primaryText, fontSize: fs(14), fontWeight: '700' }}>
+                  Ler Política de Privacidade
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
