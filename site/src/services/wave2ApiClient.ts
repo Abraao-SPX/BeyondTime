@@ -419,8 +419,13 @@ export async function fetchMyChatKeyVault(
       { method: 'GET' }
     );
     return result ?? null;
-  } catch {
-    return null;
+  } catch (err) {
+    // Somente 404 indica ausência real de cofre no servidor.
+    // Erros 5xx/rede devem propagar para impedir geração acidental de chave nova sobrescrevendo o cofre.
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
   }
 }
 
