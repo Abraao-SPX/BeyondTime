@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   computeAffinityCandidates,
   createBlockedEntry,
@@ -9,10 +9,39 @@ import {
   saveWave2State,
   SERGIPE_DISCOVERY_CATALOG,
 } from '../../services/wave2Service';
+import {
+  createBlockContact,
+  deleteBlockContact,
+  fetchBlockedContacts,
+  fetchChatConversations,
+  fetchConversationMessages,
+  fetchDiscoveryProfiles,
+  formatIsoTimeToBr,
+  mapBlockDtoToBlockedContact,
+  mapDiscoveryDtoToCandidate,
+  markConversationReadRest,
+  normalizeConnectionGoal,
+  openOrCreateConversation,
+  sendEncryptedMessageRest,
+  sendMatchInteraction,
+  type ConversationSummaryDto,
+  type EncryptedMessageDto,
+} from '../../services/wave2ApiClient';
+import {
+  decryptMessageText,
+  encryptMessageText,
+  ensureUserChatKeyPair,
+  type LocalChatKeyPair,
+} from '../../services/chatE2eeCrypto';
+import {
+  createChatStompConnection,
+  type ChatStompConnection,
+} from '../../services/chatStompClient';
 import type { AuthSession, ConnectionGoal } from '../../types/auth';
-import type { ServerProfile } from '../../services/apiClient';
+import { ApiError, resolveApiAssetUrl, type ServerProfile } from '../../services/apiClient';
 import type {
   BlockedContact,
+  ChatMessage,
   ChatThread,
   OutgoingMessagePayload,
   ScoredCandidate,
@@ -62,10 +91,15 @@ export function AuthenticatedWorkspace({
   onRequestDeleteAccount,
   onLogout,
 }: AuthenticatedWorkspaceProps) {
+  const isPreviewMode = authSession.userId === 'dev-preview-50plus';
+
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('discover');
   const [wave2State, setWave2State] = useState<Wave2State>(() =>
     loadWave2State(authSession.email)
   );
+  const [serverCandidates, setServerCandidates] = useState<ScoredCandidate[]>([]);
+  const [serverThreads, setServerThreads] = useState<ChatThread[]>([]);
+  const [serverBlocked, setServerBlocked] = useState<BlockedContact[]>([]);
   const [filterGoal, setFilterGoal] = useState<ConnectionGoal | 'Todos'>('Todos');
   const [filterCity, setFilterCity] = useState<string>('Todas');
   const [maxDistance, setMaxDistance] = useState<string>('30km');
@@ -74,12 +108,213 @@ export function AuthenticatedWorkspace({
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+
+  const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
+  const stompRef = useRef<ChatStompConnection | null>(null);
+  const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
+  const activeTabRef = useRef<WorkspaceTabId>(activeTab);
+  const activeThreadIdRef = useRef<string | null>(activeThreadId);
+  const serverThreadsRef = useRef<ChatThread[]>(serverThreads);
+
+  activeTabRef.current = activeTab;
+  activeThreadIdRef.current = activeThreadId;
+  serverThreadsRef.current = serverThreads;
+
   // O selo só é exibido quando o backend confirma a verificação (RF-11).
   const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true;
 
   useEffect(() => {
-    saveWave2State(authSession.email, wave2State);
-  }, [authSession.email, wave2State]);
+    if (isPreviewMode) {
+      saveWave2State(authSession.email, wave2State);
+    }
+  }, [authSession.email, isPreviewMode, wave2State]);
+
+  const mapConversationDtoToThread = useCallback(
+    async (dto: ConversationSummaryDto): Promise<ChatThread> => {
+      const messages: ChatMessage[] = [];
+      if (dto.lastMessage) {
+        const text = await decryptMessageText(
+          dto.lastMessage.ciphertext,
+          dto.lastMessage.iv,
+          myKeyPairRef.current,
+          dto.contactPublicKeyJwk,
+          dto.conversationId
+        );
+        messages.push({
+          id: dto.lastMessage.id,
+          sender: dto.lastMessage.senderId === authSession.userId ? 'me' : 'them',
+          text,
+          sentAt: formatIsoTimeToBr(dto.lastMessage.sentAt),
+        });
+      }
+      return {
+        conversationId: dto.conversationId,
+        contactId: dto.contactUserId,
+        contactName: dto.contactName,
+        contactAge: dto.contactAge ?? 50,
+        contactCity: dto.contactCity || 'Aracaju',
+        contactAvatarUrl: resolveApiAssetUrl(dto.contactAvatarUrl) || '/assets/perfil-helena.svg',
+        contactGoal: normalizeConnectionGoal(dto.contactGoal),
+        affinityPercent: dto.affinityPercent,
+        sharedHobbies: dto.sharedHobbies || [],
+        verifiedIdentity: Boolean(dto.contactVerified),
+        contactPublicKeyJwk: dto.contactPublicKeyJwk ?? null,
+        contactHasChatKey: dto.contactHasChatKey,
+        unreadCount: Number(dto.unreadCount || 0),
+        messages,
+      };
+    },
+    [authSession.userId]
+  );
+
+  const reloadRemoteDiscovery = useCallback(
+    async (cityFilter: string, goalFilter: ConnectionGoal | 'Todos') => {
+      if (isPreviewMode) return;
+      try {
+        const dtos = await fetchDiscoveryProfiles(authSession, {
+          city: cityFilter,
+          goal: goalFilter,
+          limit: 30,
+        });
+        setServerCandidates(dtos.map(mapDiscoveryDtoToCandidate));
+      } catch (err) {
+        const msg =
+          err instanceof ApiError
+            ? err.message
+            : 'Não foi possível carregar as sugestões de pessoas agora.';
+        setSafetyFeedback(msg);
+      }
+    },
+    [authSession, isPreviewMode]
+  );
+
+  const reloadRemoteConversations = useCallback(async () => {
+    if (isPreviewMode) return;
+    try {
+      const dtos = await fetchChatConversations(authSession);
+      const mapped = await Promise.all(dtos.map(mapConversationDtoToThread));
+      setServerThreads((prev) => {
+        const prevByConv = new Map(prev.map((t) => [t.conversationId, t]));
+        return mapped.map((nextThread) => {
+          const existing = nextThread.conversationId
+            ? prevByConv.get(nextThread.conversationId)
+            : undefined;
+          // Preserva histórico completo já carregado se a conversa já estava aberta
+          if (existing && existing.messages.length > nextThread.messages.length) {
+            return { ...nextThread, messages: existing.messages };
+          }
+          return nextThread;
+        });
+      });
+    } catch {
+      // erro tratado no carregamento inicial
+    }
+  }, [authSession, isPreviewMode, mapConversationDtoToThread]);
+
+  // Carga inicial + inicialização E2EE + conexão WebSocket STOMP (/ws-chat)
+  useEffect(() => {
+    if (isPreviewMode) return;
+    let cancelled = false;
+
+    async function bootstrapRealWave2() {
+      myKeyPairRef.current = await ensureUserChatKeyPair(authSession);
+      if (cancelled) return;
+
+      try {
+        const [discDtos, convDtos, blockDtos] = await Promise.all([
+          fetchDiscoveryProfiles(authSession, { limit: 30 }),
+          fetchChatConversations(authSession),
+          fetchBlockedContacts(authSession),
+        ]);
+        if (cancelled) return;
+
+        setServerCandidates(discDtos.map(mapDiscoveryDtoToCandidate));
+        setServerBlocked(blockDtos.map(mapBlockDtoToBlockedContact));
+        const mappedThreads = await Promise.all(convDtos.map(mapConversationDtoToThread));
+        if (!cancelled) {
+          setServerThreads(mappedThreads);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setSafetyFeedback(
+            err instanceof ApiError
+              ? err.message
+              : 'Não foi possível conectar ao servidor BeyondTime para carregar conexões reais.'
+          );
+        }
+      }
+
+      if (cancelled) return;
+      const stomp = createChatStompConnection(authSession, {
+        onMessage: (incoming: EncryptedMessageDto) => {
+          void (async () => {
+            const existingThread = serverThreadsRef.current.find(
+              (t) => t.conversationId === incoming.conversationId
+            );
+            if (!existingThread) {
+              void reloadRemoteConversations();
+            }
+            const peerKey = existingThread?.contactPublicKeyJwk ?? null;
+
+            const decryptedText = await decryptMessageText(
+              incoming.ciphertext,
+              incoming.iv,
+              myKeyPairRef.current,
+              peerKey,
+              incoming.conversationId
+            );
+            const isFromMe = incoming.senderId === authSession.userId;
+            const uiMsg: ChatMessage = {
+              id: incoming.id,
+              sender: isFromMe ? 'me' : 'them',
+              text: decryptedText,
+              sentAt: formatIsoTimeToBr(incoming.sentAt),
+            };
+
+            setServerThreads((prev) =>
+              prev.map((thread) => {
+                if (thread.conversationId !== incoming.conversationId) return thread;
+                if (thread.messages.some((m) => m.id === uiMsg.id)) return thread;
+                const isOpenNow =
+                  activeTabRef.current === 'chat' &&
+                  (activeThreadIdRef.current === thread.contactId ||
+                    (activeThreadIdRef.current === null && prev[0]?.contactId === thread.contactId));
+                return {
+                  ...thread,
+                  unreadCount: isFromMe || isOpenNow ? 0 : thread.unreadCount + 1,
+                  messages: [...thread.messages, uiMsg],
+                };
+              })
+            );
+          })();
+        },
+        onReadReceipt: (receipt) => {
+          if (receipt.readerId === authSession.userId) {
+            setServerThreads((prev) =>
+              prev.map((t) =>
+                t.conversationId === receipt.conversationId ? { ...t, unreadCount: 0 } : t
+              )
+            );
+          }
+        },
+      });
+      stompRef.current = stomp;
+    }
+
+    void bootstrapRealWave2();
+
+    return () => {
+      cancelled = true;
+      stompRef.current?.disconnect();
+      stompRef.current = null;
+    };
+  }, [authSession, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
+
+  // Recarrega descoberta quando usuário muda filtros de cidade ou objetivo
+  useEffect(() => {
+    if (isPreviewMode) return;
+    void reloadRemoteDiscovery(filterCity, filterGoal);
+  }, [filterCity, filterGoal, isPreviewMode, reloadRemoteDiscovery]);
 
   const userHobbies = useMemo<string[]>(() => {
     const source = serverProfile?.hobbies?.length ? serverProfile.hobbies : displayHobbies;
@@ -91,10 +326,12 @@ export function AuthenticatedWorkspace({
   const userGoal = ((displayGoal || serverProfile?.goal) as ConnectionGoal | undefined) ?? null;
 
   const availableCities = useMemo(() => {
-    return Array.from(new Set(SERGIPE_DISCOVERY_CATALOG.map((c) => c.city))).sort();
-  }, []);
+    const baseCities = SERGIPE_DISCOVERY_CATALOG.map((c) => c.city);
+    const remoteCities = serverCandidates.map((c) => c.city);
+    return Array.from(new Set([...baseCities, ...remoteCities])).sort();
+  }, [serverCandidates]);
 
-  const candidates = useMemo(
+  const previewCandidates = useMemo(
     () =>
       computeAffinityCandidates(
         userHobbies,
@@ -107,15 +344,56 @@ export function AuthenticatedWorkspace({
     [userHobbies, userCity, userGoal, wave2State, filterGoal, filterCity]
   );
 
+  const candidates = isPreviewMode ? previewCandidates : serverCandidates;
+  const activeBlockedContacts = isPreviewMode ? wave2State.blockedContacts : serverBlocked;
+
   const visibleThreads = useMemo(() => {
-    const blockedIds = new Set(wave2State.blockedContacts.map((b) => b.id));
-    return wave2State.threads.filter((t) => !blockedIds.has(t.contactId));
-  }, [wave2State.blockedContacts, wave2State.threads]);
+    const blockedIds = new Set(activeBlockedContacts.map((b) => b.id));
+    const sourceThreads = isPreviewMode ? wave2State.threads : serverThreads;
+    return sourceThreads.filter((t) => !blockedIds.has(t.contactId));
+  }, [activeBlockedContacts, isPreviewMode, serverThreads, wave2State.threads]);
 
   const totalUnread = useMemo(
     () => visibleThreads.reduce((acc, thread) => acc + thread.unreadCount, 0),
     [visibleThreads]
   );
+
+  // Carrega histórico real de mensagens quando uma conversa é aberta na aba Conversas
+  useEffect(() => {
+    if (isPreviewMode || activeTab !== 'chat') return;
+    const displayedThread =
+      visibleThreads.find((t) => t.contactId === activeThreadId) ?? visibleThreads[0] ?? null;
+    if (!displayedThread?.conversationId) return;
+
+    const convId = displayedThread.conversationId;
+    if (loadedHistoryIdsRef.current.has(convId)) return;
+    loadedHistoryIdsRef.current.add(convId);
+
+    void (async () => {
+      try {
+        const dtos = await fetchConversationMessages(authSession, convId, 100);
+        const decrypted: ChatMessage[] = await Promise.all(
+          dtos.map(async (m) => ({
+            id: m.id,
+            sender: m.senderId === authSession.userId ? 'me' : 'them',
+            text: await decryptMessageText(
+              m.ciphertext,
+              m.iv,
+              myKeyPairRef.current,
+              displayedThread.contactPublicKeyJwk,
+              convId
+            ),
+            sentAt: formatIsoTimeToBr(m.sentAt),
+          }))
+        );
+        setServerThreads((prev) =>
+          prev.map((t) => (t.conversationId === convId ? { ...t, messages: decrypted } : t))
+        );
+      } catch {
+        loadedHistoryIdsRef.current.delete(convId);
+      }
+    })();
+  }, [activeTab, activeThreadId, authSession, isPreviewMode, visibleThreads]);
 
   // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
   // (inclusive quando outra conversa assume o foco após um bloqueio em RF-08).
@@ -125,139 +403,309 @@ export function AuthenticatedWorkspace({
       visibleThreads.find((t) => t.contactId === activeThreadId) ?? visibleThreads[0] ?? null;
     if (!displayedThread || displayedThread.unreadCount === 0) return;
 
-    setWave2State((prev) => ({
-      ...prev,
-      threads: prev.threads.map((thread) =>
-        thread.contactId === displayedThread.contactId
-          ? { ...thread, unreadCount: 0 }
-          : thread
-      ),
-    }));
-  }, [activeTab, activeThreadId, visibleThreads]);
+    if (isPreviewMode) {
+      setWave2State((prev) => ({
+        ...prev,
+        threads: prev.threads.map((thread) =>
+          thread.contactId === displayedThread.contactId
+            ? { ...thread, unreadCount: 0 }
+            : thread
+        ),
+      }));
+    } else {
+      setServerThreads((prev) =>
+        prev.map((thread) =>
+          thread.contactId === displayedThread.contactId
+            ? { ...thread, unreadCount: 0 }
+            : thread
+        )
+      );
+      if (displayedThread.conversationId) {
+        const sentViaStomp = stompRef.current?.sendReadReceipt(displayedThread.conversationId);
+        if (!sentViaStomp) {
+          void markConversationReadRest(authSession, displayedThread.conversationId).catch(() => {});
+        }
+      }
+    }
+  }, [activeTab, activeThreadId, authSession, isPreviewMode, visibleThreads]);
 
   function handlePassCandidate(candidate: ScoredCandidate) {
     setSafetyFeedback(null);
-    setWave2State((prev) => ({
-      ...prev,
-      passedIds: prev.passedIds.includes(candidate.id)
-        ? prev.passedIds
-        : [...prev.passedIds, candidate.id],
-    }));
+    if (isPreviewMode) {
+      setWave2State((prev) => ({
+        ...prev,
+        passedIds: prev.passedIds.includes(candidate.id)
+          ? prev.passedIds
+          : [...prev.passedIds, candidate.id],
+      }));
+      return;
+    }
+
+    setServerCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+    void sendMatchInteraction(authSession, 'pass', candidate.id).catch((err) => {
+      setSafetyFeedback(
+        err instanceof ApiError ? err.message : 'Não foi possível registrar essa ação agora.'
+      );
+    });
   }
 
   function handleConnectCandidate(candidate: ScoredCandidate) {
     setSafetyFeedback(null);
-    setWave2State((prev) => {
-      const nextLikedIds = prev.likedIds.includes(candidate.id)
-        ? prev.likedIds
-        : [...prev.likedIds, candidate.id];
+    if (isPreviewMode) {
+      setWave2State((prev) => {
+        const nextLikedIds = prev.likedIds.includes(candidate.id)
+          ? prev.likedIds
+          : [...prev.likedIds, candidate.id];
 
-      const alreadyHasThread = prev.threads.some((t) => t.contactId === candidate.id);
-      const nextThreads =
-        candidate.likesBack && !alreadyHasThread
-          ? [createThreadFromCandidate(candidate), ...prev.threads]
-          : prev.threads;
+        const alreadyHasThread = prev.threads.some((t) => t.contactId === candidate.id);
+        const nextThreads =
+          candidate.likesBack && !alreadyHasThread
+            ? [createThreadFromCandidate(candidate), ...prev.threads]
+            : prev.threads;
 
-      return {
-        ...prev,
-        likedIds: nextLikedIds,
-        threads: nextThreads,
-      };
-    });
+        return {
+          ...prev,
+          likedIds: nextLikedIds,
+          threads: nextThreads,
+        };
+      });
 
-    if (candidate.likesBack) {
-      setRecentMatch(candidate);
-    } else {
-      setSafetyFeedback(
-        `Você curtiu ${candidate.fullName}. Se a pessoa também curtir você, a conversa aparecerá em Conversas.`
-      );
+      if (candidate.likesBack) {
+        setRecentMatch(candidate);
+      } else {
+        setSafetyFeedback(
+          `Você curtiu ${candidate.fullName}. Se a pessoa também curtir você, a conversa aparecerá em Conversas.`
+        );
+      }
+      return;
     }
+
+    setServerCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+    void (async () => {
+      try {
+        const res = await sendMatchInteraction(authSession, 'like', candidate.id);
+        if (res.matched) {
+          setRecentMatch(candidate);
+          await reloadRemoteConversations();
+        } else {
+          setSafetyFeedback(
+            `Você curtiu ${candidate.fullName}. Se a pessoa também curtir você, a conversa aparecerá em Conversas.`
+          );
+        }
+      } catch (err) {
+        setSafetyFeedback(
+          err instanceof ApiError ? err.message : 'Não foi possível registrar sua curtida agora.'
+        );
+      }
+    })();
   }
 
   function handleOpenMatchChat(contactId: string) {
     setRecentMatch(null);
     setActiveThreadId(contactId);
     setActiveTab('chat');
-    setWave2State((prev) => ({
-      ...prev,
-      threads: prev.threads.map((thread) =>
-        thread.contactId === contactId ? { ...thread, unreadCount: 0 } : thread
-      ),
-    }));
+    if (isPreviewMode) {
+      setWave2State((prev) => ({
+        ...prev,
+        threads: prev.threads.map((thread) =>
+          thread.contactId === contactId ? { ...thread, unreadCount: 0 } : thread
+        ),
+      }));
+    } else {
+      void reloadRemoteConversations();
+    }
   }
 
   function handleSelectThread(contactId: string) {
     setActiveThreadId(contactId);
-    setWave2State((prev) => ({
-      ...prev,
-      threads: prev.threads.map((thread) =>
-        thread.contactId === contactId ? { ...thread, unreadCount: 0 } : thread
-      ),
-    }));
-  }
-
-  function handleSendMessage(contactId: string, payload: string | OutgoingMessagePayload) {
-    const outgoing = createOutgoingMessage(payload);
-    setWave2State((prev) => ({
-      ...prev,
-      threads: prev.threads.map((thread) =>
-        thread.contactId === contactId
-          ? {
-              ...thread,
-              unreadCount: 0,
-              messages: [...thread.messages, outgoing],
-            }
-          : thread
-      ),
-    }));
-  }
-
-  function handleConfirmBlock(reason?: string) {
-    if (!pendingBlock) return;
-    const blockedEntry = createBlockedEntry(pendingBlock, reason);
-
-    setWave2State((prev) => ({
-      ...prev,
-      blockedContacts: prev.blockedContacts.some((b) => b.id === blockedEntry.id)
-        ? prev.blockedContacts
-        : [blockedEntry, ...prev.blockedContacts],
-      // Ocultação mútua imediata no chat e no feed (RF-08)
-      threads: prev.threads.filter((t) => t.contactId !== blockedEntry.id),
-    }));
-
-    if (activeThreadId === blockedEntry.id) {
-      setActiveThreadId(null);
-    }
-    if (recentMatch?.id === blockedEntry.id) {
-      setRecentMatch(null);
-    }
-
-    setSafetyFeedback(
-      `${blockedEntry.fullName} foi bloqueado(a) com segurança e ocultado(a) imediatamente do seu feed e das suas conversas.`
-    );
-    setPendingBlock(null);
-  }
-
-  function handleUnblockContact(contactId: string) {
-    const target = wave2State.blockedContacts.find((b) => b.id === contactId);
-    setWave2State((prev) => ({
-      ...prev,
-      blockedContacts: prev.blockedContacts.filter((b) => b.id !== contactId),
-      passedIds: prev.passedIds.filter((id) => id !== contactId),
-      likedIds: prev.likedIds.filter((id) => id !== contactId),
-    }));
-    if (target) {
-      setSafetyFeedback(
-        `${target.fullName} foi desbloqueado(a) e voltou a ficar disponível conforme os critérios de afinidade.`
+    if (isPreviewMode) {
+      setWave2State((prev) => ({
+        ...prev,
+        threads: prev.threads.map((thread) =>
+          thread.contactId === contactId ? { ...thread, unreadCount: 0 } : thread
+        ),
+      }));
+    } else {
+      setServerThreads((prev) =>
+        prev.map((thread) =>
+          thread.contactId === contactId ? { ...thread, unreadCount: 0 } : thread
+        )
       );
     }
   }
 
+  function handleSendMessage(contactId: string, payload: string | OutgoingMessagePayload) {
+    const outgoing = createOutgoingMessage(payload);
+    if (isPreviewMode) {
+      setWave2State((prev) => ({
+        ...prev,
+        threads: prev.threads.map((thread) =>
+          thread.contactId === contactId
+            ? {
+                ...thread,
+                unreadCount: 0,
+                messages: [...thread.messages, outgoing],
+              }
+            : thread
+        ),
+      }));
+      return;
+    }
+
+    const plainText =
+      typeof payload === 'string'
+        ? payload.trim()
+        : (payload.text?.trim() ||
+            (payload.audioUrl ? 'Mensagem de voz' : payload.imageUrl ? 'Foto enviada' : ''));
+    if (!plainText) return;
+
+    void (async () => {
+      try {
+        let targetThread = serverThreads.find((t) => t.contactId === contactId);
+        let conversationId = targetThread?.conversationId;
+        if (!conversationId) {
+          const opened = await openOrCreateConversation(authSession, contactId);
+          conversationId = opened.conversationId;
+          const mapped = await mapConversationDtoToThread(opened);
+          targetThread = mapped;
+          setServerThreads((prev) =>
+            prev.some((t) => t.conversationId === mapped.conversationId) ? prev : [mapped, ...prev]
+          );
+        }
+
+        const encrypted = await encryptMessageText(
+          plainText,
+          myKeyPairRef.current,
+          targetThread?.contactPublicKeyJwk,
+          conversationId
+        );
+
+        const requestDto = {
+          conversationId,
+          ciphertext: encrypted.ciphertext,
+          iv: encrypted.iv,
+          messageType: 'TEXT' as const,
+          senderKeyVersion: encrypted.senderKeyVersion,
+        };
+
+        const sentViaStomp = stompRef.current?.sendMessage(requestDto);
+        if (!sentViaStomp) {
+          const saved = await sendEncryptedMessageRest(authSession, requestDto);
+          const confirmedMsg: ChatMessage = {
+            id: saved.id,
+            sender: 'me',
+            text: plainText,
+            sentAt: formatIsoTimeToBr(saved.sentAt),
+          };
+          setServerThreads((prev) =>
+            prev.map((t) =>
+              t.conversationId === conversationId &&
+              !t.messages.some((m) => m.id === confirmedMsg.id)
+                ? { ...t, unreadCount: 0, messages: [...t.messages, confirmedMsg] }
+                : t
+            )
+          );
+        }
+      } catch (err) {
+        setSafetyFeedback(
+          err instanceof ApiError
+            ? err.message
+            : 'Não foi possível enviar a mensagem agora. Tente novamente.'
+        );
+      }
+    })();
+  }
+
+  function handleConfirmBlock(reason?: string) {
+    if (!pendingBlock) return;
+    const target = pendingBlock;
+
+    if (isPreviewMode) {
+      const blockedEntry = createBlockedEntry(target, reason);
+      setWave2State((prev) => ({
+        ...prev,
+        blockedContacts: prev.blockedContacts.some((b) => b.id === blockedEntry.id)
+          ? prev.blockedContacts
+          : [blockedEntry, ...prev.blockedContacts],
+        threads: prev.threads.filter((t) => t.contactId !== blockedEntry.id),
+      }));
+
+      if (activeThreadId === blockedEntry.id) setActiveThreadId(null);
+      if (recentMatch?.id === blockedEntry.id) setRecentMatch(null);
+
+      setSafetyFeedback(
+        `${blockedEntry.fullName} foi bloqueado(a) com segurança e ocultado(a) imediatamente do seu feed e das suas conversas.`
+      );
+      setPendingBlock(null);
+      return;
+    }
+
+    setPendingBlock(null);
+    void (async () => {
+      try {
+        const dto = await createBlockContact(authSession, target.id, reason);
+        const mapped = mapBlockDtoToBlockedContact(dto);
+        setServerBlocked((prev) => (prev.some((b) => b.id === mapped.id) ? prev : [mapped, ...prev]));
+        setServerThreads((prev) => prev.filter((t) => t.contactId !== target.id));
+        setServerCandidates((prev) => prev.filter((c) => c.id !== target.id));
+        if (activeThreadId === target.id) setActiveThreadId(null);
+        if (recentMatch?.id === target.id) setRecentMatch(null);
+        setSafetyFeedback(
+          `${target.fullName} foi bloqueado(a) com segurança e ocultado(a) imediatamente do seu feed e das suas conversas.`
+        );
+      } catch (err) {
+        setSafetyFeedback(
+          err instanceof ApiError ? err.message : 'Não foi possível concluir o bloqueio agora.'
+        );
+      }
+    })();
+  }
+
+  function handleUnblockContact(contactId: string) {
+    if (isPreviewMode) {
+      const target = wave2State.blockedContacts.find((b) => b.id === contactId);
+      setWave2State((prev) => ({
+        ...prev,
+        blockedContacts: prev.blockedContacts.filter((b) => b.id !== contactId),
+        passedIds: prev.passedIds.filter((id) => id !== contactId),
+        likedIds: prev.likedIds.filter((id) => id !== contactId),
+      }));
+      if (target) {
+        setSafetyFeedback(
+          `${target.fullName} foi desbloqueado(a) e voltou a ficar disponível conforme os critérios de afinidade.`
+        );
+      }
+      return;
+    }
+
+    const target = serverBlocked.find((b) => b.id === contactId);
+    void (async () => {
+      try {
+        await deleteBlockContact(authSession, contactId);
+        setServerBlocked((prev) => prev.filter((b) => b.id !== contactId));
+        if (target) {
+          setSafetyFeedback(
+            `${target.fullName} foi desbloqueado(a) e voltou a ficar disponível conforme os critérios de afinidade.`
+          );
+        }
+        await reloadRemoteDiscovery(filterCity, filterGoal);
+      } catch (err) {
+        setSafetyFeedback(
+          err instanceof ApiError ? err.message : 'Não foi possível desbloquear este contato agora.'
+        );
+      }
+    })();
+  }
+
   function handleResetPassed() {
-    setWave2State((prev) => ({
-      ...prev,
-      passedIds: [],
-    }));
+    if (isPreviewMode) {
+      setWave2State((prev) => ({
+        ...prev,
+        passedIds: [],
+      }));
+      return;
+    }
+    void reloadRemoteDiscovery(filterCity, filterGoal);
   }
 
   return (
@@ -586,7 +1034,7 @@ export function AuthenticatedWorkspace({
 
               <div className="editorial-profile__security-section">
                 <BlockedContactsPanelRF08
-                  blockedContacts={wave2State.blockedContacts}
+                  blockedContacts={activeBlockedContacts}
                   onUnblock={handleUnblockContact}
                 />
               </div>
