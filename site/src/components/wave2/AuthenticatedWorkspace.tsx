@@ -115,7 +115,7 @@ export function AuthenticatedWorkspace({
   onRequestDeleteAccount,
   onLogout,
 }: AuthenticatedWorkspaceProps) {
-  const isPreviewMode = authSession.userId === 'dev-preview-50plus';
+  const isPreviewMode = import.meta.env.DEV && authSession.userId === 'dev-preview-50plus';
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('discover');
   const [wave2State, setWave2State] = useState<Wave2State>(() =>
