@@ -24,9 +24,10 @@ def limpar_texto(texto):
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
-print(f"1. Carregando o dataset de 15.000 frases e 13 classes de '{DATASET_PATH}'...")
+print(f"1. Carregando o dataset de '{DATASET_PATH}'...")
 df = pd.read_csv(DATASET_PATH)
-print(f"Total carregado: {len(df)} linhas.")
+print(f"Total carregado: {len(df)} linhas em {df['label'].nunique()} classes.")
+print(df['label'].value_counts().to_string())
 
 # Higieniza mantendo símbolos essenciais para detecção de ofuscação
 df['texto_limpo'] = df['texto'].apply(limpar_texto)
@@ -62,20 +63,26 @@ modelo.fit(X, y)
 print("\n5. Testando a IA com frases inéditas do mundo real:")
 frases_teste = [
     "Bom dia meu amor, que Deus abençoe seu dia e da sua família",
+    "Hoje eu fui pessoalmente no banco resolver o extrato do INSS e deu tudo certo",
     "Você consegue me fazer um pix de 300 reais para cobrir meu saldo?",
+    "Oi, fiz um Pix errado de R$ 400 na sua conta, devolve nessa outra chave aqui urgente!",
     "m a n d a   u m   p.i.x   a g o r a   u r g e n t e",
-    "faz um p-i-x nessa chave pra mim por favor",
+    "Vamos sair desse aplicativo e conversar no WhatsApp porque aqui tem muita fiscalização",
     "Passei o dia com fome porque acabou o gás e ninguém se importa comigo...",
     "Apaga essa nossa conversa do celular para seus filhos não verem nada",
     "Sou o delegado da delegacia e a viatura vai parar na sua casa se não pagar a fiança",
-    "Minha mãe teve um infarto na rodovia e o guincho está cobrando Pix adiantado",
+    "Alô mãe, socorro! Bati o carro na estrada, faz um Pix pro guincho agora!",
     "Mandei uma mala com dólares para você, mas a Receita Federal segurou na alfândega",
+    "CORREIOS: Seu objeto foi taxado na alfândega de Curitiba, pague a guia no Pix hoje",
     "Descobri uma corretora para investir em criptomoedas rendendo 5% ao dia garantido",
-    "Clica nesse link para ver as fotos: https://bit.ly/fotos-album",
-    "Sou viúva com doença terminal e quero doar 500 mil dólares, pague a taxa cartorária",
-    "Me passa o código de 6 dígitos que chegou por SMS no seu celular agora",
-    "Você mora em casa própria ou paga aluguel? Quanto ganha de aposentadoria?",
-    "Oi tia, sou o mecânico do seu neto Pedro, ele está sem bateria e precisa de Pix pro guincho"
+    "Olá, somos da Shopee! Ganhe R$ 300 por dia curtindo vídeos no TikTok e fazendo tarefas VIP",
+    "INSS AVISO: Pendência na sua Prova de Vida. Seu benefício será bloqueado em 24h: https://meuinss-provadevida-gov.online",
+    "Baixe o aplicativo AnyDesk no seu celular para eu cancelar a compra suspeita na sua conta",
+    "Olá, aqui é do escritório de advocacia, seu precatório de R$ 48.000 foi liberado! Pague as custas no Pix",
+    "Aqui é da central de segurança do banco, confirme sua senha e o token para cancelar a compra de R$ 2.500",
+    "Seu cartão foi clonado, corte o cartão e entregue junto com a senha pro motoboy do banco",
+    "Você mora em casa própria ou paga aluguel? Já usou sua margem consignável do INSS?",
+    "Oi mãe, troquei de número, salva esse aqui. Consegue fazer um Pix de R$ 800 pra pagar um boleto hoje?"
 ]
 
 previsoes = modelo.predict([limpar_texto(f) for f in frases_teste])
