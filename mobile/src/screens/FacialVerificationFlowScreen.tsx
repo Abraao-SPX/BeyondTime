@@ -10,9 +10,12 @@ import {
 } from '../components/Icons';
 import { OnboardingHeader } from '../components/OnboardingHeader';
 import { useTheme } from '../theme/ThemeContext';
+import type { AuthSession } from '../services/authService';
 import FaceCaptureScreen from './FaceCaptureScreen';
 
 interface FacialVerificationFlowScreenProps {
+  session?: AuthSession | null;
+  firstName?: string;
   onBack: () => void;
   onSkipForLater: () => void;
   onVerificationComplete: (selfieUri: string | null) => void;
@@ -28,6 +31,8 @@ type FacialStage = 'intro' | 'camera' | 'review' | 'completed';
  * - Tela 10: Verificação Concluída ("Tudo certo, seu perfil está verificado.")
  */
 export function FacialVerificationFlowScreen({
+  session,
+  firstName,
   onBack,
   onSkipForLater,
   onVerificationComplete,
@@ -40,13 +45,16 @@ export function FacialVerificationFlowScreen({
   if (stage === 'camera') {
     return (
       <FaceCaptureScreen
+        session={session}
+        defaultFirstName={firstName}
+        defaultMode="REGISTER"
         onCancel={() => setStage('intro')}
         onCapturedPreview={(uri) => {
           setCapturedUri(uri);
         }}
         onVerified={(photoUri) => {
           setCapturedUri(photoUri);
-          setStage('review');
+          setStage('completed');
         }}
       />
     );

@@ -346,6 +346,32 @@ export async function upsertMyProfile(
   );
 }
 
+export interface VerifyBiometricsResponse {
+  success: boolean;
+  message: string;
+  profileId: string;
+  userId: string;
+  verifiedBadge50plus: boolean;
+  verificationStatus: string;
+  verifiedAt?: string | null;
+  similarityDistance?: number | null;
+  livenessPassed: boolean;
+}
+
+export async function verifyMyBiometrics(
+  session: AuthSession,
+  biometricToken: string
+): Promise<VerifyBiometricsResponse> {
+  return requestJson<VerifyBiometricsResponse>(
+    '/api/v1/profiles/me/verify-biometrics',
+    {
+      method: 'POST',
+      body: JSON.stringify({ biometricToken }),
+    },
+    session.accessToken
+  );
+}
+
 export async function uploadMyAvatar(
   session: AuthSession,
   file: File

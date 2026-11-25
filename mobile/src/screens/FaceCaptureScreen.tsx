@@ -23,6 +23,11 @@ import {
   View,
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import {
+  verifyMyBiometrics,
+  type AuthSession,
+  type VerifyBiometricsResponse,
+} from '../services/authService';
 
 const DEFAULT_API_URL = process.env.EXPO_PUBLIC_BIOMETRIA_API_URL || 'http://10.0.2.2:8000';
 const REQUEST_TIMEOUT_MS = 30000;
@@ -67,17 +72,32 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}) {
   }
 }
 
-export default function FaceCaptureScreen() {
+export interface FaceCaptureScreenProps {
+  session?: AuthSession | null;
+  defaultFirstName?: string;
+  defaultMode?: Mode;
+  onCancel?: () => void;
+  onVerified?: (photoUri: string, result: VerifyBiometricsResponse | BiometriaResult) => void;
+  onCapturedPreview?: (photoUri: string) => void;
+}
+
+export default function FaceCaptureScreen({
+  session,
+  defaultFirstName,
+  defaultMode = 'REGISTER',
+  onCancel,
+  onVerified,
+}: FaceCaptureScreenProps = {}) {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const cameraRef = useRef<CameraView>(null);
 
   const [serverUrl, setServerUrl] = useState(DEFAULT_API_URL);
   const [showSettings, setShowSettings] = useState(false);
-  const [mode, setMode] = useState<Mode>('VERIFY');
-  // Temporário até a integração com o backend Java (RF01): o id virá do JWT da sessão.
-  const [userId, setUserId] = useState('');
-  const [firstName, setFirstName] = useState('');
+  const [mode, setMode] = useState<Mode>(defaultMode);
+  const [userId, setUserId] = useState(session?.userId ?? '');
+  const [firstName, setFirstName] = useState(defaultFirstName ?? '');
+  const [badgeGrantResult, setBadgeGrantResult] = useState<VerifyBiometricsResponse | null>(null);
 
   const [stage, setStage] = useState<Stage>('START');
   const [cameraReady, setCameraReady] = useState(false);
@@ -169,8 +189,22 @@ export default function FaceCaptureScreen() {
         throw new Error(data.detail || `Servidor respondeu HTTP ${res.status}.`);
       }
 
+      const approvedByPython = mode === 'REGISTER' ? !!data.success : !!data.verified;
+      let grantedBadge: VerifyBiometricsResponse | null = null;
+
+      // 4. Se o microsserviço aprovou e emitiu jwt_token, envia ao backend Java (RF11) para conceder o Selo 50+
+      if (approvedByPython && data.jwt_token && session?.accessToken) {
+        setStatusMessage('Confirmando Selo de Verificado 50+ no servidor...');
+        grantedBadge = await verifyMyBiometrics(session, data.jwt_token);
+        setBadgeGrantResult(grantedBadge);
+      }
+
       setResult(data);
       setStage('RESULT');
+
+      if (approvedByPython && onVerified && (!session?.accessToken || grantedBadge?.verifiedBadge50plus)) {
+        onVerified(video.uri, grantedBadge ?? data);
+      }
     } catch (err: any) {
       const raw = err?.message || '';
       const msg =
@@ -252,17 +286,21 @@ export default function FaceCaptureScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Identificador do usuário</Text>
-          <TextInput
-            style={styles.input}
-            value={userId}
-            onChangeText={setUserId}
-            placeholder="Ex.: id do perfil no BeyondTime"
-            placeholderTextColor="#64748B"
-            autoCapitalize="none"
-          />
+          {!session?.userId && (
+            <>
+              <Text style={styles.label}>Identificador do usuário</Text>
+              <TextInput
+                style={styles.input}
+                value={userId}
+                onChangeText={setUserId}
+                placeholder="Ex.: id do perfil no BeyondTime"
+                placeholderTextColor="#64748B"
+                autoCapitalize="none"
+              />
+            </>
+          )}
 
-          {mode === 'REGISTER' && (
+          {mode === 'REGISTER' && !defaultFirstName && (
             <>
               <Text style={styles.label}>Primeiro nome</Text>
               <TextInput
@@ -282,6 +320,12 @@ export default function FaceCaptureScreen() {
           >
             <Text style={styles.primaryButtonText}>▶️ Começar</Text>
           </TouchableOpacity>
+
+          {onCancel && (
+            <TouchableOpacity style={styles.secondaryButton} onPress={onCancel}>
+              <Text style={styles.secondaryButtonText}>← Voltar</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.secondaryButton} onPress={() => setShowSettings((v) => !v)}>
             <Text style={styles.secondaryButtonText}>⚙️ Configurar servidor</Text>

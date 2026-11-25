@@ -9,4 +9,6 @@ import java.util.UUID;
 public interface VerificationAttemptRepository extends JpaRepository<VerificationAttempt, UUID> {
 
     List<VerificationAttempt> findByUserIdOrderByCreatedAtDesc(UUID userId);
+
+    boolean existsByBiometricServiceJwtId(String biometricServiceJwtId);
 }

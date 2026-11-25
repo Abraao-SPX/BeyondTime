@@ -86,16 +86,21 @@ class BiometricsVerificationIntegrationTest {
     }
 
     private String generateBiometricToken(String sub, boolean verified, Double distance, long expEpoch) throws Exception {
+        return generateBiometricToken(sub, verified, distance, expEpoch, "reconhecimento-facil-service", UUID.randomUUID().toString());
+    }
+
+    private String generateBiometricToken(String sub, boolean verified, Double distance, long expEpoch, String iss, String jti) throws Exception {
         String headerJson = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
-        String payloadJson = objectMapper.writeValueAsString(Map.of(
-                "sub", sub,
-                "verified", verified,
-                "biometrics_model", "YuNet-SFace",
-                "distance", distance,
-                "threshold", 0.35,
-                "exp", expEpoch,
-                "iss", "reconhecimento-facil-service"
-        ));
+        java.util.HashMap<String, Object> payload = new java.util.HashMap<>();
+        payload.put("sub", sub);
+        payload.put("verified", verified);
+        payload.put("biometrics_model", "YuNet-SFace");
+        payload.put("distance", distance);
+        payload.put("threshold", 0.35);
+        payload.put("exp", expEpoch);
+        if (iss != null) payload.put("iss", iss);
+        if (jti != null) payload.put("jti", jti);
+        String payloadJson = objectMapper.writeValueAsString(payload);
 
         String h64 = Base64.getUrlEncoder().withoutPadding().encodeToString(headerJson.getBytes(StandardCharsets.UTF_8));
         String p64 = Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.getBytes(StandardCharsets.UTF_8));
@@ -163,5 +168,53 @@ class BiometricsVerificationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Deve bloquear replay do mesmo token biométrico (jti duplicado)")
+    void shouldRejectReplayedBiometricToken() throws Exception {
+        long exp = Instant.now().plusSeconds(3600).getEpochSecond();
+        String fixedJti = "jti-replay-test-" + UUID.randomUUID();
+        String token = generateBiometricToken(userId.toString(), true, 0.21, exp, "reconhecimento-facil-service", fixedJti);
+
+        VerifyBiometricsRequest request = new VerifyBiometricsRequest(token);
+
+        mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("Deve rejeitar token biométrico com emissor (iss) inválido")
+    void shouldRejectInvalidIssuer() throws Exception {
+        long exp = Instant.now().plusSeconds(3600).getEpochSecond();
+        String token = generateBiometricToken(userId.toString(), true, 0.21, exp, "issuer-desconhecido", UUID.randomUUID().toString());
+
+        mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VerifyBiometricsRequest(token))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Deve rejeitar token biométrico sem jti")
+    void shouldRejectMissingJti() throws Exception {
+        long exp = Instant.now().plusSeconds(3600).getEpochSecond();
+        String token = generateBiometricToken(userId.toString(), true, 0.21, exp, "reconhecimento-facil-service", null);
+
+        mockMvc.perform(post("/api/v1/profiles/me/verify-biometrics")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new VerifyBiometricsRequest(token))))
+                .andExpect(status().isBadRequest());
     }
 }

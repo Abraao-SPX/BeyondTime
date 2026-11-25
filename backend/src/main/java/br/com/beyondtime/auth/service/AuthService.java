@@ -25,6 +25,7 @@ import br.com.beyondtime.auth.repository.PasswordResetTokenRepository;
 import br.com.beyondtime.auth.repository.RefreshTokenRepository;
 import br.com.beyondtime.auth.repository.UserOAuthAccountRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.biometrics.service.BiometricServiceClient;
 import br.com.beyondtime.profile.repository.ProfilePhotoRepository;
 import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
@@ -71,6 +72,7 @@ public class AuthService {
     private final ProfileRepository profileRepository;
     private final ProfilePhotoRepository profilePhotoRepository;
     private final AvatarService avatarService;
+    private final BiometricServiceClient biometricServiceClient;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final PasswordResetMailService passwordResetMailService;
@@ -92,6 +94,7 @@ public class AuthService {
             ProfileRepository profileRepository,
             ProfilePhotoRepository profilePhotoRepository,
             AvatarService avatarService,
+            BiometricServiceClient biometricServiceClient,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             PasswordResetMailService passwordResetMailService,
@@ -110,6 +113,7 @@ public class AuthService {
         this.profileRepository = profileRepository;
         this.profilePhotoRepository = profilePhotoRepository;
         this.avatarService = avatarService;
+        this.biometricServiceClient = biometricServiceClient;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetMailService = passwordResetMailService;
@@ -487,6 +491,11 @@ public class AuthService {
         safeDelete("DELETE FROM profile_interactions WHERE from_user_id = ? OR to_user_id = ?", user.getId(), user.getId());
         safeDelete("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?", user.getId(), user.getId());
         safeDelete("DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?", user.getId(), user.getId());
+
+        // Exclusão de embeddings biométricos no microsserviço RF11 (LGPD / RF14)
+        if (biometricServiceClient != null) {
+            biometricServiceClient.deleteUserBiometricsQuietly(user.getId());
+        }
 
         lgpdDataRequestRepository.save(
                 LgpdDataRequest.createCompletedAccountDeletion(user.getId(), true, now)

@@ -96,6 +96,14 @@ public class BiometricTokenValidator {
                 throw new BusinessException("INVALID_BIOMETRIC_TOKEN", "O token biométrico não contém o identificador do usuário (sub).", HttpStatus.BAD_REQUEST);
             }
 
+            if (iss == null || !"reconhecimento-facil-service".equals(iss.trim())) {
+                throw new BusinessException("INVALID_BIOMETRIC_ISSUER", "Emissor (iss) do token biométrico não reconhecido.", HttpStatus.UNAUTHORIZED);
+            }
+
+            if (jti == null || jti.isBlank()) {
+                throw new BusinessException("INVALID_BIOMETRIC_TOKEN", "O token biométrico deve possuir identificador único (jti).", HttpStatus.BAD_REQUEST);
+            }
+
             // 3. Validação de expiração estrita
             if (exp == null) {
                 throw new BusinessException("INVALID_BIOMETRIC_TOKEN", "O token biométrico deve possuir prazo de validade (exp).", HttpStatus.BAD_REQUEST);

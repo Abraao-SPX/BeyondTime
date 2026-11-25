@@ -76,17 +76,23 @@ public class BiometricsVerificationService {
         Profile profile = profileRepository.findByUserId(authenticatedUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("Perfil do usuário", authenticatedUserId));
 
-        // 4. Converte a distância euclidiana/cosseno para persistência
+        // 4. Proteção anti-replay: impede reutilização do mesmo token biométrico (jti único)
+        String jwtIdentifier = claims.jti().trim();
+        if (verificationAttemptRepository.existsByBiometricServiceJwtId(jwtIdentifier)) {
+            throw new BusinessException(
+                    "BIOMETRIC_TOKEN_REPLAY",
+                    "Este token de verificação facial já foi utilizado. Realize uma nova captura.",
+                    HttpStatus.CONFLICT
+            );
+        }
+
+        // 5. Converte a distância euclidiana/cosseno para persistência
         BigDecimal distance = null;
         if (claims.distance() != null) {
             distance = BigDecimal.valueOf(claims.distance()).setScale(4, RoundingMode.HALF_UP);
         }
 
-        // 5. Registra a tentativa de verificação para fins de auditoria (RF11 / LGPD)
-        String jwtIdentifier = (claims.jti() != null && !claims.jti().isBlank())
-                ? claims.jti()
-                : claims.sub() + ":" + System.currentTimeMillis();
-
+        // 6. Registra a tentativa de verificação para fins de auditoria (RF11 / LGPD)
         VerificationAttempt attempt = new VerificationAttempt(
                 authenticatedUserId,
                 VerificationType.FACIAL_LIVENESS_YUNET_SFACE,
