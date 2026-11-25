@@ -638,6 +638,7 @@ export function AppNavigator() {
       let mediaIv: string | null = null;
       let mediaMimeType: string | null = null;
 
+      const MAX_ENCRYPTED_MEDIA_BYTES = 8 * 1024 * 1024;
       if (options?.kind === 'photo' && options.photoUrl) {
         const plainBytes = await readLocalUriAsBytes(options.photoUrl);
         if (!isSessionCurrent(session)) return false;
@@ -647,6 +648,13 @@ export function AppNavigator() {
           peerKey,
           conversationId
         );
+        if (encryptedMedia.encryptedBytes.byteLength > MAX_ENCRYPTED_MEDIA_BYTES) {
+          throw new ApiError(
+            'A foto escolhida é muito grande (máximo 8 MB). Escolha uma imagem menor.',
+            413,
+            'MEDIA_TOO_LARGE'
+          );
+        }
         const uploaded = await uploadEncryptedChatMedia(
           session,
           conversationId,
@@ -666,6 +674,13 @@ export function AppNavigator() {
           peerKey,
           conversationId
         );
+        if (encryptedMedia.encryptedBytes.byteLength > MAX_ENCRYPTED_MEDIA_BYTES) {
+          throw new ApiError(
+            'A mensagem de voz excede o limite de 8 MB. Tente gravar um áudio mais curto.',
+            413,
+            'MEDIA_TOO_LARGE'
+          );
+        }
         const uploaded = await uploadEncryptedChatMedia(
           session,
           conversationId,
@@ -686,6 +701,12 @@ export function AppNavigator() {
       );
       if (!isSessionCurrent(session)) return false;
 
+      const rawDuration = options?.audioDurationSec ?? 1;
+      const safeDuration =
+        options?.kind === 'audio'
+          ? Math.min(600, Math.max(1, Number.isFinite(rawDuration) ? Math.floor(rawDuration) : 1))
+          : null;
+
       const payload: SendEncryptedMessageDto = {
         conversationId,
         ciphertext: encoded.ciphertext,
@@ -694,8 +715,7 @@ export function AppNavigator() {
         mediaId,
         mediaIv,
         mediaMimeType,
-        mediaDurationSeconds:
-          options?.kind === 'audio' ? options.audioDurationSec ?? 1 : null,
+        mediaDurationSeconds: safeDuration,
         senderKeyVersion: encoded.senderKeyVersion,
       };
 

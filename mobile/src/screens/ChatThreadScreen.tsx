@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   BackHandler,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -13,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   CameraIcon,
@@ -44,6 +47,25 @@ interface PendingPhotoSelection {
 }
 
 const WAVEFORM_BARS = [10, 18, 13, 24, 16, 28, 14, 22, 18, 26, 15, 20, 12];
+const MAX_AUDIO_DURATION_SECONDS = 600;
+
+function clampAudioDuration(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds < 1) return 1;
+  return Math.min(MAX_AUDIO_DURATION_SECONDS, Math.floor(seconds));
+}
+
+function promptOpenSettings(title: string, message: string): void {
+  if (Platform.OS === 'web') return;
+  Alert.alert(title, message, [
+    { text: 'Agora não', style: 'cancel' },
+    {
+      text: 'Abrir Configurações',
+      onPress: () => {
+        void Linking.openSettings().catch(() => undefined);
+      },
+    },
+  ]);
+}
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -83,6 +105,7 @@ export function ChatThreadScreen({
   const scrollRef = useRef<ScrollView>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const handleSendAudioRef = useRef<() => Promise<void>>(async () => undefined);
 
   const firstName = conversation.fullName.split(' ')[0] || conversation.fullName;
 
@@ -120,7 +143,13 @@ export function ChatThreadScreen({
   useEffect(() => {
     if (!isRecording) return;
     const timer = setInterval(() => {
-      setRecordingSeconds((prev) => prev + 1);
+      setRecordingSeconds((prev) => {
+        if (prev >= MAX_AUDIO_DURATION_SECONDS) {
+          void handleSendAudioRef.current();
+          return MAX_AUDIO_DURATION_SECONDS;
+        }
+        return prev + 1;
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, [isRecording]);
@@ -146,9 +175,12 @@ export function ChatThreadScreen({
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
-        setMediaNotice(
-          'Permita o acesso ao microfone nas configurações do aparelho para gravar mensagens de voz.'
-        );
+        const msg =
+          'Permita o acesso ao microfone nas configurações do aparelho para gravar mensagens de voz.';
+        setMediaNotice(msg);
+        if (!perm.canAskAgain) {
+          promptOpenSettings('Permissão de Microfone', msg);
+        }
         return;
       }
       await Audio.setAudioModeAsync({
@@ -193,7 +225,7 @@ export function ChatThreadScreen({
     if (isSending) return;
     const activeRec = recordingRef.current;
     recordingRef.current = null;
-    const duration = Math.max(1, recordingSeconds);
+    const duration = clampAudioDuration(recordingSeconds);
     setIsRecording(false);
     setRecordingSeconds(0);
 
@@ -231,11 +263,14 @@ export function ChatThreadScreen({
       );
       if (ok === false) {
         setMediaNotice('Não foi possível enviar o áudio agora. Tente novamente.');
+      } else if (Platform.OS !== 'web' && recordedUri.startsWith('file://')) {
+        void FileSystem.deleteAsync(recordedUri, { idempotent: true }).catch(() => undefined);
       }
     } finally {
       setIsSending(false);
     }
   };
+  handleSendAudioRef.current = handleSendAudio;
 
   const handleTogglePlayAudio = async (msg: ChatMessage) => {
     if (playingMessageId === msg.id) {
@@ -291,7 +326,11 @@ export function ChatThreadScreen({
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        setMediaNotice('Permita o acesso às fotos do aparelho para escolher uma imagem.');
+        const msg = 'Permita o acesso às fotos do aparelho para escolher uma imagem.';
+        setMediaNotice(msg);
+        if (!perm.canAskAgain) {
+          promptOpenSettings('Permissão de Fotos', msg);
+        }
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -317,7 +356,11 @@ export function ChatThreadScreen({
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        setMediaNotice('Permita o acesso à câmera do aparelho para tirar uma foto.');
+        const msg = 'Permita o acesso à câmera do aparelho para tirar uma foto.';
+        setMediaNotice(msg);
+        if (!perm.canAskAgain) {
+          promptOpenSettings('Permissão de Câmera', msg);
+        }
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
