@@ -18,6 +18,7 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { OnboardingFlowScreen } from '../screens/OnboardingFlowScreen';
 import { SplashWelcomeScreen } from '../screens/SplashWelcomeScreen';
 import { ApiError, logoutAccount, type AuthSession } from '../services/authService';
+import { clearLocalChatE2eeData } from '../services/chatE2eeCrypto';
 import {
   createBlockContact,
   createChatStompConnection,
@@ -428,6 +429,7 @@ export function AppNavigator() {
     setWave2Error(null);
     setActiveTab('discover');
     setRoute('splash');
+    void clearLocalChatE2eeData(currentSession?.userId);
     if (currentSession) {
       void logoutAccount(currentSession);
     }

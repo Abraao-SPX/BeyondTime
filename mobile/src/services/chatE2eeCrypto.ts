@@ -19,6 +19,7 @@ import { pbkdf2Async } from '@noble/hashes/pbkdf2';
 import { sha256 } from '@noble/hashes/sha256';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system';
+import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import type { AuthSession } from './authService';
 
@@ -224,10 +225,15 @@ function generateHermesSafeP256PrivateKey(): Uint8Array {
 }
 
 // ============================================================================
-// Armazenamento local do par de chaves (Web localStorage / Nativo FileSystem)
+// Armazenamento seguro do par de chaves (SecureStore nativo / sessionStorage web)
 // ============================================================================
 
-function getNativeKeyFileUri(userId: string): string | null {
+function getSecureStoreKey(userId: string): string {
+  const safeId = userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `bt_e2ee_v1_${safeId}`;
+}
+
+function getLegacyNativeKeyFileUri(userId: string): string | null {
   if (!FileSystem.documentDirectory) return null;
   const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
   return `${FileSystem.documentDirectory}beyondtime_e2ee_${safeId}.json`;
@@ -235,16 +241,33 @@ function getNativeKeyFileUri(userId: string): string | null {
 
 async function readLocalStoredKeyPair(userId: string): Promise<StoredKeyPairJson | null> {
   try {
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-      const raw = window.localStorage.getItem(`${LOCAL_KEYPAIR_PREFIX}${userId}`);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const key = `${LOCAL_KEYPAIR_PREFIX}${userId}`;
+      const raw = window.sessionStorage?.getItem(key) || window.localStorage?.getItem(key);
+      if (raw && window.localStorage?.getItem(key)) {
+        window.sessionStorage?.setItem(key, raw);
+        window.localStorage.removeItem(key);
+      }
       return raw ? (JSON.parse(raw) as StoredKeyPairJson) : null;
     }
-    const uri = getNativeKeyFileUri(userId);
-    if (!uri) return null;
-    const info = await FileSystem.getInfoAsync(uri);
+
+    const secureRaw = await SecureStore.getItemAsync(getSecureStoreKey(userId));
+    if (secureRaw) {
+      return JSON.parse(secureRaw) as StoredKeyPairJson;
+    }
+
+    // Migração única: move arquivo legado em claro para o SecureStore e apaga o arquivo
+    const legacyUri = getLegacyNativeKeyFileUri(userId);
+    if (!legacyUri) return null;
+    const info = await FileSystem.getInfoAsync(legacyUri);
     if (!info.exists) return null;
-    const raw = await FileSystem.readAsStringAsync(uri);
-    return raw ? (JSON.parse(raw) as StoredKeyPairJson) : null;
+    const raw = await FileSystem.readAsStringAsync(legacyUri);
+    if (raw) {
+      await SecureStore.setItemAsync(getSecureStoreKey(userId), raw);
+      await FileSystem.deleteAsync(legacyUri, { idempotent: true });
+      return JSON.parse(raw) as StoredKeyPairJson;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -253,15 +276,65 @@ async function readLocalStoredKeyPair(userId: string): Promise<StoredKeyPairJson
 async function writeLocalStoredKeyPair(userId: string, data: StoredKeyPairJson): Promise<void> {
   try {
     const serialized = JSON.stringify(data);
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(`${LOCAL_KEYPAIR_PREFIX}${userId}`, serialized);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.sessionStorage?.setItem(`${LOCAL_KEYPAIR_PREFIX}${userId}`, serialized);
+      window.localStorage?.removeItem(`${LOCAL_KEYPAIR_PREFIX}${userId}`);
       return;
     }
-    const uri = getNativeKeyFileUri(userId);
-    if (!uri) return;
-    await FileSystem.writeAsStringAsync(uri, serialized);
+    await SecureStore.setItemAsync(getSecureStoreKey(userId), serialized);
+    const legacyUri = getLegacyNativeKeyFileUri(userId);
+    if (legacyUri) {
+      await FileSystem.deleteAsync(legacyUri, { idempotent: true });
+    }
   } catch {
     // falha de cache local não impede uso em memória
+  }
+}
+
+/**
+ * Remove chave privada E2EE local e arquivos temporários de mídia decifrada no logout/exclusão (AUD-003 / LGPD).
+ */
+export async function clearLocalChatE2eeData(userId?: string | null): Promise<void> {
+  try {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (userId) {
+        window.sessionStorage?.removeItem(`${LOCAL_KEYPAIR_PREFIX}${userId}`);
+        window.localStorage?.removeItem(`${LOCAL_KEYPAIR_PREFIX}${userId}`);
+      }
+      return;
+    }
+
+    if (userId) {
+      await SecureStore.deleteItemAsync(getSecureStoreKey(userId)).catch(() => undefined);
+      const legacyUri = getLegacyNativeKeyFileUri(userId);
+      if (legacyUri) {
+        await FileSystem.deleteAsync(legacyUri, { idempotent: true }).catch(() => undefined);
+      }
+    }
+
+    const dirs = [FileSystem.cacheDirectory, FileSystem.documentDirectory].filter(
+      (d): d is string => Boolean(d)
+    );
+    for (const dir of dirs) {
+      try {
+        const entries = await FileSystem.readDirectoryAsync(dir);
+        for (const name of entries) {
+          if (
+            name.startsWith('bt-media-') ||
+            name.startsWith('bt-upload-') ||
+            name.startsWith('beyondtime_e2ee_')
+          ) {
+            await FileSystem.deleteAsync(`${dir}${name}`, { idempotent: true }).catch(
+              () => undefined
+            );
+          }
+        }
+      } catch {
+        // ignora se o diretório não puder ser listado
+      }
+    }
+  } catch {
+    // limpeza defensiva não deve travar o logout
   }
 }
 
