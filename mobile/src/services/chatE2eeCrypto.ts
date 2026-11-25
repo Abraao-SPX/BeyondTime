@@ -44,6 +44,7 @@ export interface LocalChatKeyPair {
   privateKeyBytes: Uint8Array;
   privateKeyJwk: EcJwk;
   keyVersion: number;
+  warningMessage?: string;
 }
 
 interface StoredKeyPairJson {
@@ -451,11 +452,28 @@ async function tryUnwrapPrivateKeyJwk(
   return null;
 }
 
+function isSamePublicKeyJwk(localPub: EcJwk, serverPubJson: string | null | undefined): boolean {
+  if (!serverPubJson) return false;
+  try {
+    const parsed = JSON.parse(serverPubJson) as Partial<EcJwk>;
+    return (
+      parsed.kty === 'EC' &&
+      parsed.crv === 'P-256' &&
+      Boolean(parsed.x) &&
+      Boolean(parsed.y) &&
+      parsed.x === localPub.x &&
+      parsed.y === localPub.y
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Garante que o usuário autenticado tenha um par de chaves ECDH P-256 sincronizado com o servidor.
- * 1. Reutiliza chave local se já existir.
- * 2. Se não houver chave local (novo aparelho), restaura o cofre via GET /api/v1/chat/keys/me sem sobrescrever.
- * 3. Só gera novo par e publica via PUT /api/v1/chat/keys/me quando não há cofre restaurável.
+ * 1. Reutiliza chave local somente se coincidir com a chave pública vigente no servidor (x/y).
+ * 2. Se divergir ou não houver chave local, restaura o cofre via GET /api/v1/chat/keys/me sem sobrescrever.
+ * 3. Só gera novo par quando não há cofre restaurável, avisando em português simples se houve divergência.
  */
 export async function ensureUserChatKeyPair(
   session: AuthSession,
@@ -464,34 +482,39 @@ export async function ensureUserChatKeyPair(
   try {
     const localStored = await readLocalStoredKeyPair(session.userId);
     const serverVault = await vaultApi.fetchMyVault(session);
+    let hadUnrecoverableDivergence = false;
 
     if (localStored) {
       const privBytes = privateKeyJwkToBytes(localStored.privateKeyJwk);
       if (privBytes) {
-        if (serverVault) {
+        if (serverVault && isSamePublicKeyJwk(localStored.publicKeyJwk, serverVault.publicKeyJwk)) {
           return {
-            publicKeyJwk: JSON.stringify(localStored.publicKeyJwk),
+            publicKeyJwk: serverVault.publicKeyJwk,
             privateKeyBytes: privBytes,
             privateKeyJwk: localStored.privateKeyJwk,
             keyVersion: serverVault.keyVersion || localStored.keyVersion || 1,
           };
         }
-        const wrapped = await wrapPrivateKeyJwk(session, localStored.privateKeyJwk);
-        const saved = await vaultApi.upsertMyVault(session, {
-          publicKeyJwk: JSON.stringify(localStored.publicKeyJwk),
-          ...wrapped,
-          keyAlgorithm: 'ECDH-P256',
-        });
-        return {
-          publicKeyJwk: saved.publicKeyJwk,
-          privateKeyBytes: privBytes,
-          privateKeyJwk: localStored.privateKeyJwk,
-          keyVersion: saved.keyVersion || 1,
-        };
+        if (!serverVault) {
+          const wrapped = await wrapPrivateKeyJwk(session, localStored.privateKeyJwk);
+          const saved = await vaultApi.upsertMyVault(session, {
+            publicKeyJwk: JSON.stringify(localStored.publicKeyJwk),
+            ...wrapped,
+            keyAlgorithm: 'ECDH-P256',
+          });
+          return {
+            publicKeyJwk: saved.publicKeyJwk,
+            privateKeyBytes: privBytes,
+            privateKeyJwk: localStored.privateKeyJwk,
+            keyVersion: saved.keyVersion || 1,
+          };
+        }
+        // Chave local diverge do cofre vigente no servidor -> tenta restaurar o cofre do servidor abaixo
+        hadUnrecoverableDivergence = true;
       }
     }
 
-    // Novo dispositivo: tenta restaurar o cofre existente do servidor antes de gerar chave nova
+    // Novo dispositivo ou divergência local/servidor: restaura o cofre existente sem sobrescrever
     if (serverVault) {
       const restoredPrivJwk = await tryUnwrapPrivateKeyJwk(session, serverVault);
       if (restoredPrivJwk) {
@@ -519,7 +542,7 @@ export async function ensureUserChatKeyPair(
       }
     }
 
-    // Primeiro acesso sem cofre válido: gera novo par ECDH P-256 sem depender de globalThis.crypto (AUD-006)
+    // Primeiro acesso sem cofre válido (ou cofre irrecuperável): gera novo par ECDH P-256 sem depender de globalThis.crypto (AUD-006)
     const privateKeyBytes = generateHermesSafeP256PrivateKey();
     const { publicKeyJwk, privateKeyJwk } = buildJwkPairFromPrivateBytes(privateKeyBytes);
     const wrapped = await wrapPrivateKeyJwk(session, privateKeyJwk);
@@ -540,6 +563,10 @@ export async function ensureUserChatKeyPair(
       privateKeyBytes,
       privateKeyJwk,
       keyVersion: saved.keyVersion || 1,
+      warningMessage:
+        hadUnrecoverableDivergence || serverVault
+          ? 'Sua proteção de mensagens foi renovada neste aparelho. Algumas mensagens mais antigas podem não abrir.'
+          : undefined,
     };
   } catch {
     return null;
