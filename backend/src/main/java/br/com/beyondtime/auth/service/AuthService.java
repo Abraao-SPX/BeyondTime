@@ -25,6 +25,7 @@ import br.com.beyondtime.auth.repository.PasswordResetTokenRepository;
 import br.com.beyondtime.auth.repository.RefreshTokenRepository;
 import br.com.beyondtime.auth.repository.UserOAuthAccountRepository;
 import br.com.beyondtime.auth.repository.UserRepository;
+import br.com.beyondtime.chat.service.ChatMediaService;
 import br.com.beyondtime.profile.repository.ProfilePhotoRepository;
 import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
@@ -42,12 +43,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -71,6 +76,7 @@ public class AuthService {
     private final ProfileRepository profileRepository;
     private final ProfilePhotoRepository profilePhotoRepository;
     private final AvatarService avatarService;
+    private final ChatMediaService chatMediaService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final PasswordResetMailService passwordResetMailService;
@@ -92,6 +98,7 @@ public class AuthService {
             ProfileRepository profileRepository,
             ProfilePhotoRepository profilePhotoRepository,
             AvatarService avatarService,
+            ChatMediaService chatMediaService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             PasswordResetMailService passwordResetMailService,
@@ -110,6 +117,7 @@ public class AuthService {
         this.profileRepository = profileRepository;
         this.profilePhotoRepository = profilePhotoRepository;
         this.avatarService = avatarService;
+        this.chatMediaService = chatMediaService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.passwordResetMailService = passwordResetMailService;
@@ -464,29 +472,47 @@ public class AuthService {
         passwordResetTokenRepository.deleteAllByUserId(user.getId());
         oauthAccountRepository.deleteAllByUserId(user.getId());
 
+        // Coleta arquivos físicos (avatares e mídias cifradas .enc das conversas do usuário) para remoção após commit
+        List<String> avatarKeysToDelete = new ArrayList<>();
+        List<String> encryptedMediaFilesToDelete = new ArrayList<>();
+        if (jdbcTemplate != null) {
+            encryptedMediaFilesToDelete.addAll(jdbcTemplate.queryForList(
+                    "SELECT DISTINCT m.storage_filename FROM encrypted_chat_media m " +
+                            "LEFT JOIN conversations c ON c.id = m.conversation_id " +
+                            "LEFT JOIN matches mt ON mt.id = c.match_id " +
+                            "WHERE m.uploader_user_id = ? OR mt.user_a_id = ? OR mt.user_b_id = ?",
+                    String.class,
+                    user.getId(), user.getId(), user.getId()
+            ));
+        }
+
         // Limpeza de registros de perfil e dependências diretas (SEC-MED-07 / RF14)
         profileRepository.findByUserId(user.getId()).ifPresent(profile -> {
             profilePhotoRepository.findAllByProfileIdOrderByPositionAsc(profile.getId())
-                    .forEach(photo -> avatarService.deleteAvatarQuietly(photo.getObjectKey()));
-            safeDelete("DELETE FROM profile_hobbies WHERE profile_id = ?", profile.getId());
-            safeDelete("DELETE FROM profile_intents WHERE profile_id = ?", profile.getId());
-            safeDelete("DELETE FROM profile_photos WHERE profile_id = ?", profile.getId());
+                    .forEach(photo -> avatarKeysToDelete.add(photo.getObjectKey()));
+            executeDelete("DELETE FROM profile_hobbies WHERE profile_id = ?", profile.getId());
+            executeDelete("DELETE FROM profile_intents WHERE profile_id = ?", profile.getId());
+            executeDelete("DELETE FROM profile_photos WHERE profile_id = ?", profile.getId());
             profileRepository.delete(profile);
         });
         profileRepository.deleteByUserId(user.getId());
 
         // Limpeza de configurações de acessibilidade e preferências de descoberta
-        safeDelete("DELETE FROM accessibility_preferences WHERE user_id = ?", user.getId());
-        safeDelete("DELETE FROM discovery_preference_intents WHERE user_id = ?", user.getId());
-        safeDelete("DELETE FROM discovery_preferences WHERE user_id = ?", user.getId());
+        executeDelete("DELETE FROM accessibility_preferences WHERE user_id = ?", user.getId());
+        executeDelete("DELETE FROM discovery_preference_intents WHERE user_id = ?", user.getId());
+        executeDelete("DELETE FROM discovery_preferences WHERE user_id = ?", user.getId());
 
         // Limpeza de hobbies associativos 3FN (RF03 / RF04)
-        safeDelete("DELETE FROM user_hobbies WHERE user_id = ?", user.getId());
+        executeDelete("DELETE FROM user_hobbies WHERE user_id = ?", user.getId());
 
-        // Encerramento e limpeza consistente de matches e interações (RF05)
-        safeDelete("DELETE FROM profile_interactions WHERE from_user_id = ? OR to_user_id = ?", user.getId(), user.getId());
-        safeDelete("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?", user.getId(), user.getId());
-        safeDelete("DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?", user.getId(), user.getId());
+        // Limpeza explícita de cofre E2EE e JTIs biométricos (soft-delete em users não dispara ON DELETE CASCADE — AUD-011)
+        executeDelete("DELETE FROM used_biometric_unlock_jtis WHERE user_id = ?", user.getId());
+        executeDelete("DELETE FROM user_chat_keys WHERE user_id = ?", user.getId());
+
+        // Encerramento e limpeza consistente de matches e interações (RF05 — cascateia conversations, encrypted_messages e encrypted_chat_media)
+        executeDelete("DELETE FROM profile_interactions WHERE from_user_id = ? OR to_user_id = ?", user.getId(), user.getId());
+        executeDelete("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?", user.getId(), user.getId());
+        executeDelete("DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?", user.getId(), user.getId());
 
         lgpdDataRequestRepository.save(
                 LgpdDataRequest.createCompletedAccountDeletion(user.getId(), true, now)
@@ -495,17 +521,30 @@ public class AuthService {
         user.anonymizeAndMarkDeleted(now);
         userRepository.saveAndFlush(user);
 
+        Runnable cleanupFilesOnDisk = () -> {
+            avatarKeysToDelete.forEach(avatarService::deleteAvatarQuietly);
+            if (chatMediaService != null) {
+                chatMediaService.deleteEncryptedMediaFilesQuietly(encryptedMediaFilesToDelete);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    cleanupFilesOnDisk.run();
+                }
+            });
+        } else {
+            cleanupFilesOnDisk.run();
+        }
+
         log.info("[BeyondTime LGPD RF-14] Conta userId={} excluída e anonimizada definitivamente com trilha de auditoria LGPD.",
                 authenticatedUserId);
     }
 
-    private void safeDelete(String sql, Object... params) {
+    private void executeDelete(String sql, Object... params) {
         if (jdbcTemplate != null) {
-            try {
-                jdbcTemplate.update(sql, params);
-            } catch (Exception ex) {
-                log.warn("[BeyondTime Auth] safeDelete aviso para SQL: {} - {}", sql, ex.getMessage());
-            }
+            jdbcTemplate.update(sql, params);
         }
     }
 

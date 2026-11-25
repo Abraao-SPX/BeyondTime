@@ -13,6 +13,7 @@ import br.com.beyondtime.chat.repository.ChatMatchRepository;
 import br.com.beyondtime.chat.repository.ChatUserBlockRepository;
 import br.com.beyondtime.chat.repository.ConversationRepository;
 import br.com.beyondtime.chat.repository.EncryptedMessageRepository;
+import br.com.beyondtime.chat.repository.UsedBiometricUnlockJtiRepository;
 import br.com.beyondtime.chat.repository.UserChatKeyRepository;
 import br.com.beyondtime.shared.security.JwtService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,6 +35,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -44,6 +48,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -78,6 +83,12 @@ class ChatE2eeIntegrationTest {
 
     @Autowired
     private EncryptedMessageRepository encryptedMessageRepository;
+
+    @Autowired
+    private UsedBiometricUnlockJtiRepository usedBiometricUnlockJtiRepository;
+
+    @Value("${beyondtime.uploads.chat-media-dir}")
+    private String chatMediaDir;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -461,5 +472,73 @@ class ChatE2eeIntegrationTest {
         arr1.forEach(n -> allIds.add(n.get("id").asText()));
         arr2.forEach(n -> allIds.add(n.get("id").asText()));
         assertThat(allIds).hasSize(150);
+    }
+
+    @Test
+    void deveLimparChavesE2eeJtiBiometricoEMidiaEmDiscoNaExclusaoLgpd() throws Exception {
+        // 1. Registra cofre biométrico + desbloqueia (grava user_chat_keys e used_biometric_unlock_jtis)
+        Map<String, Object> biometricVault = Map.of(
+                "publicKeyJwk", "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"LGPD_X\",\"y\":\"LGPD_Y\"}",
+                "encryptedPrivateKey", "ZW5jcnlwdGVkX2xncGQ=",
+                "kdfSalt", "c2FsdF9sZ3BkXzEyMzQ1",
+                "kdfIv", "aXZfbGdwZF8xMjM0NTY=",
+                "kdfIterations", 210000,
+                "keyAlgorithm", "ECDH-P256",
+                "vaultSecret", "LgpdTestSecretKeyWithMoreThanThirtyTwoCharacters2026=="
+        );
+        mockMvc.perform(put("/api/v1/chat/keys/me/biometric")
+                        .header("Authorization", tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(biometricVault)))
+                .andExpect(status().isOk());
+
+        String jti = "lgpd-jti-" + UUID.randomUUID();
+        String bioJwt = signBiometricJwt(
+                userA.getId().toString(), true, jti, Instant.now().plusSeconds(60).getEpochSecond(), biometricJwtSecret
+        );
+        mockMvc.perform(post("/api/v1/chat/keys/me/unlock-biometric")
+                        .header("Authorization", tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("biometricToken", bioJwt))))
+                .andExpect(status().isOk());
+
+        // 2. Cria match ativo, conversa e faz upload de mídia cifrada (.enc em disco)
+        chatMatchRepository.save(new ChatMatch(userA.getId(), userB.getId(), BigDecimal.valueOf(90.00), (short) 2));
+        MvcResult convResult = mockMvc.perform(post("/api/v1/chat/conversations/with/" + userB.getId())
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andReturn();
+        String conversationId = objectMapper.readTree(convResult.getResponse().getContentAsString())
+                .get("conversationId").asText();
+
+        MockMultipartFile mediaFile = new MockMultipartFile(
+                "file", "lgpd.enc", MediaType.APPLICATION_OCTET_STREAM_VALUE,
+                "BYTES_LGPD_TEST".getBytes(StandardCharsets.UTF_8)
+        );
+        MvcResult uploadRes = mockMvc.perform(multipart("/api/v1/chat/media")
+                        .file(mediaFile)
+                        .param("conversationId", conversationId)
+                        .param("mediaType", "IMAGE")
+                        .header("Authorization", tokenA))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String mediaId = objectMapper.readTree(uploadRes.getResponse().getContentAsString()).get("mediaId").asText();
+        Path expectedEncFile = Paths.get(chatMediaDir).toAbsolutePath().normalize().resolve(mediaId + ".enc");
+        assertThat(Files.exists(expectedEncFile)).isTrue();
+
+        // 3. Exclui definitivamente a conta de userA (LGPD RF-14)
+        mockMvc.perform(delete("/api/v1/auth/account")
+                        .header("Authorization", tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "password", "SenhaForte123!",
+                                "confirmedViaDefensiveModal", true
+                        ))))
+                .andExpect(status().isNoContent());
+
+        // 4. Verifica limpeza completa em BD e disco
+        assertThat(userChatKeyRepository.findById(userA.getId())).isEmpty();
+        assertThat(usedBiometricUnlockJtiRepository.existsById(jti)).isFalse();
+        assertThat(Files.exists(expectedEncFile)).isFalse();
     }
 }
