@@ -410,11 +410,16 @@ export async function openOrCreateConversation(
 export async function fetchConversationMessages(
   session: AuthSession,
   conversationId: string,
-  limit = 100
+  limit = 100,
+  before?: string
 ): Promise<EncryptedMessageDto[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (before && before.trim()) {
+    qs.set('before', before.trim());
+  }
   return authedRequest<EncryptedMessageDto[]>(
     session,
-    `/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`,
+    `/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?${qs.toString()}`,
     { method: 'GET' }
   );
 }
