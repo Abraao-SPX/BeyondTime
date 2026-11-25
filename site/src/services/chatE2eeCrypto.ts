@@ -7,6 +7,41 @@ const VAULT_KDF_ITERATIONS = 210000;
 const HKDF_SALT_V2 = new TextEncoder().encode('beyondtime-e2ee-salt-v2');
 const HKDF_INFO_V2 = new TextEncoder().encode('beyondtime-chat-aes-256-gcm');
 
+function readStoredKeyPair(storageKey: string): string | null {
+  const fromSession = window.sessionStorage.getItem(storageKey);
+  if (fromSession) return fromSession;
+  const fromLegacyLocal = window.localStorage.getItem(storageKey);
+  if (fromLegacyLocal) {
+    window.sessionStorage.setItem(storageKey, fromLegacyLocal);
+    window.localStorage.removeItem(storageKey);
+    return fromLegacyLocal;
+  }
+  return null;
+}
+
+function writeStoredKeyPair(storageKey: string, value: string): void {
+  window.sessionStorage.setItem(storageKey, value);
+  window.localStorage.removeItem(storageKey);
+}
+
+export function clearAllLocalChatKeyPairs(): void {
+  if (typeof window === 'undefined') return;
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      const toRemove: string[] = [];
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (key && key.startsWith(LOCAL_KEYPAIR_PREFIX)) {
+          toRemove.push(key);
+        }
+      }
+      toRemove.forEach((k) => storage.removeItem(k));
+    } catch {
+      // ignora
+    }
+  }
+}
+
 export interface LocalChatKeyPair {
   publicKeyJwk: string;
   privateKey: CryptoKey;
@@ -157,7 +192,7 @@ export async function ensureUserChatKeyPair(
 
   const storageKey = `${LOCAL_KEYPAIR_PREFIX}${session.userId}`;
   try {
-    const rawStored = window.localStorage.getItem(storageKey);
+    const rawStored = readStoredKeyPair(storageKey);
     const existingVault = await fetchMyChatKeyVault(session);
 
     if (rawStored) {
@@ -213,7 +248,7 @@ export async function ensureUserChatKeyPair(
           privateKeyJwk: restoredPrivateJwk,
           keyVersion: existingVault.keyVersion || 1,
         };
-        window.localStorage.setItem(storageKey, JSON.stringify(toStore));
+        writeStoredKeyPair(storageKey, JSON.stringify(toStore));
         return {
           publicKeyJwk: existingVault.publicKeyJwk || JSON.stringify(restoredPublicJwk),
           privateKey,
@@ -243,7 +278,7 @@ export async function ensureUserChatKeyPair(
       privateKeyJwk,
       keyVersion: saved.keyVersion || 1,
     };
-    window.localStorage.setItem(storageKey, JSON.stringify(toStore));
+    writeStoredKeyPair(storageKey, JSON.stringify(toStore));
 
     return {
       publicKeyJwk: saved.publicKeyJwk,

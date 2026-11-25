@@ -118,10 +118,29 @@ export function loadAuthSession(): AuthSession | null {
 }
 
 export function clearAuthSession(): void {
-  // SEC-MED-02: Limpeza rigorosa e completa de ambos os storages no logout / 401 / exclusão
+  // SEC-MED-02 + AUD-003: Limpeza rigorosa de tokens, chaves E2EE locais e estados de conversa no logout/401/exclusão
   window.localStorage.removeItem(AUTH_SESSION_KEY);
   window.localStorage.removeItem(REMEMBER_ME_FLAG_KEY);
   window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (
+          key &&
+          (key.startsWith('beyondtime_chat_e2ee_keypair_v1:') ||
+            key.startsWith('beyondtime_wave2_state_'))
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => storage.removeItem(k));
+    } catch {
+      // ignora restrições de storage do navegador
+    }
+  }
 }
 
 export interface RegisterPayload {
