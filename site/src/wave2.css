@@ -1483,7 +1483,7 @@ html.high-contrast .editorial-profile__link--danger {
   width: 100%;
   max-width: 520px;
   background: var(--bg-surface);
-  border: 2px solid var(--border-subtle);
+  border: 2px solid var(--border-card);
   border-radius: 20px;
   padding: 32px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35);
@@ -1493,21 +1493,21 @@ html.high-contrast .editorial-profile__link--danger {
   animation: matchModalFadeIn 0.25s ease-out;
 }
 
-.defensive-modal__badge {
+.defensive-modal-overlay .defensive-modal__badge {
   display: inline-block;
   align-self: flex-start;
   font-size: 0.82rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--primary);
-  background: var(--primary-soft);
+  color: var(--brand-primary);
+  background: var(--brand-rose-soft);
   padding: 4px 12px;
   border-radius: 999px;
   margin: 0;
 }
 
-.defensive-modal__title {
+.defensive-modal-overlay .defensive-modal__title {
   font-size: 1.5rem;
   font-weight: 800;
   color: var(--text-primary);
@@ -1515,7 +1515,7 @@ html.high-contrast .editorial-profile__link--danger {
   line-height: 1.25;
 }
 
-.defensive-modal__text {
+.defensive-modal-overlay .defensive-modal__text {
   font-size: 1.05rem;
   line-height: 1.55;
   color: var(--text-secondary);
@@ -1523,11 +1523,11 @@ html.high-contrast .editorial-profile__link--danger {
 }
 
 .block-reason-fieldset {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-card);
   border-radius: 14px;
   padding: 16px 18px;
   margin: 6px 0 10px 0;
-  background: var(--bg-canvas);
+  background: var(--bg-surface-alt);
 }
 
 .block-reason-fieldset .form-label {
@@ -1557,23 +1557,23 @@ html.high-contrast .editorial-profile__link--danger {
 }
 
 .block-reason-option:hover {
-  background: var(--primary-soft);
+  background: var(--bg-surface-hover);
 }
 
 .block-reason-option input[type="radio"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--primary);
+  accent-color: var(--brand-primary);
   cursor: pointer;
 }
 
-.defensive-modal__actions {
+.defensive-modal-overlay .defensive-modal__actions {
   display: flex;
   gap: 14px;
   margin-top: 8px;
 }
 
-.defensive-modal__actions .btn {
+.defensive-modal-overlay .defensive-modal__actions .btn {
   flex: 1;
   min-height: 52px;
   font-size: 1rem;
@@ -1596,7 +1596,7 @@ html.high-contrast .editorial-profile__link--danger {
 .blocked-panel {
   margin-top: 24px;
   padding: 24px;
-  border: 1.5px solid var(--border-subtle);
+  border: 1.5px solid var(--border-card);
   border-radius: 16px;
   background: var(--bg-surface);
 }
@@ -1606,7 +1606,7 @@ html.high-contrast .editorial-profile__link--danger {
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--brand-primary);
   margin-bottom: 4px;
 }
 
@@ -1645,9 +1645,9 @@ html.high-contrast .editorial-profile__link--danger {
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-card);
   border-radius: 12px;
-  background: var(--bg-canvas);
+  background: var(--bg-surface-alt);
   gap: 16px;
 }
 
@@ -1664,7 +1664,7 @@ html.high-contrast .editorial-profile__link--danger {
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
-  border: 1.5px solid var(--border-subtle);
+  border: 1.5px solid var(--border-card);
 }
 
 .blocked-list__person strong {
@@ -1681,7 +1681,7 @@ html.high-contrast .editorial-profile__link--danger {
 }
 
 .blocked-list__unblock-btn {
-  min-height: 44px;
+  min-height: 48px;
   padding: 8px 18px;
   font-size: 0.92rem;
   font-weight: 700;
@@ -1689,7 +1689,7 @@ html.high-contrast .editorial-profile__link--danger {
 }
 
 @media (max-width: 600px) {
-  .defensive-modal__actions {
+  .defensive-modal-overlay .defensive-modal__actions {
     flex-direction: column-reverse;
   }
   .blocked-list__item {
@@ -1728,8 +1728,8 @@ html.high-contrast .editorial-profile__verified-badge {
 .editorial-profile__verification-card {
   margin-top: 18px;
   padding: 16px;
-  background: var(--bg-surface-elevated, var(--bg-surface, #fff));
-  border: 1px solid var(--border-subtle, #e2e8f0);
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-card);
   border-radius: 14px;
   display: flex;
   flex-direction: column;
@@ -1758,16 +1758,16 @@ html.high-contrast .editorial-profile__verified-badge {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: var(--primary-soft, #fdf2f4);
-  color: var(--primary, #8A0E2A);
+  background: var(--brand-rose-soft);
+  color: var(--brand-primary);
   margin-bottom: 4px;
 }
 
 .photo-verification-banner {
   margin: 16px 0;
   padding: 14px 16px;
-  background: var(--primary-soft, #fdf2f4);
-  border: 1px solid var(--border-subtle, #f2b4c1);
+  background: var(--brand-rose-soft);
+  border: 1px solid var(--border-card);
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -1783,7 +1783,7 @@ html.high-contrast .photo-verification-banner {
   display: block;
   font-size: 0.95rem;
   font-weight: 700;
-  color: var(--primary, #8A0E2A);
+  color: var(--brand-primary);
 }
 
 html.high-contrast .photo-verification-banner__text strong {
@@ -1798,8 +1798,8 @@ html.high-contrast .photo-verification-banner__text strong {
 
 .facial-qr-modal {
   position: relative;
-  background: var(--bg-surface, #ffffff);
-  border: 1px solid var(--border-subtle, #e2e8f0);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-card);
   border-radius: 20px;
   padding: 28px 24px;
   width: 100%;
@@ -1820,7 +1820,7 @@ html.high-contrast .photo-verification-banner__text strong {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--primary, #8A0E2A);
+  color: var(--brand-primary);
   font-size: 0.85rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1908,7 +1908,7 @@ html.high-contrast .photo-verification-banner__text strong {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--primary, #8A0E2A);
+  background: var(--brand-primary);
   color: #ffffff;
   font-size: 0.85rem;
   font-weight: 800;
@@ -1935,8 +1935,8 @@ html.high-contrast .photo-verification-banner__text strong {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: var(--bg-canvas, #f8fafc);
-  border: 1px solid var(--border-subtle, #e2e8f0);
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-card);
   border-radius: 10px;
   margin-top: 14px;
   font-size: 0.88rem;
@@ -1948,7 +1948,7 @@ html.high-contrast .photo-verification-banner__text strong {
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  border-top: 1px solid var(--border-card);
   padding-top: 16px;
 }
 
