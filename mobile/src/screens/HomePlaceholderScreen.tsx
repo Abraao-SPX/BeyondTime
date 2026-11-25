@@ -371,10 +371,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   unblockBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    minHeight: TOUCH_TARGET_MIN,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
     borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   unblockBtnText: {
     fontWeight: '600',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface BlockContactModalRF08Props {
   contactName: string;
@@ -19,6 +19,11 @@ export function BlockContactModalRF08({
   onCancel,
 }: BlockContactModalRF08Props) {
   const [selectedReason, setSelectedReason] = useState<string>(BLOCK_REASONS[0]);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelBtnRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -74,6 +79,7 @@ export function BlockContactModalRF08({
 
         <div className="defensive-modal__actions">
           <button
+            ref={cancelBtnRef}
             type="button"
             className="btn btn--secondary"
             onClick={onCancel}

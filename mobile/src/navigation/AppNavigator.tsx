@@ -98,6 +98,8 @@ export function AppNavigator() {
     const currentSession = authSession;
     setAuthSession(null);
     setOnboardingData(INITIAL_ONBOARDING_DATA);
+    setConversations(INITIAL_CONVERSATIONS);
+    setBlockedContacts([]);
     setActiveConversationId(null);
     setActiveTab('discover');
     setRoute('splash');

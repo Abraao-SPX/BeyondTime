@@ -64,6 +64,13 @@ export function DiscoverScreen({
   const [imageErrorMap, setImageErrorMap] = useState<Record<string, boolean>>({});
   const [matchedProfile, setMatchedProfile] = useState<RankedDiscoveryProfile | null>(null);
 
+  useEffect(() => {
+    setCurrentIndex((prev) => {
+      if (rankedProfiles.length === 0) return 0;
+      return prev >= rankedProfiles.length ? rankedProfiles.length - 1 : prev;
+    });
+  }, [rankedProfiles.length]);
+
   // Animação da tela de conexão: os dois perfis deslizam um em direção ao outro até se juntarem
   const leftAvatarX = useRef(new Animated.Value(-84)).current;
   const rightAvatarX = useRef(new Animated.Value(84)).current;

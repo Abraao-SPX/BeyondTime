@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 
 interface FacialVerificationQrModalProps {
@@ -16,12 +16,17 @@ interface FacialVerificationQrModalProps {
 export function FacialVerificationQrModal({ onClose }: FacialVerificationQrModalProps) {
   const [qrSvg, setQrSvg] = useState<string>('');
   const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const verificationUrl = useMemo(() => {
     const configured = import.meta.env.VITE_FACIAL_VERIFICATION_URL as string | undefined;
     return configured && configured.trim().length > 0
       ? configured.trim()
-      : `${window.location.origin}/verificacao-facial`;
+      : window.location.origin;
+  }, []);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -53,7 +58,17 @@ export function FacialVerificationQrModal({ onClose }: FacialVerificationQrModal
   }, [onClose]);
 
   return (
-    <div className="defensive-modal-overlay" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div
+      className="defensive-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className="facial-qr-modal">
         <header className="facial-qr-modal__header">
           <div className="facial-qr-modal__badge" aria-hidden="true">
@@ -128,7 +143,12 @@ export function FacialVerificationQrModal({ onClose }: FacialVerificationQrModal
           </div>
 
           <footer className="facial-qr-modal__actions">
-            <button type="button" className="btn btn--primary" onClick={onClose}>
+            <button
+              ref={closeButtonRef}
+              type="button"
+              className="btn btn--primary"
+              onClick={onClose}
+            >
               Entendi
             </button>
           </footer>
