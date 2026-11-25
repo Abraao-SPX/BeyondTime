@@ -2,14 +2,18 @@ import type { AuthSession, ConnectionGoal } from '../types/auth';
 import type { BlockedContact, ScoredCandidate } from '../types/wave2';
 import { ApiError, refreshSession, resolveApiAssetUrl } from './apiClient';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080').replace(
-  /\/+$/,
-  ''
-);
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
 export function getWebSocketChatUrl(): string {
-  const wsBase = API_BASE_URL.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
-  return `${wsBase}/ws-chat`;
+  if (API_BASE_URL) {
+    const wsBase = API_BASE_URL.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
+    return `${wsBase}/ws-chat`;
+  }
+  if (typeof window !== 'undefined' && window.location?.host) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws-chat`;
+  }
+  return '/ws-chat';
 }
 
 // ==========================================================================
