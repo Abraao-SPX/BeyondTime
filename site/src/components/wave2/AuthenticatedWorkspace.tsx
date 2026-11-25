@@ -132,7 +132,10 @@ export function AuthenticatedWorkspace({
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
   const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
-  const hasMountedFilterEffectRef = useRef(false);
+  const prevFiltersRef = useRef<{ city: string; goal: ConnectionGoal | 'Todos' }>({
+    city: filterCity,
+    goal: filterGoal,
+  });
   const activeTabRef = useRef<WorkspaceTabId>(activeTab);
   const activeThreadIdRef = useRef<string | null>(activeThreadId);
   const serverThreadsRef = useRef<ChatThread[]>(serverThreads);
@@ -262,8 +265,8 @@ export function AuthenticatedWorkspace({
     [authSession, isPreviewMode]
   );
 
-  const reloadRemoteConversations = useCallback(async () => {
-    if (isPreviewMode) return;
+  const reloadRemoteConversations = useCallback(async (): Promise<ChatThread[]> => {
+    if (isPreviewMode) return [];
     try {
       const dtos = await fetchChatConversations(authSession);
       const mapped = await Promise.all(dtos.map(mapConversationDtoToThread));
@@ -273,15 +276,26 @@ export function AuthenticatedWorkspace({
           const existing = nextThread.conversationId
             ? prevByConv.get(nextThread.conversationId)
             : undefined;
-          // Preserva histórico completo já carregado se a conversa já estava aberta
-          if (existing && existing.messages.length > nextThread.messages.length) {
-            return { ...nextThread, messages: existing.messages };
+          // Preserva histórico completo já carregado mesclando novas mensagens sem duplicatas
+          if (existing && existing.messages.length > 0) {
+            const merged = new Map<string, ChatMessage>();
+            for (const m of existing.messages) {
+              merged.set(m.id, m);
+            }
+            for (const m of nextThread.messages) {
+              if (!merged.has(m.id)) {
+                merged.set(m.id, m);
+              }
+            }
+            return { ...nextThread, messages: Array.from(merged.values()) };
           }
           return nextThread;
         });
       });
+      return mapped;
     } catch {
       // erro tratado no carregamento inicial
+      return [];
     }
   }, [authSession, isPreviewMode, mapConversationDtoToThread]);
 
@@ -293,6 +307,9 @@ export function AuthenticatedWorkspace({
     async function bootstrapRealWave2() {
       myKeyPairRef.current = await ensureUserChatKeyPair(authSession);
       if (cancelled) return;
+      if (myKeyPairRef.current?.warningMessage) {
+        setSafetyFeedback(myKeyPairRef.current.warningMessage);
+      }
 
       try {
         const [discDtos, convDtos, blockDtos] = await Promise.all([
@@ -322,15 +339,20 @@ export function AuthenticatedWorkspace({
       const stomp = createChatStompConnection(authSession, {
         onMessage: (incoming: EncryptedMessageDto) => {
           void (async () => {
-            const existingThread = serverThreadsRef.current.find(
+            let existingThread = serverThreadsRef.current.find(
               (t) => t.conversationId === incoming.conversationId
             );
             if (!existingThread) {
-              void reloadRemoteConversations();
+              const refreshed = await reloadRemoteConversations();
+              if (cancelled) return;
+              existingThread =
+                refreshed.find((t) => t.conversationId === incoming.conversationId) ??
+                serverThreadsRef.current.find((t) => t.conversationId === incoming.conversationId);
             }
             const peerKey = existingThread?.contactPublicKeyJwk ?? null;
 
             const uiMsg = await hydrateRemoteMessage(incoming, peerKey);
+            if (cancelled) return;
             const isFromMe = incoming.senderId === authSession.userId;
 
             setServerThreads((prev) =>
@@ -351,6 +373,7 @@ export function AuthenticatedWorkspace({
           })();
         },
         onReadReceipt: (receipt) => {
+          if (cancelled) return;
           if (receipt.readerId === authSession.userId) {
             setServerThreads((prev) =>
               prev.map((t) =>
@@ -358,6 +381,16 @@ export function AuthenticatedWorkspace({
               )
             );
           }
+        },
+        onError: (message) => {
+          if (!cancelled) {
+            setSafetyFeedback(message);
+          }
+        },
+        onReconnect: () => {
+          if (cancelled) return;
+          loadedHistoryIdsRef.current.clear();
+          void reloadRemoteConversations();
         },
       });
       stompRef.current = stomp;
@@ -372,13 +405,16 @@ export function AuthenticatedWorkspace({
     };
   }, [authSession, hydrateRemoteMessage, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
 
-  // Recarrega descoberta somente quando usuário muda filtros de cidade ou objetivo (evita GET duplicado no mount)
+  // Recarrega descoberta somente quando usuário muda filtros de cidade ou objetivo (seguro em React StrictMode)
   useEffect(() => {
     if (isPreviewMode) return;
-    if (!hasMountedFilterEffectRef.current) {
-      hasMountedFilterEffectRef.current = true;
+    if (
+      prevFiltersRef.current.city === filterCity &&
+      prevFiltersRef.current.goal === filterGoal
+    ) {
       return;
     }
+    prevFiltersRef.current = { city: filterCity, goal: filterGoal };
     void reloadRemoteDiscovery(filterCity, filterGoal);
   }, [filterCity, filterGoal, isPreviewMode, reloadRemoteDiscovery]);
 
@@ -435,19 +471,44 @@ export function AuthenticatedWorkspace({
     if (loadedHistoryIdsRef.current.has(convId)) return;
     loadedHistoryIdsRef.current.add(convId);
 
+    let cancelled = false;
     void (async () => {
       try {
         const dtos = await fetchConversationMessages(authSession, convId, 100);
+        if (cancelled) {
+          loadedHistoryIdsRef.current.delete(convId);
+          return;
+        }
         const decrypted: ChatMessage[] = await Promise.all(
           dtos.map((m) => hydrateRemoteMessage(m, displayedThread.contactPublicKeyJwk))
         );
+        if (cancelled) {
+          loadedHistoryIdsRef.current.delete(convId);
+          return;
+        }
         setServerThreads((prev) =>
-          prev.map((t) => (t.conversationId === convId ? { ...t, messages: decrypted } : t))
+          prev.map((t) => {
+            if (t.conversationId !== convId) return t;
+            const byId = new Map<string, ChatMessage>();
+            for (const msg of decrypted) {
+              byId.set(msg.id, msg);
+            }
+            for (const msg of t.messages) {
+              if (!byId.has(msg.id)) {
+                byId.set(msg.id, msg);
+              }
+            }
+            return { ...t, messages: Array.from(byId.values()) };
+          })
         );
       } catch {
         loadedHistoryIdsRef.current.delete(convId);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab, activeThreadId, authSession, hydrateRemoteMessage, isPreviewMode, visibleThreads]);
 
   // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
