@@ -43,6 +43,8 @@ function stripImageExifViaCanvas(file: File): Promise<string> {
           reject(new Error('Canvas indisponível'));
           return;
         }
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL('image/jpeg', 0.85));
       } catch (err) {
