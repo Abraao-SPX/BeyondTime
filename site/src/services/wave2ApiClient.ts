@@ -1,6 +1,6 @@
 import type { AuthSession, ConnectionGoal } from '../types/auth';
 import type { BlockedContact, ScoredCandidate } from '../types/wave2';
-import { ApiError, refreshSession, resolveApiAssetUrl } from './apiClient';
+import { ApiError, fetchWithSessionRefresh, resolveApiAssetUrl } from './apiClient';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
@@ -164,62 +164,15 @@ export interface ChatMediaUploadResponseDto {
 }
 
 // ==========================================================================
-// Helper HTTP autenticado (com auto-refresh JWT em 401)
+// Helper HTTP autenticado (unificado com apiClient.ts — AUD-019 / AUD-020)
 // ==========================================================================
-
-let inFlightRefreshPromise: Promise<AuthSession | null> | null = null;
-
-async function tryRefreshAuthSession(session: AuthSession): Promise<AuthSession | null> {
-  if (!session.refreshToken) return null;
-  if (!inFlightRefreshPromise) {
-    inFlightRefreshPromise = refreshSession(session.refreshToken)
-      .then((refreshed) => {
-        session.accessToken = refreshed.accessToken;
-        session.refreshToken = refreshed.refreshToken;
-        session.expiresInSeconds = refreshed.expiresInSeconds;
-        return refreshed;
-      })
-      .catch(() => null)
-      .finally(() => {
-        inFlightRefreshPromise = null;
-      });
-  }
-  return inFlightRefreshPromise;
-}
-
-async function fetchWithAutoRefresh(
-  session: AuthSession,
-  path: string,
-  buildInit: (accessToken: string) => RequestInit
-): Promise<Response> {
-  const execute = async (token: string): Promise<Response> => {
-    try {
-      return await fetch(`${API_BASE_URL}${path}`, buildInit(token));
-    } catch {
-      throw new ApiError(
-        'Não foi possível conectar ao servidor BeyondTime. Verifique se o backend está online.',
-        0,
-        'NETWORK_ERROR'
-      );
-    }
-  };
-
-  let response = await execute(session.accessToken);
-  if (response.status === 401 && session.refreshToken) {
-    const refreshed = await tryRefreshAuthSession(session);
-    if (refreshed?.accessToken) {
-      response = await execute(refreshed.accessToken);
-    }
-  }
-  return response;
-}
 
 async function authedRequest<T>(
   session: AuthSession,
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const response = await fetchWithAutoRefresh(session, path, (token) => {
+  const response = await fetchWithSessionRefresh(session, path, (token) => {
     const headers = new Headers(options.headers);
     headers.set('Authorization', `Bearer ${token}`);
     if (!headers.has('Content-Type') && options.body !== undefined) {
@@ -232,7 +185,7 @@ async function authedRequest<T>(
   });
 
   if (!response.ok) {
-    let message = `Erro HTTP ${response.status} ao comunicar com o servidor.`;
+    let message = 'Não foi possível concluir esta ação agora. Tente novamente em instantes.';
     let code: string | undefined;
     try {
       const data = (await response.json()) as {
@@ -244,6 +197,13 @@ async function authedRequest<T>(
       code = data.code;
     } catch {
       // ignora payload não-JSON
+    }
+    if (code === 'CONVERSATION_NOT_ALLOWED') {
+      message = 'Você precisa ter uma conexão ativa com esta pessoa para iniciar a conversa.';
+    } else if (code === 'INVALID_CHAT_MEDIA') {
+      message = 'Não foi possível anexar esta foto ou áudio. Tente novamente.';
+    } else if (response.status === 413 || code === 'MEDIA_TOO_LARGE') {
+      message = 'O arquivo escolhido é muito grande (máximo 8 MB). Escolha um arquivo menor.';
     }
     throw new ApiError(message, response.status, code);
   }
@@ -499,7 +459,7 @@ export async function uploadEncryptedChatMedia(
   copy.set(encryptedBytes);
   const blob = new Blob([copy.buffer], { type: 'application/octet-stream' });
 
-  const response = await fetchWithAutoRefresh(session, '/api/v1/chat/media', (token) => {
+  const response = await fetchWithSessionRefresh(session, '/api/v1/chat/media', (token) => {
     const formData = new FormData();
     formData.append('conversationId', conversationId);
     formData.append('mediaType', mediaType);
@@ -514,7 +474,10 @@ export async function uploadEncryptedChatMedia(
   });
 
   if (!response.ok) {
-    let message = `Erro HTTP ${response.status} ao enviar mídia cifrada.`;
+    let message =
+      response.status === 413
+        ? 'O arquivo escolhido é muito grande (máximo 8 MB). Escolha um arquivo menor.'
+        : 'Não foi possível enviar esta foto ou áudio agora. Tente novamente.';
     try {
       const data = (await response.json()) as { detail?: string; title?: string };
       message = data.detail || data.title || message;
@@ -531,7 +494,7 @@ export async function downloadEncryptedChatMedia(
   session: AuthSession,
   mediaId: string
 ): Promise<Uint8Array> {
-  const response = await fetchWithAutoRefresh(
+  const response = await fetchWithSessionRefresh(
     session,
     `/api/v1/chat/media/${encodeURIComponent(mediaId)}`,
     (token) => ({
@@ -544,7 +507,7 @@ export async function downloadEncryptedChatMedia(
 
   if (!response.ok) {
     throw new ApiError(
-      `Erro HTTP ${response.status} ao baixar mídia cifrada.`,
+      'Não foi possível carregar esta foto ou áudio agora.',
       response.status
     );
   }

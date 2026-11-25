@@ -17,6 +17,7 @@ import {
   fetchMyProfile,
   loadAuthSession,
   logoutAccount,
+  registerSessionLifecycleCallbacks,
   resolveApiAssetUrl,
   type ServerProfile,
 } from './services/apiClient';
@@ -124,6 +125,25 @@ export function App() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    return registerSessionLifecycleCallbacks({
+      onSessionUpdated: (updated) => {
+        setAuthSession(updated);
+      },
+      onSessionExpired: () => {
+        setAuthSession(null);
+        setServerProfile(null);
+        setIsLoadingProfile(false);
+        setIsProfileMissing(false);
+        setIsEditingProfile(false);
+        setOrphanNotice(null);
+        setAccountDeletedNotice('Sua sessão expirou por segurança. Entre novamente para continuar.');
+        setActiveView('login');
+        setShowLanding(false);
+      },
+    });
+  }, []);
 
   useEffect(() => {
     function handlePopState() {
