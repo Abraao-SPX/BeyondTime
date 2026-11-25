@@ -7,6 +7,7 @@ import {
   verifyMyBiometrics,
   type VerifyBiometricsResponse,
 } from '../../services/apiClient';
+import type { AuthSession } from '../../types/auth';
 import {
   isMobileDevice,
   recordAndSubmitLiveness,
@@ -14,6 +15,7 @@ import {
 } from '../../utils/biometricCapture';
 
 interface FacialVerificationQrModalProps {
+  authSession?: AuthSession | null;
   firstName?: string;
   onClose: () => void;
   onVerified?: (result: VerifyBiometricsResponse) => void;
@@ -30,10 +32,15 @@ interface FacialVerificationQrModalProps {
  * - No PC sem celular por perto: oferece plano B discreto ("Usar a câmera deste computador").
  */
 export function FacialVerificationQrModal({
+  authSession: propSession = null,
   firstName,
   onClose,
   onVerified,
 }: FacialVerificationQrModalProps) {
+  const resolveActiveSession = useCallback(
+    () => propSession ?? loadAuthSession(),
+    [propSession]
+  );
   const defaultMode = useMemo<'qr' | 'camera'>(() => (isMobileDevice() ? 'camera' : 'qr'), []);
   const [activeMode, setActiveMode] = useState<'qr' | 'camera'>(defaultMode);
 
@@ -60,6 +67,12 @@ export function FacialVerificationQrModal({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const notifiedVerifiedRef = useRef(false);
+  const onVerifiedRef = useRef(onVerified);
+  const handoffRequestSeqRef = useRef(0);
+
+  useEffect(() => {
+    onVerifiedRef.current = onVerified;
+  }, [onVerified]);
 
   const biometricsBaseUrl = useMemo(() => resolveBiometricsBaseUrl(), []);
 
@@ -83,7 +96,8 @@ export function FacialVerificationQrModal({
 
   // Cria uma nova sessão de handoff QR no backend quando em modo QR
   const initQrHandoff = useCallback(async () => {
-    const session = loadAuthSession();
+    const requestSeq = ++handoffRequestSeqRef.current;
+    const session = resolveActiveSession();
     if (!session?.accessToken || !session?.userId || session.userId === 'dev-preview-50plus') {
       setHandoffToken(null);
       setHandoffState('unauthenticated');
@@ -98,12 +112,14 @@ export function FacialVerificationQrModal({
 
     try {
       const created = await createBiometricHandoff(session);
+      if (handoffRequestSeqRef.current !== requestSeq) return;
       setHandoffToken(created.handoffToken);
       setHandoffState('waiting');
       setHandoffMessage(
         'Aguardando você apontar a câmera do celular para o código ao lado (válido por 5 minutos).'
       );
     } catch (err) {
+      if (handoffRequestSeqRef.current !== requestSeq) return;
       setHandoffToken(null);
       setHandoffState('error');
       setHandoffMessage(
@@ -112,11 +128,13 @@ export function FacialVerificationQrModal({
           : 'Não foi possível gerar o código QR agora. Tente novamente.'
       );
     }
-  }, []);
+  }, [resolveActiveSession]);
 
   useEffect(() => {
     if (activeMode === 'qr') {
       void initQrHandoff();
+    } else {
+      handoffRequestSeqRef.current += 1;
     }
   }, [activeMode, initQrHandoff]);
 
@@ -159,7 +177,7 @@ export function FacialVerificationQrModal({
     if (activeMode !== 'qr' || handoffState !== 'waiting' || !handoffToken) {
       return;
     }
-    const session = loadAuthSession();
+    const session = resolveActiveSession();
     if (!session?.accessToken) return;
 
     let cancelled = false;
@@ -176,7 +194,7 @@ export function FacialVerificationQrModal({
           );
           if (!notifiedVerifiedRef.current) {
             notifiedVerifiedRef.current = true;
-            onVerified?.({
+            onVerifiedRef.current?.({
               success: true,
               message: 'Selo de Verificado 50+ concedido com sucesso.',
               profileId: '',
@@ -200,7 +218,7 @@ export function FacialVerificationQrModal({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeMode, handoffState, handoffToken, onVerified]);
+  }, [activeMode, handoffState, handoffToken, resolveActiveSession]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -244,7 +262,7 @@ export function FacialVerificationQrModal({
   }, []);
 
   const runLiveCameraVerification = useCallback(async () => {
-    const session = loadAuthSession();
+    const session = resolveActiveSession();
     if (!session?.accessToken || !session?.userId) {
       setCameraPhase('error');
       setCameraMessage(
@@ -292,7 +310,7 @@ export function FacialVerificationQrModal({
           : 'Não foi possível concluir a verificação facial agora.'
       );
     }
-  }, [biometricsBaseUrl, firstName, onVerified, startCamera, stopCamera]);
+  }, [biometricsBaseUrl, firstName, onVerified, resolveActiveSession, startCamera, stopCamera]);
 
   const isBusy = cameraPhase === 'recording' || cameraPhase === 'processing';
   const isApproved = handoffState === 'approved' || cameraPhase === 'approved';

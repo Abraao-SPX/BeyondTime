@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { OnboardingFormData, SocialProvider } from '../../types/auth';
+import type { AuthSession, OnboardingFormData, SocialProvider } from '../../types/auth';
 import {
   calculateAgeFromBirthDate,
   MIN_PASSWORD_LENGTH,
@@ -16,6 +16,9 @@ interface Step7SenhaLgpdProps {
   isSocialAccount?: boolean;
   isEditMode?: boolean;
   socialProvider?: SocialProvider | null;
+  authSession?: AuthSession | null;
+  isFaceVerified?: boolean;
+  onFaceVerified?: () => void;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
   onToggleLgpd: (accepted: boolean) => void;
@@ -31,6 +34,9 @@ export function Step7SenhaLgpd({
   isSocialAccount = false,
   isEditMode = false,
   socialProvider = null,
+  authSession = null,
+  isFaceVerified = false,
+  onFaceVerified,
   onPasswordChange,
   onConfirmPasswordChange,
   onToggleLgpd,
@@ -40,6 +46,7 @@ export function Step7SenhaLgpd({
 }: Step7SenhaLgpdProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
+  const hasAutoOpenedQrRef = useRef(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +54,14 @@ export function Step7SenhaLgpd({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
+
+  // Abre automaticamente o QR Code obrigatório assim que o cadastro é salvo e o rosto ainda não foi verificado
+  useEffect(() => {
+    if (isCompleted && !isFaceVerified && !isEditMode && !hasAutoOpenedQrRef.current) {
+      hasAutoOpenedQrRef.current = true;
+      setShowQrModal(true);
+    }
+  }, [isCompleted, isFaceVerified, isEditMode]);
 
   const passwordsMatch =
     formData.password.length >= MIN_PASSWORD_LENGTH &&
@@ -80,14 +95,21 @@ export function Step7SenhaLgpd({
 
   if (isCompleted) {
     const calculatedAge = calculateAgeFromBirthDate(formData.birthDate);
+    const canEnterWorkspace = isFaceVerified || isEditMode;
+    const firstName = formData.fullName.trim().split(/\s+/)[0] || undefined;
+
     return (
       <div className="completion-summary" aria-live="polite">
-        <p className="defensive-modal__badge">Perfil salvo</p>
+        <p className="defensive-modal__badge">
+          {canEnterWorkspace ? 'Selo de Verificado 50+ Ativo' : 'Etapa final obrigatória — RF-11'}
+        </p>
         <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-          Perfil criado com sucesso
+          {canEnterWorkspace ? 'Perfil verificado com sucesso' : 'Conta criada! Confirme seu rosto'}
         </h1>
         <p className="auth-card__subtitle">
-          Seus dados e preferências foram salvos. Você pode editar seu perfil a qualquer momento.
+          {canEnterWorkspace
+            ? 'Sua identidade foi confirmada e seus dados foram salvos. Você já pode acessar a página principal.'
+            : 'Para entrar na página principal do BeyondTime, conclua a verificação facial pelo celular (código QR, sem precisar baixar aplicativo).'}
         </p>
 
         {formData.photoPreviewUrl !== null && (
@@ -123,39 +145,64 @@ export function Step7SenhaLgpd({
 
         <div className="photo-verification-banner" style={{ margin: '20px 0' }}>
           <div className="photo-verification-banner__text">
-            <strong>Verificação facial pelo celular (opcional)</strong>
+            <strong>
+              {isFaceVerified
+                ? 'Selo de Verificado 50+ confirmado!'
+                : 'Verificação facial obrigatória pelo celular (QR Code)'}
+            </strong>
             <p>
-              Em breve você poderá confirmar sua identidade com a câmera do celular e receber o
-              Selo de Verificado 50+. Você poderá fazer isso depois, em Meu Perfil.
+              {isFaceVerified
+                ? 'Reconhecimento facial e prova de vida aprovados. Seu acesso à página principal está liberado.'
+                : 'Aponte a câmera do celular para o código QR e faça a prova de vida direto no navegador, sem instalar app.'}
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => setShowQrModal(true)}
-          >
-            Ver como funciona
-          </button>
+          {!isFaceVerified && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              style={{ minHeight: '48px' }}
+              onClick={() => setShowQrModal(true)}
+            >
+              Verificar rosto agora (QR Code)
+            </button>
+          )}
         </div>
 
         <div className="action-stack action-stack--compact">
           <button
             type="button"
             className="btn btn--primary"
+            style={{ minHeight: '52px' }}
+            disabled={!canEnterWorkspace}
             onClick={onFinishToLogin}
           >
-            Acessar meu painel
+            {canEnterWorkspace
+              ? 'Acessar meu painel'
+              : 'Faça a verificação facial acima para entrar'}
           </button>
           <button
             type="button"
             className="btn btn--secondary"
+            style={{ minHeight: '48px' }}
             onClick={onEditProfile}
           >
             Editar perfil
           </button>
         </div>
 
-        {showQrModal && <FacialVerificationQrModal onClose={() => setShowQrModal(false)} />}
+        {showQrModal && (
+          <FacialVerificationQrModal
+            authSession={authSession}
+            firstName={firstName}
+            onClose={() => setShowQrModal(false)}
+            onVerified={(res) => {
+              if (res.verifiedBadge50plus) {
+                onFaceVerified?.();
+                setShowQrModal(false);
+              }
+            }}
+          />
+        )}
       </div>
     );
   }

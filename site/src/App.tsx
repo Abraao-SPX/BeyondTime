@@ -9,6 +9,7 @@ import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
 import { AuthenticatedWorkspace } from './components/wave2/AuthenticatedWorkspace';
+import { FacialVerificationQrModal } from './components/wave2/FacialVerificationQrModal';
 import { MobileFacialHandoffPage } from './components/wave2/MobileFacialHandoffPage';
 import { useHighContrast } from './hooks/useHighContrast';
 import {
@@ -123,6 +124,7 @@ export function App() {
   const [isLoadingProfile, setIsLoadingProfile] = useState<boolean>(() => loadAuthSession() !== null);
   const [isProfileMissing, setIsProfileMissing] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isMandatoryQrOpen, setIsMandatoryQrOpen] = useState(false);
   const [orphanNotice, setOrphanNotice] = useState<string | null>(null);
   const [socialDraft, setSocialDraft] = useState<SocialOnboardingDraft | null>(null);
 
@@ -418,6 +420,26 @@ export function App() {
   const displayHobbies = rawHobbies?.map((h) => sanitizeTextInput(h)).filter(Boolean);
   const displayAvatarUrl = resolveApiAssetUrl(serverProfile?.avatarUrl) || savedProfile?.photoDataUrl || null;
 
+  // RF-11: Portão Biométrico Obrigatório (fail-closed) — só entra na página principal se o rosto foi verificado e aprovado
+  const needsMandatoryFacialVerification =
+    authSession !== null &&
+    !isLoadingProfile &&
+    !isProfileMissing &&
+    !isEditingProfile &&
+    serverProfile?.verifiedBadge50plus !== true;
+
+  useEffect(() => {
+    if (needsMandatoryFacialVerification) {
+      setIsMandatoryQrOpen(true);
+    } else {
+      setIsMandatoryQrOpen(false);
+    }
+  }, [needsMandatoryFacialVerification]);
+
+  if (isMobileFacialHandoff) {
+    return <MobileFacialHandoffPage />;
+  }
+
   // Roteamento nativo para páginas legais LGPD, Meta e Termos
   if (legalPage !== null) {
     return (
@@ -436,10 +458,6 @@ export function App() {
         />
       </>
     );
-  }
-
-  if (isMobileFacialHandoff) {
-    return <MobileFacialHandoffPage />;
   }
 
   if (showLanding) {
@@ -464,7 +482,11 @@ export function App() {
   }
 
   const isShowingWorkspace =
-    authSession !== null && !isLoadingProfile && !isProfileMissing && !isEditingProfile;
+    authSession !== null &&
+    !isLoadingProfile &&
+    !isProfileMissing &&
+    !isEditingProfile &&
+    !needsMandatoryFacialVerification;
   const isShowingOnboarding =
     (authSession !== null && !isLoadingProfile && (isProfileMissing || isEditingProfile)) ||
     (authSession === null && activeView === 'register');
@@ -531,6 +553,71 @@ export function App() {
                 isEditMode={isEditingProfile}
                 onCancelEdit={() => setIsEditingProfile(false)}
               />
+            ) : needsMandatoryFacialVerification ? (
+              <section className="completion-summary" aria-live="polite">
+                <p className="defensive-modal__badge">Etapa Obrigatória de Segurança — RF-11</p>
+                <h1 className="auth-card__title">
+                  Olá, {serverProfile?.firstName || 'bem-vindo(a)'}! Confirme seu rosto para entrar
+                </h1>
+                <p className="auth-card__subtitle">
+                  Para proteger toda a comunidade 50+, o acesso à página principal é liberado
+                  somente após a verificação facial pelo celular (código QR, sem baixar aplicativo).
+                </p>
+
+                <div className="action-stack action-stack--compact" style={{ marginTop: '20px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    style={{ minHeight: '52px' }}
+                    onClick={() => setIsMandatoryQrOpen(true)}
+                  >
+                    Abrir código QR de verificação facial
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    style={{ minHeight: '48px' }}
+                    onClick={() => setIsEditingProfile(true)}
+                  >
+                    Editar dados do perfil
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    style={{ minHeight: '48px' }}
+                    onClick={handleLogout}
+                  >
+                    Sair da conta
+                  </button>
+                </div>
+
+                {isMandatoryQrOpen && (
+                  <FacialVerificationQrModal
+                    authSession={authSession}
+                    firstName={serverProfile?.firstName || undefined}
+                    onClose={() => setIsMandatoryQrOpen(false)}
+                    onVerified={(res) => {
+                      if (res.verifiedBadge50plus) {
+                        setIsMandatoryQrOpen(false);
+                        setServerProfile((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                verifiedBadge50plus: true,
+                                verificationStatus: 'VERIFIED',
+                              }
+                            : prev
+                        );
+                        if (!serverProfile && authSession) {
+                          void fetchMyProfile(authSession)
+                            .then((fresh) => setServerProfile(fresh))
+                            .catch(() => {});
+                        }
+                      }
+                    }}
+                  />
+                )}
+              </section>
             ) : (
               <>
                 <AuthenticatedWorkspace
