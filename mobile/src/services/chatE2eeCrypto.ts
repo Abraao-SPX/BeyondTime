@@ -213,6 +213,16 @@ function getSecureRandomBytes(length: number): Uint8Array {
   }
 }
 
+function generateHermesSafeP256PrivateKey(): Uint8Array {
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const candidate = getSecureRandomBytes(32);
+    if (p256.utils.isValidPrivateKey(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('Não foi possível gerar chave privada segura neste dispositivo.');
+}
+
 // ============================================================================
 // Armazenamento local do par de chaves (Web localStorage / Nativo FileSystem)
 // ============================================================================
@@ -428,8 +438,8 @@ export async function ensureUserChatKeyPair(
       }
     }
 
-    // Primeiro acesso sem cofre válido: gera novo par ECDH P-256
-    const privateKeyBytes = p256.utils.randomPrivateKey();
+    // Primeiro acesso sem cofre válido: gera novo par ECDH P-256 sem depender de globalThis.crypto (AUD-006)
+    const privateKeyBytes = generateHermesSafeP256PrivateKey();
     const { publicKeyJwk, privateKeyJwk } = buildJwkPairFromPrivateBytes(privateKeyBytes);
     const wrapped = wrapPrivateKeyJwk(session, privateKeyJwk);
     const saved = await vaultApi.upsertMyVault(session, {
