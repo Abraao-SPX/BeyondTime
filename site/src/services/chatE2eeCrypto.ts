@@ -46,6 +46,7 @@ export interface LocalChatKeyPair {
   publicKeyJwk: string;
   privateKey: CryptoKey;
   keyVersion: number;
+  warningMessage?: string;
 }
 
 interface StoredKeyPairJson {
@@ -54,12 +55,20 @@ interface StoredKeyPairJson {
   keyVersion: number;
 }
 
+const inFlightKeyPairByUser = new Map<string, Promise<LocalChatKeyPair | null>>();
+
 export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  const CHUNK_SIZE = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+    let chunk = '';
+    for (let j = 0; j < slice.length; j += 1) {
+      chunk += String.fromCharCode(slice[j]);
+    }
+    parts.push(chunk);
   }
-  return window.btoa(binary);
+  return window.btoa(parts.join(''));
 }
 
 export function base64ToBytes(base64: string): Uint8Array {
@@ -183,7 +192,41 @@ async function tryUnwrapPrivateKeyJwk(
  *    sem sobrescrever a chave publicada no servidor.
  * 3. Só gera um novo par quando não existe cofre restaurável no servidor.
  */
+function isSamePublicKeyJwk(
+  localPub: JsonWebKey,
+  serverPubJson: string | null | undefined
+): boolean {
+  if (!serverPubJson) return false;
+  try {
+    const parsed = JSON.parse(serverPubJson) as JsonWebKey;
+    return (
+      parsed.kty === 'EC' &&
+      parsed.crv === 'P-256' &&
+      Boolean(parsed.x) &&
+      Boolean(parsed.y) &&
+      parsed.x === localPub.x &&
+      parsed.y === localPub.y
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureUserChatKeyPair(
+  session: AuthSession
+): Promise<LocalChatKeyPair | null> {
+  const existingPromise = inFlightKeyPairByUser.get(session.userId);
+  if (existingPromise) {
+    return existingPromise;
+  }
+  const promise = ensureUserChatKeyPairInternal(session).finally(() => {
+    inFlightKeyPairByUser.delete(session.userId);
+  });
+  inFlightKeyPairByUser.set(session.userId, promise);
+  return promise;
+}
+
+async function ensureUserChatKeyPairInternal(
   session: AuthSession
 ): Promise<LocalChatKeyPair | null> {
   if (typeof window === 'undefined' || !window.crypto?.subtle) {
@@ -194,6 +237,7 @@ export async function ensureUserChatKeyPair(
   try {
     const rawStored = readStoredKeyPair(storageKey);
     const existingVault = await fetchMyChatKeyVault(session);
+    let hadUnrecoverableDivergence = false;
 
     if (rawStored) {
       const parsed = JSON.parse(rawStored) as StoredKeyPairJson;
@@ -204,28 +248,32 @@ export async function ensureUserChatKeyPair(
         true,
         ['deriveKey']
       );
-      if (existingVault) {
+      if (existingVault && isSamePublicKeyJwk(parsed.publicKeyJwk, existingVault.publicKeyJwk)) {
         return {
-          publicKeyJwk: JSON.stringify(parsed.publicKeyJwk),
+          publicKeyJwk: existingVault.publicKeyJwk,
           privateKey,
           keyVersion: existingVault.keyVersion || parsed.keyVersion || 1,
         };
       }
-      // Publica chave já existente no servidor se ainda não estiver registrada
-      const wrapped = await wrapPrivateKeyJwk(session, parsed.privateKeyJwk);
-      const saved = await upsertMyChatKeyVault(session, {
-        publicKeyJwk: JSON.stringify(parsed.publicKeyJwk),
-        ...wrapped,
-        keyAlgorithm: 'ECDH-P256',
-      });
-      return {
-        publicKeyJwk: saved.publicKeyJwk,
-        privateKey,
-        keyVersion: saved.keyVersion || 1,
-      };
+      if (!existingVault) {
+        // Publica chave já existente no servidor se ainda não estiver registrada
+        const wrapped = await wrapPrivateKeyJwk(session, parsed.privateKeyJwk);
+        const saved = await upsertMyChatKeyVault(session, {
+          publicKeyJwk: JSON.stringify(parsed.publicKeyJwk),
+          ...wrapped,
+          keyAlgorithm: 'ECDH-P256',
+        });
+        return {
+          publicKeyJwk: saved.publicKeyJwk,
+          privateKey,
+          keyVersion: saved.keyVersion || 1,
+        };
+      }
+      // Chave local diverge do cofre vigente no servidor -> restaura o cofre do servidor abaixo
+      hadUnrecoverableDivergence = true;
     }
 
-    // Novo navegador/sessão limpa: restaura o cofre existente sem sobrescrever a chave atual
+    // Novo navegador ou divergência local/servidor: restaura o cofre existente sem sobrescrever
     if (existingVault) {
       const restoredPrivateJwk = await tryUnwrapPrivateKeyJwk(session, existingVault);
       if (restoredPrivateJwk) {
@@ -284,6 +332,10 @@ export async function ensureUserChatKeyPair(
       publicKeyJwk: saved.publicKeyJwk,
       privateKey: generated.privateKey,
       keyVersion: saved.keyVersion || 1,
+      warningMessage:
+        hadUnrecoverableDivergence || existingVault
+          ? 'Sua proteção de mensagens foi renovada neste navegador. Algumas mensagens mais antigas podem não abrir.'
+          : undefined,
     };
   } catch {
     return null;
