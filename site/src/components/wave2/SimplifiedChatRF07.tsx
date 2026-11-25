@@ -6,6 +6,7 @@ import type { ChatThread, OutgoingMessagePayload } from '../../types/wave2';
 interface SimplifiedChatRF07Props {
   threads: ChatThread[];
   isLoading?: boolean;
+  isSendingDisabled?: boolean;
   activeThreadId: string | null;
   onSelectThread: (contactId: string) => void;
   onSendMessage: (
@@ -101,6 +102,7 @@ function formatSeconds(totalSeconds: number): string {
 export function SimplifiedChatRF07({
   threads,
   isLoading = false,
+  isSendingDisabled = false,
   activeThreadId,
   onSelectThread,
   onSendMessage,
@@ -120,6 +122,7 @@ export function SimplifiedChatRF07({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [mediaNotice, setMediaNotice] = useState<string | null>(null);
   const [unplayableAudioIds, setUnplayableAudioIds] = useState<Record<string, boolean>>({});
+  const sendingBlocked = isSending || isSendingDisabled;
 
   const isMountedRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -200,7 +203,7 @@ export function SimplifiedChatRF07({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeThread || isSending) return;
+    if (!activeThread || sendingBlocked) return;
     const contactId = activeThread.contactId;
     const trimmed = draft.trim();
     if (!trimmed && !pendingImage) return;
@@ -234,7 +237,7 @@ export function SimplifiedChatRF07({
   }
 
   async function handleIcebreakerClick(contactId: string, suggestion: string) {
-    if (isSending) return;
+    if (sendingBlocked) return;
     setIsSending(true);
     try {
       await onSendMessage(contactId, suggestion);
@@ -246,7 +249,7 @@ export function SimplifiedChatRF07({
   }
 
   async function handleRetryFailedAudio() {
-    if (!activeThread || !failedAudio || isSending) return;
+    if (!activeThread || !failedAudio || sendingBlocked) return;
     const contactId = activeThread.contactId;
     setIsSending(true);
     setMediaNotice(null);
@@ -271,7 +274,7 @@ export function SimplifiedChatRF07({
   function handlePhotoPick(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || !activeThread) return;
+    if (!file || !activeThread || sendingBlocked) return;
     const targetContactId = activeThread.contactId;
 
     if (!file.type.startsWith('image/')) {
@@ -298,7 +301,7 @@ export function SimplifiedChatRF07({
   }
 
   async function handleStartRecording() {
-    if (!activeThread || isSending) return;
+    if (!activeThread || sendingBlocked) return;
     setMediaNotice(null);
 
     if (
@@ -611,7 +614,7 @@ export function SimplifiedChatRF07({
                         key={suggestion}
                         type="button"
                         className="chat-icebreaker-btn"
-                        disabled={isSending}
+                        disabled={sendingBlocked}
                         onClick={() => void handleIcebreakerClick(activeThread.contactId, suggestion)}
                       >
                         “{suggestion}”
@@ -693,7 +696,7 @@ export function SimplifiedChatRF07({
                   <button
                     type="button"
                     className="btn btn--secondary wa-attachment-bar__cancel"
-                    disabled={isSending}
+                    disabled={sendingBlocked}
                     onClick={() => setFailedAudioForContact(activeContactId, null)}
                   >
                     Descartar
@@ -701,7 +704,7 @@ export function SimplifiedChatRF07({
                   <button
                     type="button"
                     className="btn btn--primary wa-attachment-bar__cancel"
-                    disabled={isSending}
+                    disabled={sendingBlocked}
                     onClick={() => void handleRetryFailedAudio()}
                   >
                     {isSending ? 'Enviando...' : 'Reenviar áudio'}
@@ -772,7 +775,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="wa-media-btn"
-                  disabled={isSending}
+                  disabled={sendingBlocked}
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Enviar foto"
                   title="Enviar foto"
@@ -796,7 +799,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="wa-media-btn"
-                  disabled={isSending}
+                  disabled={sendingBlocked}
                   onClick={handleStartRecording}
                   aria-label="Gravar mensagem de voz"
                   title="Gravar áudio"
@@ -825,10 +828,13 @@ export function SimplifiedChatRF07({
                   id="chat-message-input"
                   type="text"
                   className="form-input wa-composer__input"
+                  disabled={isSendingDisabled}
                   placeholder={
-                    pendingImage
-                      ? 'Adicione uma legenda opcional...'
-                      : `Digite uma mensagem para ${activeThread.contactName.split(' ')[0]}...`
+                    isSendingDisabled
+                      ? 'Proteção de mensagens indisponível. Clique em "Tentar de novo" acima.'
+                      : pendingImage
+                        ? 'Adicione uma legenda opcional...'
+                        : `Digite uma mensagem para ${activeThread.contactName.split(' ')[0]}...`
                   }
                   value={draft}
                   onChange={(event) => {
@@ -841,7 +847,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="submit"
                   className="btn btn--primary wa-composer__send"
-                  disabled={!canSubmit || isSending}
+                  disabled={!canSubmit || sendingBlocked}
                 >
                   <span>{isSending ? 'Enviando...' : 'Enviar'}</span>
                   <svg

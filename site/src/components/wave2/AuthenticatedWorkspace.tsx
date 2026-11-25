@@ -132,6 +132,8 @@ export function AuthenticatedWorkspace({
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
+  const [chatKeyUnavailable, setChatKeyUnavailable] = useState(false);
+  const [isRetryingChatKey, setIsRetryingChatKey] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
@@ -327,10 +329,12 @@ export function AuthenticatedWorkspace({
     let cancelled = false;
 
     async function bootstrapRealWave2() {
-      myKeyPairRef.current = await ensureUserChatKeyPair(authSession);
+      const keyPair = await ensureUserChatKeyPair(authSession);
       if (cancelled) return;
-      if (myKeyPairRef.current?.warningMessage) {
-        setSafetyFeedback(myKeyPairRef.current.warningMessage);
+      myKeyPairRef.current = keyPair;
+      setChatKeyUnavailable(keyPair === null);
+      if (keyPair?.warningMessage) {
+        setSafetyFeedback(keyPair.warningMessage);
       }
 
       try {
@@ -430,6 +434,28 @@ export function AuthenticatedWorkspace({
       stompRef.current = null;
     };
   }, [authSession, hydrateRemoteMessage, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
+
+  const handleRetryChatKey = useCallback(async () => {
+    if (isPreviewMode || isRetryingChatKey) return;
+    setIsRetryingChatKey(true);
+    try {
+      const keyPair = await ensureUserChatKeyPair(authSession);
+      myKeyPairRef.current = keyPair;
+      if (keyPair) {
+        setChatKeyUnavailable(false);
+        if (keyPair.warningMessage) {
+          setSafetyFeedback(keyPair.warningMessage);
+        }
+        loadedHistoryIdsRef.current.clear();
+        setServerThreads((prev) => prev.map((t) => ({ ...t, messages: [] })));
+        await reloadRemoteConversations();
+      } else {
+        setChatKeyUnavailable(true);
+      }
+    } finally {
+      setIsRetryingChatKey(false);
+    }
+  }, [authSession, isPreviewMode, isRetryingChatKey, reloadRemoteConversations]);
 
   // Recarrega descoberta somente quando usuário muda filtros de cidade ou objetivo (seguro em React StrictMode)
   useEffect(() => {
@@ -701,6 +727,12 @@ export function AuthenticatedWorkspace({
         ),
       }));
       return true;
+    }
+
+    if (!myKeyPairRef.current) {
+      setChatKeyUnavailable(true);
+      setSafetyFeedback('Não foi possível carregar sua proteção de mensagens. Tente de novo.');
+      return false;
     }
 
     const richPayload = typeof payload === 'string' ? null : payload;
@@ -990,6 +1022,21 @@ export function AuthenticatedWorkspace({
         </button>
       </nav>
 
+      {!isPreviewMode && chatKeyUnavailable && (
+        <div className="callout-amber workspace-feedback" role="alert" aria-live="assertive">
+          <span>Não foi possível carregar sua proteção de mensagens. Tente de novo.</span>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ minHeight: '48px', padding: '8px 16px' }}
+            disabled={isRetryingChatKey}
+            onClick={() => void handleRetryChatKey()}
+          >
+            {isRetryingChatKey ? 'Carregando...' : 'Tentar de novo'}
+          </button>
+        </div>
+      )}
+
       {safetyFeedback && (
         <div className="callout-amber workspace-feedback" role="status" aria-live="polite">
           <span>{safetyFeedback}</span>
@@ -1029,6 +1076,7 @@ export function AuthenticatedWorkspace({
         <SimplifiedChatRF07
           threads={visibleThreads}
           isLoading={isLoadingWorkspace}
+          isSendingDisabled={!isPreviewMode && chatKeyUnavailable}
           activeThreadId={activeThreadId}
           onSelectThread={handleSelectThread}
           onSendMessage={handleSendMessage}
