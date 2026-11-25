@@ -17,7 +17,12 @@ import { HomePlaceholderScreen } from '../screens/HomePlaceholderScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { OnboardingFlowScreen } from '../screens/OnboardingFlowScreen';
 import { SplashWelcomeScreen } from '../screens/SplashWelcomeScreen';
-import { ApiError, logoutAccount, type AuthSession } from '../services/authService';
+import {
+  ApiError,
+  deleteAccountDefinitively,
+  logoutAccount,
+  type AuthSession,
+} from '../services/authService';
 import { clearLocalChatE2eeData } from '../services/chatE2eeCrypto';
 import {
   createBlockContact,
@@ -435,6 +440,30 @@ export function AppNavigator() {
     });
     return () => subscription.remove();
   }, [activeConversationId, activeTab, route]);
+
+  const handleDeleteAccount = async (password: string): Promise<void> => {
+    if (!authSession) {
+      throw new Error('Sua sessão expirou. Entre novamente para excluir sua conta.');
+    }
+    const currentSession = authSession;
+    await deleteAccountDefinitively(currentSession, password);
+    activeSessionRef.current = null;
+    myKeyPairRef.current = null;
+    if (stompRef.current) {
+      stompRef.current.disconnect();
+      stompRef.current = null;
+    }
+    await clearLocalChatE2eeData(currentSession.userId);
+    setAuthSession(null);
+    setOnboardingData(INITIAL_ONBOARDING_DATA);
+    setRemoteDiscoveryProfiles([]);
+    setConversations([]);
+    setBlockedContacts([]);
+    setActiveConversationId(null);
+    setWave2Error(null);
+    setActiveTab('discover');
+    setRoute('splash');
+  };
 
   const handleResetAndExit = () => {
     const currentSession = authSession;
@@ -965,6 +994,7 @@ export function AppNavigator() {
                     onUnblockContact={handleUnblockContact}
                     onRepeatFacialVerification={() => setRoute('facialVerification')}
                     onSignOut={handleResetAndExit}
+                    onDeleteAccount={handleDeleteAccount}
                   />
                 )}
               </View>

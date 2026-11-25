@@ -230,6 +230,23 @@ export async function logoutAccount(session: AuthSession | null): Promise<void> 
   }
 }
 
+export async function deleteAccountDefinitively(
+  session: AuthSession,
+  password?: string
+): Promise<void> {
+  await requestJson<void>(
+    '/api/v1/auth/account',
+    {
+      method: 'DELETE',
+      body: JSON.stringify({
+        password: password ? password.slice(0, 72) : null,
+        confirmedViaDefensiveModal: true,
+      }),
+    },
+    session.accessToken
+  );
+}
+
 export async function fetchMyProfile(session: AuthSession): Promise<ServerProfile> {
   return requestJson<ServerProfile>('/api/v1/profiles/me', {}, session.accessToken);
 }
