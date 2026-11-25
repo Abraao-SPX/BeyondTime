@@ -39,7 +39,7 @@ export function Step2DadosPessoais({
     event.preventDefault();
 
     if (containsDangerousXss(fullName)) {
-      setNameError('Scripts ou tags HTML não são permitidos no nome.');
+      setNameError('Use apenas letras e espaços comuns no seu nome (evite símbolos especiais).');
       nameInputRef.current?.focus();
       return;
     }

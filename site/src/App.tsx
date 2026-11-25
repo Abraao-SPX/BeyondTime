@@ -588,8 +588,8 @@ export function App() {
                     {isSocialAccount ? (
                       <div className="callout-amber" role="note" style={{ marginTop: '16px', marginBottom: '8px' }}>
                         <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.5 }}>
-                          <strong>Conta autenticada via {authSession.authProvider === 'google' ? 'Google' : authSession.authProvider === 'facebook' ? 'Facebook' : 'provedor social'}:</strong>{' '}
-                          Conforme a LGPD (RF-14), você não precisa redigitar senha para excluir sua conta. Aguarde o temporizador defensivo abaixo para confirmar a exclusão com total segurança.
+                          <strong>Conta conectada via {authSession.authProvider === 'google' ? 'Google' : authSession.authProvider === 'facebook' ? 'Facebook' : 'conta social'}:</strong>{' '}
+                          Você não precisa digitar senha para excluir sua conta. Aguarde o temporizador abaixo para confirmar a exclusão com segurança.
                         </p>
                       </div>
                     ) : (
@@ -609,12 +609,13 @@ export function App() {
                             if (deleteError) setDeleteError(null);
                           }}
                         />
-                        {deleteError !== null && (
-                          <p className="form-error" role="alert">
-                            {deleteError}
-                          </p>
-                        )}
                       </div>
+                    )}
+
+                    {deleteError !== null && (
+                      <p className="form-error" role="alert" style={{ marginTop: '10px' }}>
+                        {deleteError}
+                      </p>
                     )}
 
                     <div className="defensive-modal__actions">

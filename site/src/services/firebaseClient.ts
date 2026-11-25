@@ -22,7 +22,7 @@ function getFirebaseAuth(): Auth {
 
   if (!apiKey || !projectId) {
     throw new Error(
-      'Configuração do Firebase ausente. Crie ou configure o arquivo site/.env.local com VITE_FIREBASE_API_KEY e VITE_FIREBASE_PROJECT_ID (consulte site/.env.example).'
+      'O acesso com conta social não está disponível no momento. Você pode entrar usando seu e-mail e senha.'
     );
   }
 
@@ -87,7 +87,7 @@ export async function authenticateWithFirebasePopup(
     }
     const message = error instanceof Error ? error.message : err?.message;
     throw new Error(
-      message || 'Falha ao autenticar com provedor social via Firebase. Tente novamente.'
+      message || 'Não foi possível entrar com sua conta social agora. Tente novamente.'
     );
   }
 }
