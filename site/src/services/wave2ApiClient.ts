@@ -1,6 +1,6 @@
 import type { AuthSession, ConnectionGoal } from '../types/auth';
 import type { BlockedContact, ScoredCandidate } from '../types/wave2';
-import { ApiError, resolveApiAssetUrl } from './apiClient';
+import { ApiError, refreshSession, resolveApiAssetUrl } from './apiClient';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080').replace(
   /\/+$/,
@@ -152,34 +152,80 @@ export interface PublicChatKeyDto {
   keyVersion: number;
 }
 
+export interface ChatMediaUploadResponseDto {
+  mediaId: string;
+  conversationId: string;
+  mediaType: BackendChatMessageType;
+  sizeBytes: number;
+}
+
 // ==========================================================================
-// Helper HTTP autenticado
+// Helper HTTP autenticado (com auto-refresh JWT em 401)
 // ==========================================================================
+
+let inFlightRefreshPromise: Promise<AuthSession | null> | null = null;
+
+async function tryRefreshAuthSession(session: AuthSession): Promise<AuthSession | null> {
+  if (!session.refreshToken) return null;
+  if (!inFlightRefreshPromise) {
+    inFlightRefreshPromise = refreshSession(session.refreshToken)
+      .then((refreshed) => {
+        session.accessToken = refreshed.accessToken;
+        session.refreshToken = refreshed.refreshToken;
+        session.expiresInSeconds = refreshed.expiresInSeconds;
+        return refreshed;
+      })
+      .catch(() => null)
+      .finally(() => {
+        inFlightRefreshPromise = null;
+      });
+  }
+  return inFlightRefreshPromise;
+}
+
+async function fetchWithAutoRefresh(
+  session: AuthSession,
+  path: string,
+  buildInit: (accessToken: string) => RequestInit
+): Promise<Response> {
+  const execute = async (token: string): Promise<Response> => {
+    try {
+      return await fetch(`${API_BASE_URL}${path}`, buildInit(token));
+    } catch {
+      throw new ApiError(
+        'Não foi possível conectar ao servidor BeyondTime. Verifique se o backend está online.',
+        0,
+        'NETWORK_ERROR'
+      );
+    }
+  };
+
+  let response = await execute(session.accessToken);
+  if (response.status === 401 && session.refreshToken) {
+    const refreshed = await tryRefreshAuthSession(session);
+    if (refreshed?.accessToken) {
+      response = await execute(refreshed.accessToken);
+    }
+  }
+  return response;
+}
 
 async function authedRequest<T>(
   session: AuthSession,
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const headers = new Headers(options.headers);
-  headers.set('Authorization', `Bearer ${session.accessToken}`);
-  if (!headers.has('Content-Type') && options.body !== undefined) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithAutoRefresh(session, path, (token) => {
+    const headers = new Headers(options.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type') && options.body !== undefined) {
+      headers.set('Content-Type', 'application/json');
+    }
+    return {
       ...options,
       headers,
-    });
-  } catch {
-    throw new ApiError(
-      'Não foi possível conectar ao servidor BeyondTime. Verifique se o backend está online.',
-      0,
-      'NETWORK_ERROR'
-    );
-  }
+    };
+  });
 
   if (!response.ok) {
     let message = `Erro HTTP ${response.status} ao comunicar com o servidor.`;
@@ -432,4 +478,67 @@ export async function fetchUserPublicChatKey(
   } catch {
     return null;
   }
+}
+
+export async function uploadEncryptedChatMedia(
+  session: AuthSession,
+  conversationId: string,
+  mediaType: 'IMAGE' | 'AUDIO',
+  encryptedBytes: Uint8Array
+): Promise<ChatMediaUploadResponseDto> {
+  const copy = new Uint8Array(encryptedBytes.byteLength);
+  copy.set(encryptedBytes);
+  const blob = new Blob([copy.buffer], { type: 'application/octet-stream' });
+
+  const response = await fetchWithAutoRefresh(session, '/api/v1/chat/media', (token) => {
+    const formData = new FormData();
+    formData.append('conversationId', conversationId);
+    formData.append('mediaType', mediaType);
+    formData.append('file', blob, `media-${Date.now()}.enc`);
+    return {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    };
+  });
+
+  if (!response.ok) {
+    let message = `Erro HTTP ${response.status} ao enviar mídia cifrada.`;
+    try {
+      const data = (await response.json()) as { detail?: string; title?: string };
+      message = data.detail || data.title || message;
+    } catch {
+      // ignora payload não-JSON
+    }
+    throw new ApiError(message, response.status);
+  }
+
+  return (await response.json()) as ChatMediaUploadResponseDto;
+}
+
+export async function downloadEncryptedChatMedia(
+  session: AuthSession,
+  mediaId: string
+): Promise<Uint8Array> {
+  const response = await fetchWithAutoRefresh(
+    session,
+    `/api/v1/chat/media/${encodeURIComponent(mediaId)}`,
+    (token) => ({
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      `Erro HTTP ${response.status} ao baixar mídia cifrada.`,
+      response.status
+    );
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
 }

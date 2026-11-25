@@ -7,7 +7,10 @@ interface SimplifiedChatRF07Props {
   threads: ChatThread[];
   activeThreadId: string | null;
   onSelectThread: (contactId: string) => void;
-  onSendMessage: (contactId: string, payload: string | OutgoingMessagePayload) => void;
+  onSendMessage: (
+    contactId: string,
+    payload: string | OutgoingMessagePayload
+  ) => Promise<boolean> | boolean | void;
   onRequestBlock: (thread: ChatThread) => void;
   onGoToDiscover: () => void;
 }
@@ -85,27 +88,31 @@ export function SimplifiedChatRF07({
     setMediaNotice(null);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!activeThread) return;
     const trimmed = draft.trim();
     if (!trimmed && !pendingImage) return;
 
     if (pendingImage) {
-      onSendMessage(activeThread.contactId, {
+      const ok = await onSendMessage(activeThread.contactId, {
         text: trimmed,
         imageUrl: pendingImage.url,
         imageName: pendingImage.name,
       });
-      setPendingImage(null);
-      setDraft('');
-      setMediaNotice(null);
+      if (ok !== false) {
+        setPendingImage(null);
+        setDraft('');
+        setMediaNotice(null);
+      }
       return;
     }
 
-    onSendMessage(activeThread.contactId, trimmed);
-    setDraft('');
-    setMediaNotice(null);
+    const ok = await onSendMessage(activeThread.contactId, trimmed);
+    if (ok !== false) {
+      setDraft('');
+      setMediaNotice(null);
+    }
   }
 
   function handlePhotoPick(event: ChangeEvent<HTMLInputElement>) {

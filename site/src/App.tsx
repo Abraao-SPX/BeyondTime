@@ -294,20 +294,27 @@ export function App() {
   }, [authSession]);
 
   async function handleLogout() {
-    await logoutAccount(authSession);
-    setAuthSession(null);
-    setServerProfile(null);
-    setIsLoadingProfile(false);
-    setIsProfileMissing(false);
-    setIsEditingProfile(false);
-    setOrphanNotice(null);
-    setSocialDraft(null);
-    setIsDeleteModalOpen(false);
-    setDeletePassword('');
-    setDeleteError(null);
-    setContacts({ login: '', register: '', recover: '' });
-    setActiveView('login');
-    setShowLanding(true);
+    try {
+      await logoutAccount(authSession);
+    } catch {
+      // Mesmo se o backend estiver indisponível, limpa a sessão local com segurança
+      clearAuthSession();
+      clearUserProfile();
+    } finally {
+      setAuthSession(null);
+      setServerProfile(null);
+      setIsLoadingProfile(false);
+      setIsProfileMissing(false);
+      setIsEditingProfile(false);
+      setOrphanNotice(null);
+      setSocialDraft(null);
+      setIsDeleteModalOpen(false);
+      setDeletePassword('');
+      setDeleteError(null);
+      setContacts({ login: '', register: '', recover: '' });
+      setActiveView('login');
+      setShowLanding(true);
+    }
   }
 
   useEffect(() => {

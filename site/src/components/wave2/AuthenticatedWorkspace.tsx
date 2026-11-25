@@ -12,6 +12,7 @@ import {
 import {
   createBlockContact,
   deleteBlockContact,
+  downloadEncryptedChatMedia,
   fetchBlockedContacts,
   fetchChatConversations,
   fetchConversationMessages,
@@ -24,11 +25,16 @@ import {
   openOrCreateConversation,
   sendEncryptedMessageRest,
   sendMatchInteraction,
+  uploadEncryptedChatMedia,
+  type BackendChatMessageType,
   type ConversationSummaryDto,
   type EncryptedMessageDto,
 } from '../../services/wave2ApiClient';
 import {
+  bytesToBase64,
+  decryptMediaBytes,
   decryptMessageText,
+  encryptMediaBytes,
   encryptMessageText,
   ensureUserChatKeyPair,
   type LocalChatKeyPair,
@@ -76,6 +82,20 @@ function formatSergipeLocation(city?: string): string {
   return cleaned ? `${cleaned}, Sergipe` : 'Sergipe';
 }
 
+function formatAudioDurationLabel(seconds?: number | null): string | undefined {
+  if (!seconds || seconds <= 0) return undefined;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function parseDurationLabelToSeconds(label?: string): number {
+  if (!label) return 1;
+  const match = /^(\d+):(\d{2})$/.exec(label.trim());
+  if (!match) return 1;
+  return Math.max(1, Number(match[1]) * 60 + Number(match[2]));
+}
+
 type PendingBlockTarget = Pick<BlockedContact, 'id' | 'fullName' | 'age' | 'city' | 'avatarUrl'>;
 
 export function AuthenticatedWorkspace({
@@ -112,6 +132,7 @@ export function AuthenticatedWorkspace({
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
   const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
+  const hasMountedFilterEffectRef = useRef(false);
   const activeTabRef = useRef<WorkspaceTabId>(activeTab);
   const activeThreadIdRef = useRef<string | null>(activeThreadId);
   const serverThreadsRef = useRef<ChatThread[]>(serverThreads);
@@ -119,6 +140,59 @@ export function AuthenticatedWorkspace({
   activeTabRef.current = activeTab;
   activeThreadIdRef.current = activeThreadId;
   serverThreadsRef.current = serverThreads;
+
+  const hydrateRemoteMessage = useCallback(
+    async (
+      dto: EncryptedMessageDto,
+      peerPublicKeyJwk: string | null | undefined
+    ): Promise<ChatMessage> => {
+      const text = await decryptMessageText(
+        dto.ciphertext,
+        dto.iv,
+        myKeyPairRef.current,
+        peerPublicKeyJwk,
+        dto.conversationId
+      );
+
+      let imageUrl: string | undefined;
+      let audioUrl: string | undefined;
+      if (dto.mediaId && dto.mediaIv && (dto.messageType === 'IMAGE' || dto.messageType === 'AUDIO')) {
+        try {
+          const encryptedBlob = await downloadEncryptedChatMedia(authSession, dto.mediaId);
+          const plainBytes = await decryptMediaBytes(
+            encryptedBlob,
+            dto.mediaIv,
+            myKeyPairRef.current,
+            peerPublicKeyJwk,
+            dto.conversationId
+          );
+          if (plainBytes) {
+            const mime =
+              dto.mediaMimeType || (dto.messageType === 'AUDIO' ? 'audio/mp4' : 'image/jpeg');
+            const dataUrl = `data:${mime};base64,${bytesToBase64(plainBytes)}`;
+            if (dto.messageType === 'IMAGE') {
+              imageUrl = dataUrl;
+            } else {
+              audioUrl = dataUrl;
+            }
+          }
+        } catch {
+          // mantém fallback textual se o blob de mídia não puder ser baixado
+        }
+      }
+
+      return {
+        id: dto.id,
+        sender: dto.senderId === authSession.userId ? 'me' : 'them',
+        text,
+        sentAt: formatIsoTimeToBr(dto.sentAt),
+        imageUrl,
+        audioUrl,
+        audioDurationLabel: formatAudioDurationLabel(dto.mediaDurationSeconds),
+      };
+    },
+    [authSession]
+  );
 
   // O selo só é exibido quando o backend confirma a verificação (RF-11).
   const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true;
@@ -256,20 +330,8 @@ export function AuthenticatedWorkspace({
             }
             const peerKey = existingThread?.contactPublicKeyJwk ?? null;
 
-            const decryptedText = await decryptMessageText(
-              incoming.ciphertext,
-              incoming.iv,
-              myKeyPairRef.current,
-              peerKey,
-              incoming.conversationId
-            );
+            const uiMsg = await hydrateRemoteMessage(incoming, peerKey);
             const isFromMe = incoming.senderId === authSession.userId;
-            const uiMsg: ChatMessage = {
-              id: incoming.id,
-              sender: isFromMe ? 'me' : 'them',
-              text: decryptedText,
-              sentAt: formatIsoTimeToBr(incoming.sentAt),
-            };
 
             setServerThreads((prev) =>
               prev.map((thread) => {
@@ -308,11 +370,15 @@ export function AuthenticatedWorkspace({
       stompRef.current?.disconnect();
       stompRef.current = null;
     };
-  }, [authSession, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
+  }, [authSession, hydrateRemoteMessage, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
 
-  // Recarrega descoberta quando usuário muda filtros de cidade ou objetivo
+  // Recarrega descoberta somente quando usuário muda filtros de cidade ou objetivo (evita GET duplicado no mount)
   useEffect(() => {
     if (isPreviewMode) return;
+    if (!hasMountedFilterEffectRef.current) {
+      hasMountedFilterEffectRef.current = true;
+      return;
+    }
     void reloadRemoteDiscovery(filterCity, filterGoal);
   }, [filterCity, filterGoal, isPreviewMode, reloadRemoteDiscovery]);
 
@@ -373,18 +439,7 @@ export function AuthenticatedWorkspace({
       try {
         const dtos = await fetchConversationMessages(authSession, convId, 100);
         const decrypted: ChatMessage[] = await Promise.all(
-          dtos.map(async (m) => ({
-            id: m.id,
-            sender: m.senderId === authSession.userId ? 'me' : 'them',
-            text: await decryptMessageText(
-              m.ciphertext,
-              m.iv,
-              myKeyPairRef.current,
-              displayedThread.contactPublicKeyJwk,
-              convId
-            ),
-            sentAt: formatIsoTimeToBr(m.sentAt),
-          }))
+          dtos.map((m) => hydrateRemoteMessage(m, displayedThread.contactPublicKeyJwk))
         );
         setServerThreads((prev) =>
           prev.map((t) => (t.conversationId === convId ? { ...t, messages: decrypted } : t))
@@ -393,7 +448,7 @@ export function AuthenticatedWorkspace({
         loadedHistoryIdsRef.current.delete(convId);
       }
     })();
-  }, [activeTab, activeThreadId, authSession, isPreviewMode, visibleThreads]);
+  }, [activeTab, activeThreadId, authSession, hydrateRemoteMessage, isPreviewMode, visibleThreads]);
 
   // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
   // (inclusive quando outra conversa assume o foco após um bloqueio em RF-08).
@@ -534,7 +589,10 @@ export function AuthenticatedWorkspace({
     }
   }
 
-  function handleSendMessage(contactId: string, payload: string | OutgoingMessagePayload) {
+  async function handleSendMessage(
+    contactId: string,
+    payload: string | OutgoingMessagePayload
+  ): Promise<boolean> {
     const outgoing = createOutgoingMessage(payload);
     if (isPreviewMode) {
       setWave2State((prev) => ({
@@ -549,71 +607,115 @@ export function AuthenticatedWorkspace({
             : thread
         ),
       }));
-      return;
+      return true;
     }
 
+    const richPayload = typeof payload === 'string' ? null : payload;
     const plainText =
       typeof payload === 'string'
         ? payload.trim()
         : (payload.text?.trim() ||
             (payload.audioUrl ? 'Mensagem de voz' : payload.imageUrl ? 'Foto enviada' : ''));
-    if (!plainText) return;
+    if (!plainText) return false;
 
-    void (async () => {
-      try {
-        let targetThread = serverThreads.find((t) => t.contactId === contactId);
-        let conversationId = targetThread?.conversationId;
-        if (!conversationId) {
-          const opened = await openOrCreateConversation(authSession, contactId);
-          conversationId = opened.conversationId;
-          const mapped = await mapConversationDtoToThread(opened);
-          targetThread = mapped;
-          setServerThreads((prev) =>
-            prev.some((t) => t.conversationId === mapped.conversationId) ? prev : [mapped, ...prev]
-          );
-        }
-
-        const encrypted = await encryptMessageText(
-          plainText,
-          myKeyPairRef.current,
-          targetThread?.contactPublicKeyJwk,
-          conversationId
-        );
-
-        const requestDto = {
-          conversationId,
-          ciphertext: encrypted.ciphertext,
-          iv: encrypted.iv,
-          messageType: 'TEXT' as const,
-          senderKeyVersion: encrypted.senderKeyVersion,
-        };
-
-        const sentViaStomp = stompRef.current?.sendMessage(requestDto);
-        if (!sentViaStomp) {
-          const saved = await sendEncryptedMessageRest(authSession, requestDto);
-          const confirmedMsg: ChatMessage = {
-            id: saved.id,
-            sender: 'me',
-            text: plainText,
-            sentAt: formatIsoTimeToBr(saved.sentAt),
-          };
-          setServerThreads((prev) =>
-            prev.map((t) =>
-              t.conversationId === conversationId &&
-              !t.messages.some((m) => m.id === confirmedMsg.id)
-                ? { ...t, unreadCount: 0, messages: [...t.messages, confirmedMsg] }
-                : t
-            )
-          );
-        }
-      } catch (err) {
-        setSafetyFeedback(
-          err instanceof ApiError
-            ? err.message
-            : 'Não foi possível enviar a mensagem agora. Tente novamente.'
+    try {
+      let targetThread = serverThreads.find((t) => t.contactId === contactId);
+      let conversationId = targetThread?.conversationId;
+      if (!conversationId) {
+        const opened = await openOrCreateConversation(authSession, contactId);
+        conversationId = opened.conversationId;
+        const mapped = await mapConversationDtoToThread(opened);
+        targetThread = mapped;
+        setServerThreads((prev) =>
+          prev.some((t) => t.conversationId === mapped.conversationId) ? prev : [mapped, ...prev]
         );
       }
-    })();
+
+      const peerKey = targetThread?.contactPublicKeyJwk ?? null;
+      let messageType: BackendChatMessageType = 'TEXT';
+      let mediaId: string | null = null;
+      let mediaIv: string | null = null;
+      let mediaMimeType: string | null = null;
+      let mediaDurationSeconds: number | null = null;
+
+      const mediaDataUrl = richPayload?.imageUrl || richPayload?.audioUrl;
+      if (mediaDataUrl) {
+        const isAudio = Boolean(richPayload?.audioUrl && !richPayload?.imageUrl);
+        messageType = isAudio ? 'AUDIO' : 'IMAGE';
+        const res = await fetch(mediaDataUrl);
+        const rawBytes = new Uint8Array(await res.arrayBuffer());
+        const mimeMatch = /^data:([^;]+);/i.exec(mediaDataUrl);
+        mediaMimeType = mimeMatch?.[1] || (isAudio ? 'audio/webm' : 'image/jpeg');
+        const encryptedMedia = await encryptMediaBytes(
+          rawBytes,
+          myKeyPairRef.current,
+          peerKey,
+          conversationId
+        );
+        const uploaded = await uploadEncryptedChatMedia(
+          authSession,
+          conversationId,
+          messageType,
+          encryptedMedia.encryptedBytes
+        );
+        mediaId = uploaded.mediaId;
+        mediaIv = encryptedMedia.mediaIv;
+        if (isAudio) {
+          mediaDurationSeconds = parseDurationLabelToSeconds(richPayload?.audioDurationLabel);
+        }
+      }
+
+      const encrypted = await encryptMessageText(
+        plainText,
+        myKeyPairRef.current,
+        peerKey,
+        conversationId
+      );
+
+      const requestDto = {
+        conversationId,
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        messageType,
+        mediaId,
+        mediaIv,
+        mediaMimeType,
+        mediaDurationSeconds,
+        senderKeyVersion: encrypted.senderKeyVersion,
+      };
+
+      const sentViaStomp = stompRef.current?.sendMessage(requestDto);
+      if (!sentViaStomp) {
+        const saved = await sendEncryptedMessageRest(authSession, requestDto);
+        const confirmedMsg: ChatMessage = {
+          id: saved.id,
+          sender: 'me',
+          text: plainText,
+          sentAt: formatIsoTimeToBr(saved.sentAt),
+          imageUrl: richPayload?.imageUrl,
+          imageName: richPayload?.imageName,
+          audioUrl: richPayload?.audioUrl,
+          audioDurationLabel:
+            richPayload?.audioDurationLabel ?? formatAudioDurationLabel(mediaDurationSeconds),
+        };
+        setServerThreads((prev) =>
+          prev.map((t) =>
+            t.conversationId === conversationId &&
+            !t.messages.some((m) => m.id === confirmedMsg.id)
+              ? { ...t, unreadCount: 0, messages: [...t.messages, confirmedMsg] }
+              : t
+          )
+        );
+      }
+      return true;
+    } catch (err) {
+      setSafetyFeedback(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível enviar a mensagem agora. Tente novamente.'
+      );
+      return false;
+    }
   }
 
   function handleConfirmBlock(reason?: string) {
