@@ -1,15 +1,19 @@
 import type { AuthSession, ConnectionGoal } from '../types/auth';
 import type { BlockedContact, ScoredCandidate } from '../types/wave2';
-import { ApiError, resolveApiAssetUrl } from './apiClient';
+import { ApiError, fetchWithSessionRefresh, resolveApiAssetUrl } from './apiClient';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080').replace(
-  /\/+$/,
-  ''
-);
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
 export function getWebSocketChatUrl(): string {
-  const wsBase = API_BASE_URL.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
-  return `${wsBase}/ws-chat`;
+  if (API_BASE_URL) {
+    const wsBase = API_BASE_URL.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
+    return `${wsBase}/ws-chat`;
+  }
+  if (typeof window !== 'undefined' && window.location?.host) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws-chat`;
+  }
+  return '/ws-chat';
 }
 
 // ==========================================================================
@@ -152,8 +156,15 @@ export interface PublicChatKeyDto {
   keyVersion: number;
 }
 
+export interface ChatMediaUploadResponseDto {
+  mediaId: string;
+  conversationId: string;
+  mediaType: BackendChatMessageType;
+  sizeBytes: number;
+}
+
 // ==========================================================================
-// Helper HTTP autenticado
+// Helper HTTP autenticado (unificado com apiClient.ts — AUD-019 / AUD-020)
 // ==========================================================================
 
 async function authedRequest<T>(
@@ -161,28 +172,20 @@ async function authedRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const headers = new Headers(options.headers);
-  headers.set('Authorization', `Bearer ${session.accessToken}`);
-  if (!headers.has('Content-Type') && options.body !== undefined) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithSessionRefresh(session, path, (token) => {
+    const headers = new Headers(options.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type') && options.body !== undefined) {
+      headers.set('Content-Type', 'application/json');
+    }
+    return {
       ...options,
       headers,
-    });
-  } catch {
-    throw new ApiError(
-      'Não foi possível conectar ao servidor BeyondTime. Verifique se o backend está online.',
-      0,
-      'NETWORK_ERROR'
-    );
-  }
+    };
+  });
 
   if (!response.ok) {
-    let message = `Erro HTTP ${response.status} ao comunicar com o servidor.`;
+    let message = 'Não foi possível concluir esta ação agora. Tente novamente em instantes.';
     let code: string | undefined;
     try {
       const data = (await response.json()) as {
@@ -194,6 +197,13 @@ async function authedRequest<T>(
       code = data.code;
     } catch {
       // ignora payload não-JSON
+    }
+    if (code === 'CONVERSATION_NOT_ALLOWED') {
+      message = 'Você precisa ter uma conexão ativa com esta pessoa para iniciar a conversa.';
+    } else if (code === 'INVALID_CHAT_MEDIA') {
+      message = 'Não foi possível anexar esta foto ou áudio. Tente novamente.';
+    } else if (response.status === 413 || code === 'MEDIA_TOO_LARGE') {
+      message = 'O arquivo escolhido é muito grande (máximo 8 MB). Escolha um arquivo menor.';
     }
     throw new ApiError(message, response.status, code);
   }
@@ -360,11 +370,16 @@ export async function openOrCreateConversation(
 export async function fetchConversationMessages(
   session: AuthSession,
   conversationId: string,
-  limit = 100
+  limit = 100,
+  before?: string
 ): Promise<EncryptedMessageDto[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (before && before.trim()) {
+    qs.set('before', before.trim());
+  }
   return authedRequest<EncryptedMessageDto[]>(
     session,
-    `/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`,
+    `/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?${qs.toString()}`,
     { method: 'GET' }
   );
 }
@@ -404,8 +419,13 @@ export async function fetchMyChatKeyVault(
       { method: 'GET' }
     );
     return result ?? null;
-  } catch {
-    return null;
+  } catch (err) {
+    // Somente 404 indica ausência real de cofre no servidor.
+    // Erros 5xx/rede devem propagar para impedir geração acidental de chave nova sobrescrevendo o cofre.
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
   }
 }
 
@@ -432,4 +452,70 @@ export async function fetchUserPublicChatKey(
   } catch {
     return null;
   }
+}
+
+export async function uploadEncryptedChatMedia(
+  session: AuthSession,
+  conversationId: string,
+  mediaType: 'IMAGE' | 'AUDIO',
+  encryptedBytes: Uint8Array
+): Promise<ChatMediaUploadResponseDto> {
+  const copy = new Uint8Array(encryptedBytes.byteLength);
+  copy.set(encryptedBytes);
+  const blob = new Blob([copy.buffer], { type: 'application/octet-stream' });
+
+  const response = await fetchWithSessionRefresh(session, '/api/v1/chat/media', (token) => {
+    const formData = new FormData();
+    formData.append('conversationId', conversationId);
+    formData.append('mediaType', mediaType);
+    formData.append('file', blob, `media-${Date.now()}.enc`);
+    return {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    };
+  });
+
+  if (!response.ok) {
+    let message =
+      response.status === 413
+        ? 'O arquivo escolhido é muito grande (máximo 8 MB). Escolha um arquivo menor.'
+        : 'Não foi possível enviar esta foto ou áudio agora. Tente novamente.';
+    try {
+      const data = (await response.json()) as { detail?: string; title?: string };
+      message = data.detail || data.title || message;
+    } catch {
+      // ignora payload não-JSON
+    }
+    throw new ApiError(message, response.status);
+  }
+
+  return (await response.json()) as ChatMediaUploadResponseDto;
+}
+
+export async function downloadEncryptedChatMedia(
+  session: AuthSession,
+  mediaId: string
+): Promise<Uint8Array> {
+  const response = await fetchWithSessionRefresh(
+    session,
+    `/api/v1/chat/media/${encodeURIComponent(mediaId)}`,
+    (token) => ({
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      'Não foi possível carregar esta foto ou áudio agora.',
+      response.status
+    );
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
 }

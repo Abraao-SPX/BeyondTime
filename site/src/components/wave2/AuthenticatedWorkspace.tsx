@@ -12,6 +12,7 @@ import {
 import {
   createBlockContact,
   deleteBlockContact,
+  downloadEncryptedChatMedia,
   fetchBlockedContacts,
   fetchChatConversations,
   fetchConversationMessages,
@@ -24,11 +25,15 @@ import {
   openOrCreateConversation,
   sendEncryptedMessageRest,
   sendMatchInteraction,
+  uploadEncryptedChatMedia,
+  type BackendChatMessageType,
   type ConversationSummaryDto,
   type EncryptedMessageDto,
 } from '../../services/wave2ApiClient';
 import {
+  decryptMediaBytes,
   decryptMessageText,
+  encryptMediaBytes,
   encryptMessageText,
   ensureUserChatKeyPair,
   type LocalChatKeyPair,
@@ -76,6 +81,25 @@ function formatSergipeLocation(city?: string): string {
   return cleaned ? `${cleaned}, Sergipe` : 'Sergipe';
 }
 
+function formatAudioDurationLabel(seconds?: number | null): string | undefined {
+  if (!seconds || seconds <= 0) return undefined;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+const MAX_ENCRYPTED_MEDIA_BYTES = 8 * 1024 * 1024;
+const MAX_AUDIO_DURATION_SECONDS = 600;
+
+function parseDurationLabelToSeconds(label?: string): number {
+  if (!label) return 1;
+  const match = /^(\d+):(\d{2})$/.exec(label.trim());
+  if (!match) return 1;
+  const parsed = Number(match[1]) * 60 + Number(match[2]);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(MAX_AUDIO_DURATION_SECONDS, Math.floor(parsed));
+}
+
 type PendingBlockTarget = Pick<BlockedContact, 'id' | 'fullName' | 'age' | 'city' | 'avatarUrl'>;
 
 export function AuthenticatedWorkspace({
@@ -91,7 +115,7 @@ export function AuthenticatedWorkspace({
   onRequestDeleteAccount,
   onLogout,
 }: AuthenticatedWorkspaceProps) {
-  const isPreviewMode = authSession.userId === 'dev-preview-50plus';
+  const isPreviewMode = import.meta.env.DEV && authSession.userId === 'dev-preview-50plus';
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('discover');
   const [wave2State, setWave2State] = useState<Wave2State>(() =>
@@ -102,17 +126,25 @@ export function AuthenticatedWorkspace({
   const [serverBlocked, setServerBlocked] = useState<BlockedContact[]>([]);
   const [filterGoal, setFilterGoal] = useState<ConnectionGoal | 'Todos'>('Todos');
   const [filterCity, setFilterCity] = useState<string>('Todas');
-  const [maxDistance, setMaxDistance] = useState<string>('30km');
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState<boolean>(() => !isPreviewMode);
+  const [isLoadingDiscovery, setIsLoadingDiscovery] = useState<boolean>(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
+  const [chatKeyUnavailable, setChatKeyUnavailable] = useState(false);
+  const [isRetryingChatKey, setIsRetryingChatKey] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [verifiedNow, setVerifiedNow] = useState(false);
 
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
   const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
+  const createdObjectUrlsRef = useRef<Set<string>>(new Set());
+  const prevFiltersRef = useRef<{ city: string; goal: ConnectionGoal | 'Todos' }>({
+    city: filterCity,
+    goal: filterGoal,
+  });
   const activeTabRef = useRef<WorkspaceTabId>(activeTab);
   const activeThreadIdRef = useRef<string | null>(activeThreadId);
   const serverThreadsRef = useRef<ChatThread[]>(serverThreads);
@@ -120,6 +152,72 @@ export function AuthenticatedWorkspace({
   activeTabRef.current = activeTab;
   activeThreadIdRef.current = activeThreadId;
   serverThreadsRef.current = serverThreads;
+
+  useEffect(() => {
+    const urls = createdObjectUrlsRef.current;
+    return () => {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
+      urls.clear();
+    };
+  }, []);
+
+  const hydrateRemoteMessage = useCallback(
+    async (
+      dto: EncryptedMessageDto,
+      peerPublicKeyJwk: string | null | undefined
+    ): Promise<ChatMessage> => {
+      const text = await decryptMessageText(
+        dto.ciphertext,
+        dto.iv,
+        myKeyPairRef.current,
+        peerPublicKeyJwk,
+        dto.conversationId
+      );
+
+      let imageUrl: string | undefined;
+      let audioUrl: string | undefined;
+      if (dto.mediaId && dto.mediaIv && (dto.messageType === 'IMAGE' || dto.messageType === 'AUDIO')) {
+        try {
+          const encryptedBlob = await downloadEncryptedChatMedia(authSession, dto.mediaId);
+          const plainBytes = await decryptMediaBytes(
+            encryptedBlob,
+            dto.mediaIv,
+            myKeyPairRef.current,
+            peerPublicKeyJwk,
+            dto.conversationId
+          );
+          if (plainBytes) {
+            const mime =
+              dto.mediaMimeType || (dto.messageType === 'AUDIO' ? 'audio/mp4' : 'image/jpeg');
+            const objectUrl = URL.createObjectURL(
+              new Blob([plainBytes.buffer as ArrayBuffer], { type: mime })
+            );
+            createdObjectUrlsRef.current.add(objectUrl);
+            if (dto.messageType === 'IMAGE') {
+              imageUrl = objectUrl;
+            } else {
+              audioUrl = objectUrl;
+            }
+          }
+        } catch {
+          // mantém fallback textual se o blob de mídia não puder ser baixado
+        }
+      }
+
+      return {
+        id: dto.id,
+        sender: dto.senderId === authSession.userId ? 'me' : 'them',
+        text,
+        sentAt: formatIsoTimeToBr(dto.sentAt),
+        imageUrl,
+        audioUrl,
+        audioDurationLabel: formatAudioDurationLabel(dto.mediaDurationSeconds),
+      };
+    },
+    [authSession]
+  );
 
   // O selo só é exibido quando o backend confirma a verificação (RF-11).
   const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true || verifiedNow;
@@ -171,6 +269,7 @@ export function AuthenticatedWorkspace({
   const reloadRemoteDiscovery = useCallback(
     async (cityFilter: string, goalFilter: ConnectionGoal | 'Todos') => {
       if (isPreviewMode) return;
+      setIsLoadingDiscovery(true);
       try {
         const dtos = await fetchDiscoveryProfiles(authSession, {
           city: cityFilter,
@@ -184,13 +283,15 @@ export function AuthenticatedWorkspace({
             ? err.message
             : 'Não foi possível carregar as sugestões de pessoas agora.';
         setSafetyFeedback(msg);
+      } finally {
+        setIsLoadingDiscovery(false);
       }
     },
     [authSession, isPreviewMode]
   );
 
-  const reloadRemoteConversations = useCallback(async () => {
-    if (isPreviewMode) return;
+  const reloadRemoteConversations = useCallback(async (): Promise<ChatThread[]> => {
+    if (isPreviewMode) return [];
     try {
       const dtos = await fetchChatConversations(authSession);
       const mapped = await Promise.all(dtos.map(mapConversationDtoToThread));
@@ -200,15 +301,26 @@ export function AuthenticatedWorkspace({
           const existing = nextThread.conversationId
             ? prevByConv.get(nextThread.conversationId)
             : undefined;
-          // Preserva histórico completo já carregado se a conversa já estava aberta
-          if (existing && existing.messages.length > nextThread.messages.length) {
-            return { ...nextThread, messages: existing.messages };
+          // Preserva histórico completo já carregado mesclando novas mensagens sem duplicatas
+          if (existing && existing.messages.length > 0) {
+            const merged = new Map<string, ChatMessage>();
+            for (const m of existing.messages) {
+              merged.set(m.id, m);
+            }
+            for (const m of nextThread.messages) {
+              if (!merged.has(m.id)) {
+                merged.set(m.id, m);
+              }
+            }
+            return { ...nextThread, messages: Array.from(merged.values()) };
           }
           return nextThread;
         });
       });
+      return mapped;
     } catch {
       // erro tratado no carregamento inicial
+      return [];
     }
   }, [authSession, isPreviewMode, mapConversationDtoToThread]);
 
@@ -218,8 +330,13 @@ export function AuthenticatedWorkspace({
     let cancelled = false;
 
     async function bootstrapRealWave2() {
-      myKeyPairRef.current = await ensureUserChatKeyPair(authSession);
+      const keyPair = await ensureUserChatKeyPair(authSession);
       if (cancelled) return;
+      myKeyPairRef.current = keyPair;
+      setChatKeyUnavailable(keyPair === null);
+      if (keyPair?.warningMessage) {
+        setSafetyFeedback(keyPair.warningMessage);
+      }
 
       try {
         const [discDtos, convDtos, blockDtos] = await Promise.all([
@@ -243,34 +360,31 @@ export function AuthenticatedWorkspace({
               : 'Não foi possível conectar ao servidor BeyondTime para carregar conexões reais.'
           );
         }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingWorkspace(false);
+        }
       }
 
       if (cancelled) return;
       const stomp = createChatStompConnection(authSession, {
         onMessage: (incoming: EncryptedMessageDto) => {
           void (async () => {
-            const existingThread = serverThreadsRef.current.find(
+            let existingThread = serverThreadsRef.current.find(
               (t) => t.conversationId === incoming.conversationId
             );
             if (!existingThread) {
-              void reloadRemoteConversations();
+              const refreshed = await reloadRemoteConversations();
+              if (cancelled) return;
+              existingThread =
+                refreshed.find((t) => t.conversationId === incoming.conversationId) ??
+                serverThreadsRef.current.find((t) => t.conversationId === incoming.conversationId);
             }
             const peerKey = existingThread?.contactPublicKeyJwk ?? null;
 
-            const decryptedText = await decryptMessageText(
-              incoming.ciphertext,
-              incoming.iv,
-              myKeyPairRef.current,
-              peerKey,
-              incoming.conversationId
-            );
+            const uiMsg = await hydrateRemoteMessage(incoming, peerKey);
+            if (cancelled) return;
             const isFromMe = incoming.senderId === authSession.userId;
-            const uiMsg: ChatMessage = {
-              id: incoming.id,
-              sender: isFromMe ? 'me' : 'them',
-              text: decryptedText,
-              sentAt: formatIsoTimeToBr(incoming.sentAt),
-            };
 
             setServerThreads((prev) =>
               prev.map((thread) => {
@@ -290,6 +404,7 @@ export function AuthenticatedWorkspace({
           })();
         },
         onReadReceipt: (receipt) => {
+          if (cancelled) return;
           if (receipt.readerId === authSession.userId) {
             setServerThreads((prev) =>
               prev.map((t) =>
@@ -297,6 +412,16 @@ export function AuthenticatedWorkspace({
               )
             );
           }
+        },
+        onError: (message) => {
+          if (!cancelled) {
+            setSafetyFeedback(message);
+          }
+        },
+        onReconnect: () => {
+          if (cancelled) return;
+          loadedHistoryIdsRef.current.clear();
+          void reloadRemoteConversations();
         },
       });
       stompRef.current = stomp;
@@ -309,11 +434,40 @@ export function AuthenticatedWorkspace({
       stompRef.current?.disconnect();
       stompRef.current = null;
     };
-  }, [authSession, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
+  }, [authSession, hydrateRemoteMessage, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
 
-  // Recarrega descoberta quando usuário muda filtros de cidade ou objetivo
+  const handleRetryChatKey = useCallback(async () => {
+    if (isPreviewMode || isRetryingChatKey) return;
+    setIsRetryingChatKey(true);
+    try {
+      const keyPair = await ensureUserChatKeyPair(authSession);
+      myKeyPairRef.current = keyPair;
+      if (keyPair) {
+        setChatKeyUnavailable(false);
+        if (keyPair.warningMessage) {
+          setSafetyFeedback(keyPair.warningMessage);
+        }
+        loadedHistoryIdsRef.current.clear();
+        setServerThreads((prev) => prev.map((t) => ({ ...t, messages: [] })));
+        await reloadRemoteConversations();
+      } else {
+        setChatKeyUnavailable(true);
+      }
+    } finally {
+      setIsRetryingChatKey(false);
+    }
+  }, [authSession, isPreviewMode, isRetryingChatKey, reloadRemoteConversations]);
+
+  // Recarrega descoberta somente quando usuário muda filtros de cidade ou objetivo (seguro em React StrictMode)
   useEffect(() => {
     if (isPreviewMode) return;
+    if (
+      prevFiltersRef.current.city === filterCity &&
+      prevFiltersRef.current.goal === filterGoal
+    ) {
+      return;
+    }
+    prevFiltersRef.current = { city: filterCity, goal: filterGoal };
     void reloadRemoteDiscovery(filterCity, filterGoal);
   }, [filterCity, filterGoal, isPreviewMode, reloadRemoteDiscovery]);
 
@@ -370,31 +524,45 @@ export function AuthenticatedWorkspace({
     if (loadedHistoryIdsRef.current.has(convId)) return;
     loadedHistoryIdsRef.current.add(convId);
 
+    let cancelled = false;
     void (async () => {
       try {
         const dtos = await fetchConversationMessages(authSession, convId, 100);
+        if (cancelled) {
+          loadedHistoryIdsRef.current.delete(convId);
+          return;
+        }
         const decrypted: ChatMessage[] = await Promise.all(
-          dtos.map(async (m) => ({
-            id: m.id,
-            sender: m.senderId === authSession.userId ? 'me' : 'them',
-            text: await decryptMessageText(
-              m.ciphertext,
-              m.iv,
-              myKeyPairRef.current,
-              displayedThread.contactPublicKeyJwk,
-              convId
-            ),
-            sentAt: formatIsoTimeToBr(m.sentAt),
-          }))
+          dtos.map((m) => hydrateRemoteMessage(m, displayedThread.contactPublicKeyJwk))
         );
+        if (cancelled) {
+          loadedHistoryIdsRef.current.delete(convId);
+          return;
+        }
         setServerThreads((prev) =>
-          prev.map((t) => (t.conversationId === convId ? { ...t, messages: decrypted } : t))
+          prev.map((t) => {
+            if (t.conversationId !== convId) return t;
+            const byId = new Map<string, ChatMessage>();
+            for (const msg of decrypted) {
+              byId.set(msg.id, msg);
+            }
+            for (const msg of t.messages) {
+              if (!byId.has(msg.id)) {
+                byId.set(msg.id, msg);
+              }
+            }
+            return { ...t, messages: Array.from(byId.values()) };
+          })
         );
       } catch {
         loadedHistoryIdsRef.current.delete(convId);
       }
     })();
-  }, [activeTab, activeThreadId, authSession, isPreviewMode, visibleThreads]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, activeThreadId, authSession, hydrateRemoteMessage, isPreviewMode, visibleThreads]);
 
   // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
   // (inclusive quando outra conversa assume o foco após um bloqueio em RF-08).
@@ -444,6 +612,9 @@ export function AuthenticatedWorkspace({
 
     setServerCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
     void sendMatchInteraction(authSession, 'pass', candidate.id).catch((err) => {
+      setServerCandidates((prev) =>
+        prev.some((c) => c.id === candidate.id) ? prev : [candidate, ...prev]
+      );
       setSafetyFeedback(
         err instanceof ApiError ? err.message : 'Não foi possível registrar essa ação agora.'
       );
@@ -494,6 +665,9 @@ export function AuthenticatedWorkspace({
           );
         }
       } catch (err) {
+        setServerCandidates((prev) =>
+          prev.some((c) => c.id === candidate.id) ? prev : [candidate, ...prev]
+        );
         setSafetyFeedback(
           err instanceof ApiError ? err.message : 'Não foi possível registrar sua curtida agora.'
         );
@@ -535,7 +709,10 @@ export function AuthenticatedWorkspace({
     }
   }
 
-  function handleSendMessage(contactId: string, payload: string | OutgoingMessagePayload) {
+  async function handleSendMessage(
+    contactId: string,
+    payload: string | OutgoingMessagePayload
+  ): Promise<boolean> {
     const outgoing = createOutgoingMessage(payload);
     if (isPreviewMode) {
       setWave2State((prev) => ({
@@ -550,71 +727,127 @@ export function AuthenticatedWorkspace({
             : thread
         ),
       }));
-      return;
+      return true;
     }
 
+    if (!myKeyPairRef.current) {
+      setChatKeyUnavailable(true);
+      setSafetyFeedback('Não foi possível carregar sua proteção de mensagens. Tente de novo.');
+      return false;
+    }
+
+    const richPayload = typeof payload === 'string' ? null : payload;
     const plainText =
       typeof payload === 'string'
         ? payload.trim()
         : (payload.text?.trim() ||
             (payload.audioUrl ? 'Mensagem de voz' : payload.imageUrl ? 'Foto enviada' : ''));
-    if (!plainText) return;
+    if (!plainText) return false;
 
-    void (async () => {
-      try {
-        let targetThread = serverThreads.find((t) => t.contactId === contactId);
-        let conversationId = targetThread?.conversationId;
-        if (!conversationId) {
-          const opened = await openOrCreateConversation(authSession, contactId);
-          conversationId = opened.conversationId;
-          const mapped = await mapConversationDtoToThread(opened);
-          targetThread = mapped;
-          setServerThreads((prev) =>
-            prev.some((t) => t.conversationId === mapped.conversationId) ? prev : [mapped, ...prev]
-          );
-        }
-
-        const encrypted = await encryptMessageText(
-          plainText,
-          myKeyPairRef.current,
-          targetThread?.contactPublicKeyJwk,
-          conversationId
-        );
-
-        const requestDto = {
-          conversationId,
-          ciphertext: encrypted.ciphertext,
-          iv: encrypted.iv,
-          messageType: 'TEXT' as const,
-          senderKeyVersion: encrypted.senderKeyVersion,
-        };
-
-        const sentViaStomp = stompRef.current?.sendMessage(requestDto);
-        if (!sentViaStomp) {
-          const saved = await sendEncryptedMessageRest(authSession, requestDto);
-          const confirmedMsg: ChatMessage = {
-            id: saved.id,
-            sender: 'me',
-            text: plainText,
-            sentAt: formatIsoTimeToBr(saved.sentAt),
-          };
-          setServerThreads((prev) =>
-            prev.map((t) =>
-              t.conversationId === conversationId &&
-              !t.messages.some((m) => m.id === confirmedMsg.id)
-                ? { ...t, unreadCount: 0, messages: [...t.messages, confirmedMsg] }
-                : t
-            )
-          );
-        }
-      } catch (err) {
-        setSafetyFeedback(
-          err instanceof ApiError
-            ? err.message
-            : 'Não foi possível enviar a mensagem agora. Tente novamente.'
+    try {
+      let targetThread = serverThreads.find((t) => t.contactId === contactId);
+      let conversationId = targetThread?.conversationId;
+      if (!conversationId) {
+        const opened = await openOrCreateConversation(authSession, contactId);
+        conversationId = opened.conversationId;
+        const mapped = await mapConversationDtoToThread(opened);
+        targetThread = mapped;
+        setServerThreads((prev) =>
+          prev.some((t) => t.conversationId === mapped.conversationId) ? prev : [mapped, ...prev]
         );
       }
-    })();
+
+      const peerKey = targetThread?.contactPublicKeyJwk ?? null;
+      let messageType: BackendChatMessageType = 'TEXT';
+      let mediaId: string | null = null;
+      let mediaIv: string | null = null;
+      let mediaMimeType: string | null = null;
+      let mediaDurationSeconds: number | null = null;
+
+      const mediaDataUrl = richPayload?.imageUrl || richPayload?.audioUrl;
+      if (mediaDataUrl) {
+        const isAudio = Boolean(richPayload?.audioUrl && !richPayload?.imageUrl);
+        messageType = isAudio ? 'AUDIO' : 'IMAGE';
+        const res = await fetch(mediaDataUrl);
+        const rawBytes = new Uint8Array(await res.arrayBuffer());
+        const mimeMatch = /^data:([^;,]+)/i.exec(mediaDataUrl);
+        mediaMimeType = mimeMatch?.[1] || (isAudio ? 'audio/mp4' : 'image/jpeg');
+        const encryptedMedia = await encryptMediaBytes(
+          rawBytes,
+          myKeyPairRef.current,
+          peerKey,
+          conversationId
+        );
+        if (encryptedMedia.encryptedBytes.byteLength > MAX_ENCRYPTED_MEDIA_BYTES) {
+          throw new ApiError(
+            'O arquivo escolhido ficou grande demais para envio (limite de 8 MB). Tente uma foto ou áudio menor.',
+            413
+          );
+        }
+        const uploaded = await uploadEncryptedChatMedia(
+          authSession,
+          conversationId,
+          messageType,
+          encryptedMedia.encryptedBytes
+        );
+        mediaId = uploaded.mediaId;
+        mediaIv = encryptedMedia.mediaIv;
+        if (isAudio) {
+          mediaDurationSeconds = parseDurationLabelToSeconds(richPayload?.audioDurationLabel);
+        }
+      }
+
+      const encrypted = await encryptMessageText(
+        plainText,
+        myKeyPairRef.current,
+        peerKey,
+        conversationId
+      );
+
+      const requestDto = {
+        conversationId,
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        messageType,
+        mediaId,
+        mediaIv,
+        mediaMimeType,
+        mediaDurationSeconds,
+        senderKeyVersion: encrypted.senderKeyVersion,
+      };
+
+      const sentViaStomp = stompRef.current?.sendMessage(requestDto);
+      if (!sentViaStomp) {
+        const saved = await sendEncryptedMessageRest(authSession, requestDto);
+        const confirmedMsg: ChatMessage = {
+          id: saved.id,
+          sender: 'me',
+          text: plainText,
+          sentAt: formatIsoTimeToBr(saved.sentAt),
+          imageUrl: richPayload?.imageUrl,
+          imageName: richPayload?.imageName,
+          audioUrl: richPayload?.audioUrl,
+          audioDurationLabel:
+            richPayload?.audioDurationLabel ?? formatAudioDurationLabel(mediaDurationSeconds),
+        };
+        setServerThreads((prev) =>
+          prev.map((t) =>
+            t.conversationId === conversationId &&
+            !t.messages.some((m) => m.id === confirmedMsg.id)
+              ? { ...t, unreadCount: 0, messages: [...t.messages, confirmedMsg] }
+              : t
+          )
+        );
+      }
+      return true;
+    } catch (err) {
+      setSafetyFeedback(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível enviar a mensagem agora. Tente novamente.'
+      );
+      return false;
+    }
   }
 
   function handleConfirmBlock(reason?: string) {
@@ -790,6 +1023,21 @@ export function AuthenticatedWorkspace({
         </button>
       </nav>
 
+      {!isPreviewMode && chatKeyUnavailable && (
+        <div className="callout-amber workspace-feedback" role="alert" aria-live="assertive">
+          <span>Não foi possível carregar sua proteção de mensagens. Tente de novo.</span>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ minHeight: '48px', padding: '8px 16px' }}
+            disabled={isRetryingChatKey}
+            onClick={() => void handleRetryChatKey()}
+          >
+            {isRetryingChatKey ? 'Carregando...' : 'Tentar de novo'}
+          </button>
+        </div>
+      )}
+
       {safetyFeedback && (
         <div className="callout-amber workspace-feedback" role="status" aria-live="polite">
           <span>{safetyFeedback}</span>
@@ -807,6 +1055,7 @@ export function AuthenticatedWorkspace({
       {activeTab === 'discover' && (
         <MatchAffinityFeedRF05
           candidates={candidates}
+          isLoading={isLoadingWorkspace || isLoadingDiscovery}
           userCity={userCity}
           currentUserName={displayFullName || 'Você'}
           currentUserAvatarUrl={displayAvatarUrl}
@@ -827,6 +1076,8 @@ export function AuthenticatedWorkspace({
       {activeTab === 'chat' && (
         <SimplifiedChatRF07
           threads={visibleThreads}
+          isLoading={isLoadingWorkspace}
+          isSendingDisabled={!isPreviewMode && chatKeyUnavailable}
           activeThreadId={activeThreadId}
           onSelectThread={handleSelectThread}
           onSendMessage={handleSendMessage}
@@ -1007,24 +1258,23 @@ export function AuthenticatedWorkspace({
 
                   <div className="editorial-profile__pref-field">
                     <label
-                      htmlFor="profile-pref-distance"
+                      htmlFor="profile-pref-city"
                       className="editorial-profile__pref-label"
                     >
-                      Distância máxima
+                      Cidade em Sergipe
                     </label>
                     <select
-                      id="profile-pref-distance"
+                      id="profile-pref-city"
                       className="form-input"
-                      value={maxDistance}
-                      onChange={(event) => {
-                        const val = event.target.value;
-                        setMaxDistance(val);
-                        setFilterCity(val === 'city' ? userCity : 'Todas');
-                      }}
+                      value={filterCity}
+                      onChange={(event) => setFilterCity(event.target.value)}
                     >
-                      <option value="city">Apenas minha cidade</option>
-                      <option value="30km">Até 30 km</option>
-                      <option value="state">Todo Sergipe</option>
+                      <option value="Todas">Todas em Sergipe</option>
+                      {availableCities.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>

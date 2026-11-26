@@ -33,6 +33,7 @@ import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +44,7 @@ import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.Period;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -159,19 +161,27 @@ public class DiscoveryService {
         Set<Integer> requiredHobbyIds = resolveFilterHobbyIds(hobbyFilters, hobbyById);
         boolean requireVerified = Boolean.TRUE.equals(onlyVerified);
 
-        List<Profile> allProfiles = profileRepository.findAll();
+        LocalDate maxBirthDate = LocalDate.now().minusYears(50);
+        List<Profile> candidateProfiles = profileRepository.findDiscoveryCandidates(
+                UserStatus.ACTIVE,
+                maxBirthDate,
+                excludedUserIds
+        );
+
+        List<UUID> candidateUserIds = candidateProfiles.stream()
+                .map(Profile::getUserId)
+                .toList();
+
         Map<UUID, User> usersById = new HashMap<>();
-        for (User u : userRepository.findAll()) {
-            usersById.put(u.getId(), u);
+        if (!candidateUserIds.isEmpty()) {
+            for (User u : userRepository.findAllById(candidateUserIds)) {
+                usersById.put(u.getId(), u);
+            }
         }
 
         List<ScoredCandidateInternal> scored = new ArrayList<>();
-        for (Profile candidateProfile : allProfiles) {
+        for (Profile candidateProfile : candidateProfiles) {
             UUID candidateUserId = candidateProfile.getUserId();
-            if (excludedUserIds.contains(candidateUserId)) {
-                continue;
-            }
-
             User candidateUser = usersById.get(candidateUserId);
             if (candidateUser == null || candidateUser.getStatus() != UserStatus.ACTIVE) {
                 continue;
@@ -263,24 +273,8 @@ public class DiscoveryService {
         UUID userB = currentUserId.toString().compareTo(targetUserId.toString()) < 0 ? targetUserId : currentUserId;
 
         short commonCount = (short) Math.min(affinitySummary.sharedHobbyNames().size(), Short.MAX_VALUE);
-        ChatMatch match = matchRepository.findByPair(userA, userB)
-                .map(existing -> {
-                    existing.reactivateWithAffinity(affinitySummary.affinityDecimal(), commonCount);
-                    return matchRepository.save(existing);
-                })
-                .orElseGet(() -> matchRepository.save(
-                        new ChatMatch(userA, userB, affinitySummary.affinityDecimal(), commonCount)
-                ));
-
-        Conversation conversation = conversationRepository.findByMatchId(match.getId())
-                .map(existing -> {
-                    if (!"ACTIVE".equalsIgnoreCase(existing.getStatus())) {
-                        existing.markStatus("ACTIVE");
-                        return conversationRepository.save(existing);
-                    }
-                    return existing;
-                })
-                .orElseGet(() -> conversationRepository.save(new Conversation(match.getId())));
+        ChatMatch match = findOrCreateActiveMatch(userA, userB, affinitySummary.affinityDecimal(), commonCount);
+        Conversation conversation = findOrCreateActiveConversation(match.getId());
 
         return new MatchInteractionResponse(
                 "LIKE",
@@ -292,6 +286,43 @@ public class DiscoveryService {
                 affinitySummary.sharedHobbyNames(),
                 affinitySummary.targetProfileDto()
         );
+    }
+
+    private ChatMatch findOrCreateActiveMatch(
+            UUID userA,
+            UUID userB,
+            BigDecimal affinityDecimal,
+            short commonCount) {
+        return matchRepository.findByPair(userA, userB)
+                .map(existing -> {
+                    existing.reactivateWithAffinity(affinityDecimal, commonCount);
+                    return matchRepository.save(existing);
+                })
+                .orElseGet(() -> {
+                    try {
+                        return matchRepository.saveAndFlush(new ChatMatch(userA, userB, affinityDecimal, commonCount));
+                    } catch (DataIntegrityViolationException ex) {
+                        return matchRepository.findByPair(userA, userB).orElseThrow(() -> ex);
+                    }
+                });
+    }
+
+    private Conversation findOrCreateActiveConversation(UUID matchId) {
+        return conversationRepository.findByMatchId(matchId)
+                .map(existing -> {
+                    if (!"ACTIVE".equalsIgnoreCase(existing.getStatus())) {
+                        existing.markStatus("ACTIVE");
+                        return conversationRepository.save(existing);
+                    }
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    try {
+                        return conversationRepository.saveAndFlush(new Conversation(matchId));
+                    } catch (DataIntegrityViolationException ex) {
+                        return conversationRepository.findByMatchId(matchId).orElseThrow(() -> ex);
+                    }
+                });
     }
 
     @Transactional
@@ -675,7 +706,7 @@ public class DiscoveryService {
         if (birthDate == null) {
             return 50;
         }
-        return Period.between(birthDate, LocalDate.now()).getYears();
+        return Period.between(birthDate, LocalDate.now(ZoneId.of("America/Maceio"))).getYears();
     }
 
     private String normalizeCityFilter(String cityFilter) {

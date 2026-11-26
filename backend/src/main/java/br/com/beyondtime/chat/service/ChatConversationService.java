@@ -26,6 +26,7 @@ import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,14 +35,19 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.Period;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class ChatConversationService {
@@ -102,10 +108,6 @@ public class ChatConversationService {
             );
         }
 
-        if (!userRepository.existsById(otherUserId)) {
-            throw new ResourceNotFoundException("Contato", otherUserId);
-        }
-
         if (chatUserBlockRepository.existsBlockBetween(currentUserId, otherUserId)) {
             throw new BusinessException(
                     "CONTACT_BLOCKED",
@@ -114,24 +116,38 @@ public class ChatConversationService {
             );
         }
 
+        boolean currentActive = userRepository.findById(currentUserId)
+                .map(User::isActive)
+                .orElse(false);
+        boolean otherActive = userRepository.findById(otherUserId)
+                .map(User::isActive)
+                .orElse(false);
+
         UUID userA = currentUserId.toString().compareTo(otherUserId.toString()) < 0 ? currentUserId : otherUserId;
         UUID userB = currentUserId.toString().compareTo(otherUserId.toString()) < 0 ? otherUserId : currentUserId;
 
-        ChatMatch match = chatMatchRepository.findByPair(userA, userB)
-                .orElseGet(() -> chatMatchRepository.save(
-                        new ChatMatch(userA, userB, BigDecimal.valueOf(85.00), (short) 0)
-                ));
+        ChatMatch match = (currentActive && otherActive)
+                ? chatMatchRepository.findByPair(userA, userB)
+                        .filter(m -> "ACTIVE".equalsIgnoreCase(m.getStatus()))
+                        .orElse(null)
+                : null;
 
-        if (!"ACTIVE".equalsIgnoreCase(match.getStatus())) {
+        if (match == null) {
             throw new BusinessException(
-                    "MATCH_INACTIVE",
-                    "Esta conexão não está ativa para troca de mensagens.",
+                    "CONVERSATION_NOT_ALLOWED",
+                    "Você precisa ter uma conexão ativa com esta pessoa para iniciar a conversa.",
                     HttpStatus.FORBIDDEN
             );
         }
 
         Conversation conversation = conversationRepository.findByMatchId(match.getId())
-                .orElseGet(() -> conversationRepository.save(new Conversation(match.getId())));
+                .orElseGet(() -> {
+                    try {
+                        return conversationRepository.saveAndFlush(new Conversation(match.getId()));
+                    } catch (DataIntegrityViolationException ex) {
+                        return conversationRepository.findByMatchId(match.getId()).orElseThrow(() -> ex);
+                    }
+                });
 
         return buildSummary(currentUserId, match, conversation);
     }
@@ -139,6 +155,24 @@ public class ChatConversationService {
     @Transactional(readOnly = true)
     public List<ConversationSummaryResponse> listMyConversations(UUID currentUserId) {
         List<ChatMatch> activeMatches = chatMatchRepository.findActiveMatchesForUser(currentUserId);
+        if (activeMatches.isEmpty()) {
+            return List.of();
+        }
+
+        // Pré-carrega em lote dados do próprio usuário, usuários de contato e chaves E2EE (AUD-028)
+        Set<Integer> myHobbyIds = profileRepository.findByUserId(currentUserId)
+                .map(p -> new HashSet<>(profileHobbyRepository.findHobbyIdsByProfileId(p.getId())))
+                .orElseGet(HashSet::new);
+
+        List<UUID> contactIds = activeMatches.stream()
+                .map(m -> m.getOtherUserId(currentUserId))
+                .distinct()
+                .toList();
+        Map<UUID, User> usersById = userRepository.findAllById(contactIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a, HashMap::new));
+        Map<UUID, UserChatKey> keysById = userChatKeyRepository.findAllById(contactIds).stream()
+                .collect(Collectors.toMap(UserChatKey::getUserId, Function.identity(), (a, b) -> a, HashMap::new));
+
         List<ConversationSummaryResponse> summaries = new ArrayList<>();
 
         for (ChatMatch match : activeMatches) {
@@ -150,7 +184,14 @@ public class ChatConversationService {
             if (convOpt.isEmpty() || !"ACTIVE".equalsIgnoreCase(convOpt.get().getStatus())) {
                 continue;
             }
-            summaries.add(buildSummary(currentUserId, match, convOpt.get()));
+            summaries.add(buildSummary(
+                    currentUserId,
+                    match,
+                    convOpt.get(),
+                    Optional.ofNullable(usersById.get(otherUserId)),
+                    Optional.ofNullable(keysById.get(otherUserId)),
+                    myHobbyIds
+            ));
         }
 
         summaries.sort(Comparator.comparing(
@@ -199,16 +240,36 @@ public class ChatConversationService {
 
     private ConversationSummaryResponse buildSummary(UUID currentUserId, ChatMatch match, Conversation conversation) {
         UUID contactId = match.getOtherUserId(currentUserId);
+        Set<Integer> myHobbyIds = profileRepository.findByUserId(currentUserId)
+                .map(p -> new HashSet<>(profileHobbyRepository.findHobbyIdsByProfileId(p.getId())))
+                .orElseGet(HashSet::new);
+        return buildSummary(
+                currentUserId,
+                match,
+                conversation,
+                userRepository.findById(contactId),
+                userChatKeyRepository.findById(contactId),
+                myHobbyIds
+        );
+    }
+
+    private ConversationSummaryResponse buildSummary(
+            UUID currentUserId,
+            ChatMatch match,
+            Conversation conversation,
+            Optional<User> userOpt,
+            Optional<UserChatKey> keyOpt,
+            Set<Integer> myHobbyIds) {
+        UUID contactId = match.getOtherUserId(currentUserId);
 
         Optional<Profile> profileOpt = profileRepository.findByUserId(contactId);
-        Optional<User> userOpt = userRepository.findById(contactId);
-        Optional<UserChatKey> keyOpt = userChatKeyRepository.findById(contactId);
 
         String contactName = profileOpt.map(Profile::getDisplayName)
-                .orElseGet(() -> userOpt.map(User::getEmail).orElse("Contato BeyondTime"));
+                .filter(name -> name != null && !name.isBlank())
+                .orElse("Contato BeyondTime");
 
         Integer contactAge = userOpt.map(User::getBirthDate)
-                .map(birthDate -> Period.between(birthDate, LocalDate.now()).getYears())
+                .map(birthDate -> Period.between(birthDate, LocalDate.now(ZoneId.of("America/Maceio"))).getYears())
                 .orElse(null);
 
         String contactCity = profileOpt.map(Profile::getCityId)
@@ -228,7 +289,7 @@ public class ChatConversationService {
         int affinityPercent = match.getAffinityPercentage() != null
                 ? match.getAffinityPercentage().setScale(0, RoundingMode.HALF_UP).intValue()
                 : 85;
-        List<String> sharedHobbies = resolveSharedHobbies(currentUserId, profileOpt.orElse(null));
+        List<String> sharedHobbies = resolveSharedHobbies(myHobbyIds, profileOpt.orElse(null));
 
         long unreadCount = encryptedMessageRepository.countByConversationIdAndRecipientIdAndReadAtIsNull(
                 conversation.getId(), currentUserId
@@ -277,16 +338,8 @@ public class ChatConversationService {
                 .orElse("Amizade");
     }
 
-    private List<String> resolveSharedHobbies(UUID currentUserId, Profile contactProfile) {
-        if (contactProfile == null || contactProfile.getId() == null) {
-            return List.of();
-        }
-        Optional<Profile> myProfileOpt = profileRepository.findByUserId(currentUserId);
-        if (myProfileOpt.isEmpty()) {
-            return List.of();
-        }
-        Set<Integer> myHobbyIds = new HashSet<>(profileHobbyRepository.findHobbyIdsByProfileId(myProfileOpt.get().getId()));
-        if (myHobbyIds.isEmpty()) {
+    private List<String> resolveSharedHobbies(Set<Integer> myHobbyIds, Profile contactProfile) {
+        if (contactProfile == null || contactProfile.getId() == null || myHobbyIds == null || myHobbyIds.isEmpty()) {
             return List.of();
         }
         List<Integer> sharedIds = profileHobbyRepository.findHobbyIdsByProfileId(contactProfile.getId())

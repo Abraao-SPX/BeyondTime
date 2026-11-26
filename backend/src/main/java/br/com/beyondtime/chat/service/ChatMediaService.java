@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -139,6 +140,24 @@ public class ChatMediaService {
                     "Não foi possível carregar a mídia cifrada.",
                     HttpStatus.INTERNAL_SERVER_ERROR
             );
+        }
+    }
+
+    public void deleteEncryptedMediaFilesQuietly(List<String> storageFilenames) {
+        if (storageFilenames == null || storageFilenames.isEmpty()) {
+            return;
+        }
+        for (String filename : storageFilenames) {
+            if (filename == null || filename.isBlank()) {
+                continue;
+            }
+            try {
+                Path target = resolveSafePath(filename);
+                Files.deleteIfExists(target);
+            } catch (Exception ex) {
+                log.warn("[BeyondTime Chat Media] Falha ao remover arquivo cifrado após commit (AUD-011): {}",
+                        ex.getClass().getSimpleName());
+            }
         }
     }
 

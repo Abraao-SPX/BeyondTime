@@ -5,6 +5,23 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, ''
 const AUTH_SESSION_KEY = 'beyondtime_auth_session_v1';
 const REMEMBER_ME_FLAG_KEY = 'beyondtime_remember_me_active';
 
+let authSessionGeneration = 0;
+let inFlightRefreshPromise: Promise<AuthSession | null> | null = null;
+let onSessionUpdatedCb: ((session: AuthSession) => void) | null = null;
+let onSessionExpiredCb: (() => void) | null = null;
+
+export function registerSessionLifecycleCallbacks(callbacks: {
+  onSessionUpdated?: (session: AuthSession) => void;
+  onSessionExpired?: () => void;
+}): () => void {
+  onSessionUpdatedCb = callbacks.onSessionUpdated ?? null;
+  onSessionExpiredCb = callbacks.onSessionExpired ?? null;
+  return () => {
+    onSessionUpdatedCb = null;
+    onSessionExpiredCb = null;
+  };
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -39,14 +56,71 @@ async function parseError(response: Response): Promise<ApiError> {
       firstFieldMsg ||
       data.detail ||
       data.title ||
-      `Erro HTTP ${response.status} ao comunicar com o servidor.`;
+      'Não foi possível concluir esta ação agora. Tente novamente em instantes.';
     return new ApiError(message, response.status, data.code, data.errors);
   } catch {
     return new ApiError(
-      `Não foi possível processar a resposta do servidor (HTTP ${response.status}).`,
+      'Não foi possível processar a resposta do servidor agora. Tente novamente em instantes.',
       response.status
     );
   }
+}
+
+export async function fetchWithSessionRefresh(
+  session: AuthSession,
+  path: string,
+  buildInit: (accessToken: string) => RequestInit
+): Promise<Response> {
+  const startGen = authSessionGeneration;
+  const execute = async (token: string): Promise<Response> => {
+    try {
+      return await fetch(`${API_BASE_URL}${path}`, buildInit(token));
+    } catch {
+      throw new ApiError(
+        'Não foi possível conectar ao BeyondTime agora. Verifique sua internet e tente novamente.',
+        0,
+        'NETWORK_ERROR'
+      );
+    }
+  };
+
+  let response = await execute(session.accessToken);
+  if (response.status === 401 && session.refreshToken && startGen === authSessionGeneration) {
+    const refreshed = await refreshSessionSingleFlight(session, startGen);
+    if (refreshed?.accessToken && startGen === authSessionGeneration) {
+      response = await execute(refreshed.accessToken);
+    } else if (startGen === authSessionGeneration) {
+      clearAuthSession();
+      clearUserProfile();
+      onSessionExpiredCb?.();
+    }
+  }
+  return response;
+}
+
+async function refreshSessionSingleFlight(
+  session: AuthSession,
+  expectedGen: number
+): Promise<AuthSession | null> {
+  if (!session.refreshToken) return null;
+  if (!inFlightRefreshPromise) {
+    inFlightRefreshPromise = refreshSession(session.refreshToken, expectedGen)
+      .then((refreshed) => {
+        if (expectedGen !== authSessionGeneration) {
+          return null;
+        }
+        session.accessToken = refreshed.accessToken;
+        session.refreshToken = refreshed.refreshToken;
+        session.expiresInSeconds = refreshed.expiresInSeconds;
+        onSessionUpdatedCb?.({ ...session });
+        return refreshed;
+      })
+      .catch(() => null)
+      .finally(() => {
+        inFlightRefreshPromise = null;
+      });
+  }
+  return inFlightRefreshPromise;
 }
 
 async function requestJson<T>(
@@ -70,11 +144,39 @@ async function requestJson<T>(
     });
   } catch {
     throw new ApiError(
-      'Não foi possível conectar ao servidor BeyondTime. Verifique se o backend Java está rodando.',
+      'Não foi possível conectar ao BeyondTime agora. Verifique sua internet e tente novamente.',
       0,
       'NETWORK_ERROR'
     );
   }
+
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+async function authedJson<T>(
+  session: AuthSession,
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const response = await fetchWithSessionRefresh(session, path, (token) => {
+    const headers = new Headers(options.headers);
+    if (!headers.has('Content-Type') && options.body !== undefined) {
+      headers.set('Content-Type', 'application/json');
+    }
+    headers.set('Authorization', `Bearer ${token}`);
+    return {
+      ...options,
+      headers,
+    };
+  });
 
   if (!response.ok) {
     throw await parseError(response);
@@ -118,10 +220,31 @@ export function loadAuthSession(): AuthSession | null {
 }
 
 export function clearAuthSession(): void {
-  // SEC-MED-02: Limpeza rigorosa e completa de ambos os storages no logout / 401 / exclusão
+  // Incrementa geração para impedir que um refresh em andamento ressuscite sessão após logout (AUD-020)
+  authSessionGeneration += 1;
+  // SEC-MED-02 + AUD-003: Limpeza rigorosa de tokens, chaves E2EE locais e estados de conversa no logout/401/exclusão
   window.localStorage.removeItem(AUTH_SESSION_KEY);
   window.localStorage.removeItem(REMEMBER_ME_FLAG_KEY);
   window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (
+          key &&
+          (key.startsWith('beyondtime_chat_e2ee_keypair_v1:') ||
+            key.startsWith('beyondtime_wave2_state_'))
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => storage.removeItem(k));
+    } catch {
+      // ignora restrições de storage do navegador
+    }
+  }
 }
 
 export interface RegisterPayload {
@@ -221,13 +344,17 @@ export async function confirmPasswordReset(
 }
 
 export async function refreshSession(
-  refreshToken: string
+  refreshToken: string,
+  expectedGen: number = authSessionGeneration
 ): Promise<AuthSession> {
   const previousSession = loadAuthSession();
   const session = await requestJson<AuthSession>('/api/v1/auth/refresh', {
     method: 'POST',
     body: JSON.stringify({ refreshToken: refreshToken.trim() }),
   });
+  if (expectedGen !== authSessionGeneration) {
+    throw new ApiError('Sessão encerrada durante a renovação.', 401, 'SESSION_LOGGED_OUT');
+  }
   if (previousSession?.authProvider) {
     session.authProvider = previousSession.authProvider;
   }
@@ -329,21 +456,17 @@ export async function fetchHobbiesCatalog(): Promise<HobbyCatalogItem[]> {
 export async function fetchMyProfile(
   session: AuthSession
 ): Promise<ServerProfile> {
-  return requestJson<ServerProfile>('/api/v1/profiles/me', {}, session.accessToken);
+  return authedJson<ServerProfile>(session, '/api/v1/profiles/me', {});
 }
 
 export async function upsertMyProfile(
   session: AuthSession,
   payload: UpsertProfilePayload
 ): Promise<ServerProfile> {
-  return requestJson<ServerProfile>(
-    '/api/v1/profiles/me',
-    {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    },
-    session.accessToken
-  );
+  return authedJson<ServerProfile>(session, '/api/v1/profiles/me', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface VerifyBiometricsResponse {
@@ -438,15 +561,16 @@ export async function uploadMyAvatar(
   session: AuthSession,
   file: File
 ): Promise<AvatarUploadResult> {
-  const formData = new FormData();
-  formData.append('file', file, file.name || 'avatar.jpg');
-
-  const response = await fetch(`${API_BASE_URL}/api/v1/profiles/me/avatar`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${session.accessToken}`,
-    },
-    body: formData,
+  const response = await fetchWithSessionRefresh(session, '/api/v1/profiles/me/avatar', (token) => {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'avatar.jpg');
+    return {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    };
   });
 
   if (!response.ok) {

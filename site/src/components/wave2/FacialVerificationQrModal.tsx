@@ -45,7 +45,7 @@ export function FacialVerificationQrModal({
   const [activeMode, setActiveMode] = useState<'qr' | 'camera'>(defaultMode);
 
   // Estado do fluxo QR Handoff (PC -> Celular sem app)
-  const [qrSvg, setQrSvg] = useState<string>('');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [handoffToken, setHandoffToken] = useState<string | null>(null);
   const [handoffState, setHandoffState] = useState<
     'creating' | 'waiting' | 'approved' | 'expired' | 'unauthenticated' | 'error'
@@ -154,16 +154,16 @@ export function FacialVerificationQrModal({
 
   useEffect(() => {
     let isMounted = true;
-    QRCode.toString(
+    QRCode.toDataURL(
       qrTargetUrl,
       {
-        type: 'svg',
         margin: 2,
+        width: 240,
         color: { dark: '#5A081D', light: '#FFFFFF' },
       },
-      (error, svgString) => {
-        if (!error && svgString && isMounted) {
-          setQrSvg(svgString);
+      (error, dataUrl) => {
+        if (!error && dataUrl && isMounted) {
+          setQrDataUrl(dataUrl);
         }
       }
     );
@@ -378,13 +378,20 @@ export function FacialVerificationQrModal({
                 <div className="facial-qr-modal__qr-container">
                   <div
                     className="facial-qr-modal__qr-box"
-                    role="img"
-                    aria-label="Código QR da verificação facial pelo navegador do celular"
                     style={{
                       opacity: handoffState === 'expired' || handoffState === 'creating' ? 0.35 : 1,
                     }}
-                    dangerouslySetInnerHTML={{ __html: qrSvg }}
-                  />
+                  >
+                    {qrDataUrl && (
+                      <img
+                        src={qrDataUrl}
+                        alt="Código QR da verificação facial pelo navegador do celular"
+                        width={220}
+                        height={220}
+                        style={{ display: 'block', width: '100%', height: 'auto' }}
+                      />
+                    )}
+                  </div>
                   <span className="facial-qr-modal__qr-hint">
                     {handoffState === 'approved'
                       ? 'Verificação aprovada!'
