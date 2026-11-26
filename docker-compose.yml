@@ -55,6 +55,7 @@ services:
       - "127.0.0.1:8001:8000"
     environment:
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      ANTIFRAUD_INTERNAL_TOKEN: ${ANTIFRAUD_INTERNAL_TOKEN:-}
     restart: unless-stopped
 
   # ==========================================
@@ -86,6 +87,7 @@ services:
       AVATARS_UPLOAD_DIR: /app/uploads/avatars
       CHAT_MEDIA_UPLOAD_DIR: /app/uploads/chat-media
       ANTIFRAUD_API_URL: http://anjo-da-guarda:8000
+      ANTIFRAUD_INTERNAL_TOKEN: ${ANTIFRAUD_INTERNAL_TOKEN:-}
       CHAT_VAULT_KEK: ${CHAT_VAULT_KEK:-}
       BIOMETRIA_API_URL: http://reconhecimento-facial:8000
       BIOMETRIA_INTERNAL_API_KEY: ${BIOMETRIA_INTERNAL_API_KEY:-}

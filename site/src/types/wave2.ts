@@ -24,6 +24,25 @@ export interface ScoredCandidate extends DiscoveryCandidate {
   sameCity: boolean;
 }
 
+export type ModerationReasonCode =
+  | 'MONEY_OR_PIX_REQUEST'
+  | 'FAKE_PROFILE'
+  | 'HARASSMENT'
+  | 'INAPPROPRIATE_CONTENT'
+  | 'SPAM'
+  | 'OTHER';
+
+export interface ChatAntifraudAlert {
+  riskLabel: string;
+  confidencePercent: number;
+  educationalTitle: string;
+  educationalMessage: string;
+  strikeCountInConversation?: number;
+  escalatedWarning?: boolean;
+  senderPreventivelySuspended?: boolean;
+  auditTicketCode?: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'me' | 'them';
@@ -33,6 +52,7 @@ export interface ChatMessage {
   audioDurationLabel?: string;
   imageUrl?: string;
   imageName?: string;
+  antifraudAlert?: ChatAntifraudAlert | null;
 }
 
 export interface OutgoingMessagePayload {

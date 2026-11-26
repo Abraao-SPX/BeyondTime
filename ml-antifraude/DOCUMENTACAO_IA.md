@@ -15,20 +15,20 @@ Com essa intenção identificada, o sistema principal (que faremos depois em Jav
 
 ### 📄 `dataset.csv` (A Base do Conhecimento)
 - **Para que serve:** É a matéria-prima do classificador de intenções.
-- **O que faz:** Contém exatamente **15.000 frases** balanceadas e categorizadas em **13 classes de proteção**:
-  1. `NORMAL` (3.000 frases): Afeto legítimo 50+, rotina, família, compras diárias, hobbies e encontros reais em locais públicos.
-  2. `PEDIDO_DINHEIRO` (1.200 frases): Pedidos diretos de Pix, transferências bancárias e empréstimos com promessas de devolução.
-  3. `MENSAGEM_SUSPEITA` (1.200 frases): Tentativas de ofuscação proposital (`p.i.x`, `c-v-v`, `d i n h e i r o`, traços e símbolos entre letras).
-  4. `SUBLIMACAO_MENSAGEM` (1.200 frases): Vitimização velada por piedade para induzir oferta financeira e pedidos para apagar mensagens/manter segredo da família.
-  5. `AMEACA_EXTORSAO` (1.200 frases): Extorsão moral, falso delegado de polícia, ameaças de expor fotos/conversas e ordens de prisão.
-  6. `EMERGENCIA_FINANCEIRA` (1.000 frases): Falsas internações em UTI, hospitais particulares, remédios urgentes, guincho adiantado e assaltos.
-  7. `ENCOMENDA_TAXA` (1.000 frases): Golpe do presente ou mala com dólares/joias presa na alfândega com falsa cobrança da Receita Federal.
-  8. `INVESTIMENTO_SUSPEITO` (1.000 frases): *Pig Butchering*, falsos rendimentos diários de 5%, arbitragem de criptomoedas (USDT/Bitcoin) e Forex.
-  9. `LINK_MALICIOSO` (1.000 frases): Phishing, links encurtados (*bit.ly*, *t.me*), arquivos executáveis (*.apk*) e páginas clonadas.
-  10. `FALSA_DOACAO_HERANCA` (800 frases): Falsa herança ou doação milionária de caridade mediante pagamento de taxas cartorárias.
-  11. `PEDIDO_CREDENCIAL` (800 frases): Solicitação de tokens SMS, códigos de 6 dígitos, fotos frente/verso de cartão e senhas.
-  12. `SONDAGEM_FINANCEIRA` (800 frases): Perguntas invasivas sobre limite de cartão de crédito, aposentadoria do INSS, pensão e imóveis.
-  13. `FALSO_INTERMEDIARIO` (800 frases): Golpista se passando por mecânico, policial ou amigo em nome de filho/neto pedindo Pix urgente.
+- **O que faz:** Contém exatamente **50.000 frases únicas** balanceadas e categorizadas em **13 classes de proteção** (incluindo *hard negatives* e golpes atuais no Brasil):
+  1. `NORMAL` (11.000 frases): Afeto legítimo 50+, rotina, família, hobbies, conversas curtas cotidianas e 3.500 *hard negatives* (menções legítimas a banco, INSS, Pix, médico, encomendas e advogados).
+  2. `PEDIDO_DINHEIRO` (4.200 frases): Pedidos diretos/curtos de Pix, golpe do Pix errado, falsa vaga de emprego com taxa, Pix de "conta segura"/estorno de falsa central e falso consignado por engano.
+  3. `FALSO_INTERMEDIARIO` (4.000 frases): Golpe do falso parente (*"Oi mãe/pai, troquei de número"*) e terceiros falsos (mecânico, policial, guincho, hospital) pedindo Pix em nome de familiares.
+  4. `PEDIDO_CREDENCIAL` (3.600 frases): Tokens SMS, CVV, fotos de cartão/RG, Falsa Central de Banco, roubo de senha `gov.br`/selfie consignado, Golpe do Motoboy e códigos do AnyDesk/TeamViewer.
+  5. `INVESTIMENTO_SUSPEITO` (3.600 frases): *Pig Butchering*, criptomoedas/Forex com retorno garantido, golpe da tarefa remunerada (Shopee, Amazon, Mercado Livre, TikTok, YouTube, Google Maps) e Urubu do Pix.
+  6. `LINK_MALICIOSO` (3.600 frases): Phishing, APKs maliciosos, avisos falsos do INSS (Prova de Vida, biometria, 14º salário), instalação de acesso remoto (`AnyDesk`/`TeamViewer`/`RustDesk`) e lojas falsas.
+  7. `MENSAGEM_SUSPEITA` (3.400 frases): Ofuscações (`p.i.x`, `c-v-v`, `g.o.v.b.r`, `a.n.y.d.e.s.k`, `d i n h e i r o`) e tentativas de migração forçada da conversa para WhatsApp/Telegram.
+  8. `SUBLIMACAO_MENSAGEM` (3.400 frases): Vitimização velada por piedade, pedidos para apagar histórico/manter segredo da família e roteiros do Golpe do Amor (*love bombing* + isolamento).
+  9. `EMERGENCIA_FINANCEIRA` (3.000 frases): Falsas internações/UTI, acidentes na estrada, guincho adiantado, falso sequestro e roteiros de clonagem de voz por IA.
+  10. `AMEACA_EXTORSAO` (2.800 frases): Extorsão moral, falso delegado/policial, sextorsão, ameaças de expor prints e falso bloqueio judicial/penhora de aposentadoria.
+  11. `ENCOMENDA_TAXA` (2.600 frases): Golpe da mala/presentes retidos na alfândega e avisos falsos dos Correios/Receita Federal cobrando taxa de liberação postal.
+  12. `FALSA_DOACAO_HERANCA` (2.600 frases): Falsa herança/doação milionária e golpe do Falso Advogado / Falso Precatório / RPV / Alvará Judicial / Revisão do INSS.
+  13. `SONDAGEM_FINANCEIRA` (2.200 frases): Perguntas invasivas sobre limite de cartão, aposentadoria, margem consignável, precatórios, imóveis e se a vítima mora sozinha.
 
 ### 📄 `treinar.py` (A Sala de Aula da IA)
 - **Para que serve:** É o script que ensina a máquina. Só precisa ser rodado quando quisermos melhorar a IA (ex: adicionarmos frases novas no CSV).
