@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Animated,
   Easing,
   Image,
@@ -22,54 +23,67 @@ import {
   RefreshIcon,
   ShieldCheckIcon,
 } from '../components/Icons';
-import {
-  getHobbyLabelById,
-  rankProfilesByAffinity,
-  SEED_DISCOVERY_PROFILES,
-} from '../services/discoveryService';
+import { getHobbyLabelById } from '../services/discoveryService';
 import { useTheme } from '../theme/ThemeContext';
 import type { RankedDiscoveryProfile } from '../types/social';
+
+export interface LikeActionResult {
+  matched: boolean;
+  conversationId?: string | null;
+}
 
 interface DiscoverScreenProps {
   userName?: string;
   userCity: string;
   userHobbies: string[];
+  remoteProfiles: RankedDiscoveryProfile[];
   blockedProfileIds?: string[];
-  onMutualConnection: (profile: RankedDiscoveryProfile, openChatNow: boolean) => void;
+  isLoading?: boolean;
+  errorMessage?: string | null;
+  onLikeProfile: (profile: RankedDiscoveryProfile) => Promise<LikeActionResult>;
+  onPassProfile: (profile: RankedDiscoveryProfile) => Promise<void>;
+  onRefreshProfiles: () => Promise<void> | void;
+  onMutualConnection: (
+    profile: RankedDiscoveryProfile,
+    openChatNow: boolean,
+    conversationId?: string | null
+  ) => void;
 }
 
 /**
- * Tela Descobrir — Conexões por Afinidade:
- * - Ordenação: 1) Mesma cidade, 2) Mesma região (Sergipe), 3) Mais hobbies em comum.
+ * Tela Descobrir — Conexões por Afinidade (RF-05 integrado à API real):
+ * - Consome perfis reais ordenados pelo backend (cidade, região em Sergipe e hobbies em comum).
  * - Card com foto grande + gradiente escuro na base + bio + interesses em comum.
  * - Botões grandes e explícitos "Passar" e "Curtir" (>= 60dp), sem dependência de swipe.
  */
 export function DiscoverScreen({
   userName = 'Você',
   userCity,
-  userHobbies,
+  remoteProfiles,
   blockedProfileIds,
+  isLoading = false,
+  errorMessage = null,
+  onLikeProfile,
+  onPassProfile,
+  onRefreshProfiles,
   onMutualConnection,
 }: DiscoverScreenProps) {
   const { palette, fs } = useTheme();
 
   const rankedProfiles = useMemo(() => {
-    const list = rankProfilesByAffinity(SEED_DISCOVERY_PROFILES, userCity, userHobbies);
-    if (!blockedProfileIds || blockedProfileIds.length === 0) return list;
+    if (!blockedProfileIds || blockedProfileIds.length === 0) return remoteProfiles;
     const blockedSet = new Set(blockedProfileIds);
-    return list.filter((p) => !blockedSet.has(p.id));
-  }, [userCity, userHobbies, blockedProfileIds]);
+    return remoteProfiles.filter((p) => !blockedSet.has(p.id));
+  }, [remoteProfiles, blockedProfileIds]);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [imageErrorMap, setImageErrorMap] = useState<Record<string, boolean>>({});
-  const [matchedProfile, setMatchedProfile] = useState<RankedDiscoveryProfile | null>(null);
+  const [matchedInfo, setMatchedInfo] = useState<{
+    profile: RankedDiscoveryProfile;
+    conversationId?: string | null;
+  } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    setCurrentIndex((prev) => {
-      if (rankedProfiles.length === 0) return 0;
-      return prev >= rankedProfiles.length ? rankedProfiles.length - 1 : prev;
-    });
-  }, [rankedProfiles.length]);
+  const matchedProfile = matchedInfo?.profile ?? null;
 
   // Animação da tela de conexão: os dois perfis deslizam um em direção ao outro até se juntarem
   const leftAvatarX = useRef(new Animated.Value(-84)).current;
@@ -150,29 +164,36 @@ export function DiscoverScreen({
     rightAvatarX,
   ]);
 
-  const currentProfile = rankedProfiles[currentIndex] ?? null;
+  const currentProfile = rankedProfiles[0] ?? null;
 
-  const advanceCard = () => {
-    setCurrentIndex((prev) => prev + 1);
+  const handlePass = async () => {
+    if (!currentProfile || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onPassProfile(currentProfile);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handlePass = () => {
-    if (!currentProfile) return;
-    advanceCard();
-  };
-
-  const handleLike = () => {
-    if (!currentProfile) return;
-    if (currentProfile.likesCurrentUser) {
-      setMatchedProfile(currentProfile);
-      onMutualConnection(currentProfile, false);
-    } else {
-      advanceCard();
+  const handleLike = async () => {
+    if (!currentProfile || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const result = await onLikeProfile(currentProfile);
+      if (result.matched) {
+        setMatchedInfo({
+          profile: currentProfile,
+          conversationId: result.conversationId,
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleRestartDeck = () => {
-    setCurrentIndex(0);
+    void onRefreshProfiles();
   };
 
   const renderInitialsAvatar = (name: string, size: number) => {
@@ -235,7 +256,27 @@ export function DiscoverScreen({
         </View>
       </View>
 
-      {currentProfile ? (
+      {isLoading && rankedProfiles.length === 0 ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color={palette.primary} />
+          <Text
+            style={[
+              styles.emptyTitle,
+              { color: palette.textPrimary, fontSize: fs(20) },
+            ]}
+          >
+            Buscando pessoas compatíveis...
+          </Text>
+          <Text
+            style={[
+              styles.emptyDesc,
+              { color: palette.textSecondary, fontSize: fs(16) },
+            ]}
+          >
+            Estamos organizando sugestões próximas de você em Sergipe.
+          </Text>
+        </View>
+      ) : currentProfile ? (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -249,7 +290,7 @@ export function DiscoverScreen({
           >
             {/* Área da Foto + Gradiente Escuro na Base */}
             <View style={styles.photoContainer}>
-              {!imageErrorMap[currentProfile.id] ? (
+              {!imageErrorMap[currentProfile.id] && currentProfile.photoUrl ? (
                 <Image
                   source={{ uri: currentProfile.photoUrl }}
                   style={styles.photo}
@@ -395,15 +436,21 @@ export function DiscoverScreen({
             <AccessibleButton
               label="Passar"
               variant="outline"
-              onPress={handlePass}
+              disabled={isSubmitting}
+              onPress={() => {
+                void handlePass();
+              }}
               iconLeft={<CloseXIcon size={22} color={palette.textPrimary} />}
               style={styles.actionBtn}
               accessibilityHint="Avança para a próxima pessoa"
             />
             <AccessibleButton
-              label="Curtir"
+              label={isSubmitting ? 'Enviando...' : 'Curtir'}
               variant="primary"
-              onPress={handleLike}
+              disabled={isSubmitting}
+              onPress={() => {
+                void handleLike();
+              }}
               iconLeft={<HeartIcon size={22} color={palette.textOnPrimary} filled />}
               style={styles.actionBtn}
               accessibilityHint="Demonstra interesse neste perfil"
@@ -426,7 +473,9 @@ export function DiscoverScreen({
               { color: palette.textPrimary, fontSize: fs(22) },
             ]}
           >
-            Você já viu todos os perfis por enquanto
+            {errorMessage
+              ? 'Não foi possível carregar as sugestões'
+              : 'Você já viu todos os perfis por enquanto'}
           </Text>
           <Text
             style={[
@@ -434,10 +483,11 @@ export function DiscoverScreen({
               { color: palette.textSecondary, fontSize: fs(16) },
             ]}
           >
-            Assim que novas pessoas da sua cidade chegarem, elas aparecerão aqui para você.
+            {errorMessage ||
+              'Assim que novas pessoas da sua cidade chegarem, elas aparecerão aqui para você.'}
           </Text>
           <AccessibleButton
-            label="Ver perfis novamente"
+            label={errorMessage ? 'Tentar novamente' : 'Atualizar sugestões'}
             variant="primary"
             onPress={handleRestartDeck}
             iconLeft={<RefreshIcon size={20} color={palette.textOnPrimary} />}
@@ -446,14 +496,13 @@ export function DiscoverScreen({
         </View>
       )}
 
-      {/* Modal gentil de Conexão Mútua */}
+      {/* Modal gentil de Conexão Mútua (exibido apenas quando matched === true no backend) */}
       <Modal
         visible={matchedProfile !== null}
         transparent
         animationType="fade"
         onRequestClose={() => {
-          setMatchedProfile(null);
-          advanceCard();
+          setMatchedInfo(null);
         }}
       >
         <View style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}>
@@ -537,7 +586,7 @@ export function DiscoverScreen({
                     },
                   ]}
                 >
-                  {!imageErrorMap[matchedProfile.id] ? (
+                  {!imageErrorMap[matchedProfile.id] && matchedProfile.photoUrl ? (
                     <Image
                       source={{ uri: matchedProfile.photoUrl }}
                       style={[styles.matchAvatar, { borderColor: palette.primary }]}
@@ -562,10 +611,11 @@ export function DiscoverScreen({
                   label="Enviar mensagem"
                   variant="primary"
                   onPress={() => {
-                    const target = matchedProfile;
-                    setMatchedProfile(null);
-                    advanceCard();
-                    onMutualConnection(target, true);
+                    const target = matchedInfo;
+                    setMatchedInfo(null);
+                    if (target) {
+                      onMutualConnection(target.profile, true, target.conversationId);
+                    }
                   }}
                   iconLeft={<MessageCircleIcon size={20} color={palette.textOnPrimary} />}
                 />
@@ -573,8 +623,7 @@ export function DiscoverScreen({
                   label="Continuar descobrindo"
                   variant="outline"
                   onPress={() => {
-                    setMatchedProfile(null);
-                    advanceCard();
+                    setMatchedInfo(null);
                   }}
                 />
               </View>

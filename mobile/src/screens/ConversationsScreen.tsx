@@ -126,7 +126,7 @@ export function ConversationsScreen({
                 ]}
               >
                 <View style={styles.avatarWrap}>
-                  {!imageErrors[conv.id] ? (
+                  {!imageErrors[conv.id] && conv.photoUrl ? (
                     <Image
                       source={{ uri: conv.photoUrl }}
                       style={styles.avatar}

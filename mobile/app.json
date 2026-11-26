@@ -6,32 +6,39 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "br.com.beyondtime",
       "infoPlist": {
-        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura.",
-        "NSMicrophoneUsageDescription": "O BeyondTime usa o sensor de vídeo apenas durante a prova de vida da verificação facial (o áudio não é gravado)."
+        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para foto de perfil, envio de fotos no chat e verificação facial segura.",
+        "NSPhotoLibraryUsageDescription": "O BeyondTime precisa de acesso às suas fotos para escolher sua foto de perfil e enviar imagens nas conversas.",
+        "NSMicrophoneUsageDescription": "O BeyondTime precisa de acesso ao microfone para gravar mensagens de voz nas suas conversas."
       }
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
         "backgroundColor": "#000000"
       },
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE"
       ],
-      "package": "br.com.beyondtime",
-      "googleServicesFile": "./google-services.json"
+      "package": "br.com.beyondtime"
     },
     "plugins": [
       [
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true,
+            "usesCleartextTraffic": false,
             "minSdkVersion": 26,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34
@@ -41,11 +48,24 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "O BeyondTime precisa de acesso à câmera para realizar a verificação facial segura.",
-          "microphonePermission": "O BeyondTime usa o sensor de vídeo apenas durante a prova de vida da verificação facial (o áudio não é gravado).",
-          "recordAudioAndroid": false
+          "cameraPermission": "O BeyondTime precisa de acesso à câmera para foto de perfil, envio de fotos no chat e verificação facial segura.",
+          "microphonePermission": "O BeyondTime precisa de acesso ao microfone durante a verificação facial e gravação de áudio no chat."
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O BeyondTime precisa de acesso às suas fotos para escolher sua foto de perfil e enviar imagens nas conversas.",
+          "cameraPermission": "O BeyondTime precisa de acesso à câmera para tirar fotos de perfil ou enviar imagens nas conversas."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "O BeyondTime precisa de acesso ao microfone para gravar mensagens de voz nas suas conversas."
+        }
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {
