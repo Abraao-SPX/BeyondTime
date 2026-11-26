@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const FONT_SCALE_STORAGE_KEY = 'beyondtime_accessibility_font_scale_v1';
 
@@ -52,10 +52,32 @@ export function AccessibilityPanelRF09({
     return initial;
   });
 
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     applyFontScale(fontScale);
     saveStoredFontScale(fontScale);
   }, [fontScale]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [isOpen, onClose]);
 
   function handleScaleChange(newScale: FontScaleStep) {
     setFontScale(newScale);
@@ -116,6 +138,7 @@ export function AccessibilityPanelRF09({
                 </h2>
               </div>
               <button
+                ref={closeButtonRef}
                 type="button"
                 className="accessibility-btn-close"
                 onClick={onClose}

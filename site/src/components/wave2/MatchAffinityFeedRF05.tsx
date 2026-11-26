@@ -5,6 +5,7 @@ import { MatchCelebrationModal } from './MatchCelebrationModal';
 
 interface MatchAffinityFeedRF05Props {
   candidates: ScoredCandidate[];
+  isLoading?: boolean;
   userCity: string;
   currentUserName: string;
   currentUserAvatarUrl: string | null;
@@ -30,6 +31,7 @@ const GOAL_FILTERS: readonly (ConnectionGoal | 'Todos')[] = [
 
 export function MatchAffinityFeedRF05({
   candidates,
+  isLoading = false,
   currentUserName,
   currentUserAvatarUrl,
   filterGoal,
@@ -97,7 +99,14 @@ export function MatchAffinityFeedRF05({
         />
       )}
 
-      {currentCandidate ? (
+      {isLoading && !currentCandidate ? (
+        <div className="wave2-empty-card" role="status" aria-live="polite">
+          <h1 className="wave2-empty-card__title">Buscando pessoas para você...</h1>
+          <p className="wave2-empty-card__text">
+            Estamos organizando as sugestões conforme seus interesses em Sergipe.
+          </p>
+        </div>
+      ) : currentCandidate ? (
         <article
           className="deck-card"
           aria-label={`Perfil de ${currentCandidate.fullName}`}

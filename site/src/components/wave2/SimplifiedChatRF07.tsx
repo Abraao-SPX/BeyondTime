@@ -5,36 +5,126 @@ import type { ChatThread, OutgoingMessagePayload } from '../../types/wave2';
 
 interface SimplifiedChatRF07Props {
   threads: ChatThread[];
+  isLoading?: boolean;
+  isSendingDisabled?: boolean;
   activeThreadId: string | null;
   onSelectThread: (contactId: string) => void;
-  onSendMessage: (contactId: string, payload: string | OutgoingMessagePayload) => void;
+  onSendMessage: (
+    contactId: string,
+    payload: string | OutgoingMessagePayload
+  ) => Promise<boolean> | boolean | void;
   onRequestBlock: (thread: ChatThread) => void;
   onGoToDiscover: () => void;
 }
 
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_CHAT_IMAGE_DIMENSION = 1600;
+const MAX_AUDIO_RECORDING_SECONDS = 600;
+
+function stripImageExifViaCanvas(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const tempUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        let { naturalWidth: width, naturalHeight: height } = img;
+        if (width > MAX_CHAT_IMAGE_DIMENSION || height > MAX_CHAT_IMAGE_DIMENSION) {
+          const ratio = Math.min(
+            MAX_CHAT_IMAGE_DIMENSION / width,
+            MAX_CHAT_IMAGE_DIMENSION / height
+          );
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas indisponível'));
+          return;
+        }
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch (err) {
+        reject(err);
+      } finally {
+        URL.revokeObjectURL(tempUrl);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(tempUrl);
+      reject(new Error('Falha ao carregar imagem'));
+    };
+    img.src = tempUrl;
+  });
+}
+const AUDIO_MIME_CANDIDATES = [
+  'audio/mp4',
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+];
+
+function pickSupportedAudioMimeType(): string | undefined {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return undefined;
+  }
+  return AUDIO_MIME_CANDIDATES.find((mime) => {
+    try {
+      return MediaRecorder.isTypeSupported(mime);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function canBrowserPlayAudioUrl(audioUrl: string): boolean {
+  if (typeof document === 'undefined') return true;
+  const match = /^data:(audio\/[^;,]+)/i.exec(audioUrl);
+  if (!match) return true;
+  const probe = document.createElement('audio');
+  if (typeof probe.canPlayType !== 'function') return true;
+  return probe.canPlayType(match[1]) !== '';
+}
 
 function formatSeconds(totalSeconds: number): string {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
+  const safe = Number.isFinite(totalSeconds)
+    ? Math.min(MAX_AUDIO_RECORDING_SECONDS, Math.max(0, Math.floor(totalSeconds)))
+    : 0;
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 export function SimplifiedChatRF07({
   threads,
+  isLoading = false,
+  isSendingDisabled = false,
   activeThreadId,
   onSelectThread,
   onSendMessage,
   onRequestBlock,
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
-  const [draft, setDraft] = useState('');
+  const [draftByContact, setDraftByContact] = useState<Record<string, string>>({});
   const [mobileViewingChat, setMobileViewingChat] = useState(Boolean(activeThreadId));
-  const [pendingImage, setPendingImage] = useState<{ url: string; name: string } | null>(null);
+  const [pendingImageByContact, setPendingImageByContact] = useState<
+    Record<string, { url: string; name: string } | null>
+  >({});
+  const [failedAudioByContact, setFailedAudioByContact] = useState<
+    Record<string, { url: string; durationLabel: string } | null>
+  >({});
+  const [isSending, setIsSending] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [mediaNotice, setMediaNotice] = useState<string | null>(null);
+  const [unplayableAudioIds, setUnplayableAudioIds] = useState<Record<string, boolean>>({});
+  const sendingBlocked = isSending || isSendingDisabled;
 
+  const isMountedRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -46,6 +136,39 @@ export function SimplifiedChatRF07({
 
   const activeThread =
     threads.find((item) => item.contactId === activeThreadId) ?? threads[0] ?? null;
+  const activeContactId = activeThread?.contactId ?? null;
+  const draft = activeContactId ? (draftByContact[activeContactId] ?? '') : '';
+  const pendingImage = activeContactId ? (pendingImageByContact[activeContactId] ?? null) : null;
+  const failedAudio = activeContactId ? (failedAudioByContact[activeContactId] ?? null) : null;
+
+  function setDraftForContact(contactId: string, value: string) {
+    setDraftByContact((prev) => ({ ...prev, [contactId]: value }));
+  }
+
+  function setPendingImageForContact(
+    contactId: string,
+    value: { url: string; name: string } | null
+  ) {
+    setPendingImageByContact((prev) => ({ ...prev, [contactId]: value }));
+  }
+
+  function setFailedAudioForContact(
+    contactId: string,
+    value: { url: string; durationLabel: string } | null
+  ) {
+    setFailedAudioByContact((prev) => ({ ...prev, [contactId]: value }));
+  }
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (recordingTimerRef.current !== null) {
+        window.clearInterval(recordingTimerRef.current);
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
 
   useEffect(() => {
     if (activeThreadId) {
@@ -57,15 +180,6 @@ export function SimplifiedChatRF07({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [activeThread?.contactId, activeThread?.messages.length]);
 
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current !== null) {
-        window.clearInterval(recordingTimerRef.current);
-      }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-    };
-  }, []);
-
   function cleanupRecordingStream() {
     if (recordingTimerRef.current !== null) {
       window.clearInterval(recordingTimerRef.current);
@@ -74,8 +188,10 @@ export function SimplifiedChatRF07({
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     mediaRecorderRef.current = null;
-    setIsRecording(false);
-    setRecordingSeconds(0);
+    if (isMountedRef.current) {
+      setIsRecording(false);
+      setRecordingSeconds(0);
+    }
     recordingSecondsRef.current = 0;
   }
 
@@ -85,33 +201,81 @@ export function SimplifiedChatRF07({
     setMediaNotice(null);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeThread) return;
+    if (!activeThread || sendingBlocked) return;
+    const contactId = activeThread.contactId;
     const trimmed = draft.trim();
     if (!trimmed && !pendingImage) return;
 
-    if (pendingImage) {
-      onSendMessage(activeThread.contactId, {
-        text: trimmed,
-        imageUrl: pendingImage.url,
-        imageName: pendingImage.name,
-      });
-      setPendingImage(null);
-      setDraft('');
-      setMediaNotice(null);
-      return;
-    }
+    setIsSending(true);
+    try {
+      if (pendingImage) {
+        const ok = await onSendMessage(contactId, {
+          text: trimmed,
+          imageUrl: pendingImage.url,
+          imageName: pendingImage.name,
+        });
+        if (ok !== false && isMountedRef.current) {
+          setPendingImageForContact(contactId, null);
+          setDraftForContact(contactId, '');
+          setMediaNotice(null);
+        }
+        return;
+      }
 
-    onSendMessage(activeThread.contactId, trimmed);
-    setDraft('');
+      const ok = await onSendMessage(contactId, trimmed);
+      if (ok !== false && isMountedRef.current) {
+        setDraftForContact(contactId, '');
+        setMediaNotice(null);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsSending(false);
+      }
+    }
+  }
+
+  async function handleIcebreakerClick(contactId: string, suggestion: string) {
+    if (sendingBlocked) return;
+    setIsSending(true);
+    try {
+      await onSendMessage(contactId, suggestion);
+    } finally {
+      if (isMountedRef.current) {
+        setIsSending(false);
+      }
+    }
+  }
+
+  async function handleRetryFailedAudio() {
+    if (!activeThread || !failedAudio || sendingBlocked) return;
+    const contactId = activeThread.contactId;
+    setIsSending(true);
     setMediaNotice(null);
+    try {
+      const ok = await onSendMessage(contactId, {
+        text: '',
+        audioUrl: failedAudio.url,
+        audioDurationLabel: failedAudio.durationLabel,
+      });
+      if (ok !== false && isMountedRef.current) {
+        setFailedAudioForContact(contactId, null);
+      } else if (isMountedRef.current) {
+        setMediaNotice('Não foi possível reenviar o áudio agora. Tente novamente em instantes.');
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsSending(false);
+      }
+    }
   }
 
   function handlePhotoPick(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
+    if (!file || !activeThread || sendingBlocked) return;
+    const targetContactId = activeThread.contactId;
 
     if (!file.type.startsWith('image/')) {
       setMediaNotice('Selecione um arquivo de imagem válido (JPG, PNG ou WebP).');
@@ -122,18 +286,22 @@ export function SimplifiedChatRF07({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setPendingImage({ url: reader.result, name: file.name });
-        setMediaNotice(null);
-      }
-    };
-    reader.readAsDataURL(file);
+    void stripImageExifViaCanvas(file)
+      .then((cleanDataUrl) => {
+        if (isMountedRef.current) {
+          setPendingImageForContact(targetContactId, { url: cleanDataUrl, name: file.name });
+          setMediaNotice(null);
+        }
+      })
+      .catch(() => {
+        if (isMountedRef.current) {
+          setMediaNotice('Não foi possível preparar a foto escolhida. Tente selecionar outra imagem.');
+        }
+      });
   }
 
   async function handleStartRecording() {
-    if (!activeThread) return;
+    if (!activeThread || sendingBlocked) return;
     setMediaNotice(null);
 
     if (
@@ -150,11 +318,18 @@ export function SimplifiedChatRF07({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       audioChunksRef.current = [];
       cancelRecordingFlagRef.current = false;
 
-      const recorder = new MediaRecorder(stream);
+      const preferredMime = pickSupportedAudioMimeType();
+      const recorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
       const targetContactId = activeThread.contactId;
@@ -167,7 +342,11 @@ export function SimplifiedChatRF07({
 
       recorder.onstop = () => {
         const wasCancelled = cancelRecordingFlagRef.current;
-        const durationLabel = formatSeconds(Math.max(1, recordingSecondsRef.current));
+        const clampedSeconds = Math.min(
+          MAX_AUDIO_RECORDING_SECONDS,
+          Math.max(1, Number.isFinite(recordingSecondsRef.current) ? recordingSecondsRef.current : 1)
+        );
+        const durationLabel = formatSeconds(clampedSeconds);
         const chunks = [...audioChunksRef.current];
         cleanupRecordingStream();
 
@@ -175,16 +354,42 @@ export function SimplifiedChatRF07({
           return;
         }
 
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const resolvedMime = (recorder.mimeType || preferredMime || 'audio/mp4').split(';')[0];
+        const blob = new Blob(chunks, { type: resolvedMime });
         const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            onSendMessage(targetContactId, {
-              text: '',
-              audioUrl: reader.result,
-              audioDurationLabel: durationLabel,
-            });
+        reader.onerror = () => {
+          if (isMountedRef.current) {
+            setMediaNotice('Não foi possível preparar o áudio gravado. Tente gravar novamente.');
           }
+        };
+        reader.onloadend = () => {
+          if (typeof reader.result !== 'string' || !isMountedRef.current) return;
+          const audioDataUrl = reader.result;
+          void (async () => {
+            setIsSending(true);
+            try {
+              const ok = await onSendMessage(targetContactId, {
+                text: '',
+                audioUrl: audioDataUrl,
+                audioDurationLabel: durationLabel,
+              });
+              if (ok === false && isMountedRef.current) {
+                setFailedAudioForContact(targetContactId, {
+                  url: audioDataUrl,
+                  durationLabel,
+                });
+                setMediaNotice(
+                  'Não foi possível enviar o áudio agora. Ele foi mantido abaixo para você tentar novamente.'
+                );
+              } else if (isMountedRef.current) {
+                setFailedAudioForContact(targetContactId, null);
+              }
+            } finally {
+              if (isMountedRef.current) {
+                setIsSending(false);
+              }
+            }
+          })();
         };
         reader.readAsDataURL(blob);
       };
@@ -196,12 +401,18 @@ export function SimplifiedChatRF07({
       recordingTimerRef.current = window.setInterval(() => {
         recordingSecondsRef.current += 1;
         setRecordingSeconds(recordingSecondsRef.current);
+        if (recordingSecondsRef.current >= MAX_AUDIO_RECORDING_SECONDS) {
+          setMediaNotice('Limite de 10 minutos atingido. Enviando seu áudio.');
+          handleStopAndSendRecording();
+        }
       }, 1000);
     } catch {
       cleanupRecordingStream();
-      setMediaNotice(
-        'Não foi possível acessar o microfone. Verifique a permissão no navegador e tente novamente.'
-      );
+      if (isMountedRef.current) {
+        setMediaNotice(
+          'Não foi possível acessar o microfone. Verifique a permissão no navegador e tente novamente.'
+        );
+      }
     }
   }
 
@@ -221,6 +432,19 @@ export function SimplifiedChatRF07({
     } else {
       cleanupRecordingStream();
     }
+  }
+
+  if (isLoading && threads.length === 0) {
+    return (
+      <section className="wave2-section" aria-label="Conversas">
+        <div className="wave2-empty-card" role="status" aria-live="polite">
+          <h1 className="wave2-empty-card__title">Carregando suas conversas...</h1>
+          <p className="wave2-empty-card__text">
+            Aguarde um instante enquanto buscamos suas mensagens protegidas.
+          </p>
+        </div>
+      </section>
+    );
   }
 
   if (threads.length === 0) {
@@ -390,7 +614,8 @@ export function SimplifiedChatRF07({
                         key={suggestion}
                         type="button"
                         className="chat-icebreaker-btn"
-                        onClick={() => onSendMessage(activeThread.contactId, suggestion)}
+                        disabled={sendingBlocked}
+                        onClick={() => void handleIcebreakerClick(activeThread.contactId, suggestion)}
                       >
                         “{suggestion}”
                       </button>
@@ -416,12 +641,21 @@ export function SimplifiedChatRF07({
                           <span className="chat-bubble__audio-label">
                             Mensagem de voz ({msg.audioDurationLabel || '00:01'})
                           </span>
-                          <audio
-                            controls
-                            src={msg.audioUrl}
-                            className="chat-bubble__audio"
-                            aria-label="Reproduzir mensagem de voz"
-                          />
+                          {unplayableAudioIds[msg.id] || !canBrowserPlayAudioUrl(msg.audioUrl) ? (
+                            <p className="chat-bubble__text">
+                              Este áudio não pode ser tocado neste navegador.
+                            </p>
+                          ) : (
+                            <audio
+                              controls
+                              src={msg.audioUrl}
+                              className="chat-bubble__audio"
+                              aria-label="Reproduzir mensagem de voz"
+                              onError={() =>
+                                setUnplayableAudioIds((prev) => ({ ...prev, [msg.id]: true }))
+                              }
+                            />
+                          )}
                         </div>
                       )}
                       {msg.text && <p className="chat-bubble__text">{msg.text}</p>}
@@ -448,7 +682,38 @@ export function SimplifiedChatRF07({
               </div>
             )}
 
-            {pendingImage && (
+            {failedAudio && activeContactId && (
+              <div className="wa-attachment-bar" role="status">
+                <div className="wa-attachment-bar__info">
+                  <div>
+                    <strong>Áudio pendente ({failedAudio.durationLabel})</strong>
+                    <span className="wa-attachment-bar__name">
+                      O envio falhou. Você pode tentar novamente.
+                    </span>
+                  </div>
+                </div>
+                <div className="wa-recording-actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary wa-attachment-bar__cancel"
+                    disabled={sendingBlocked}
+                    onClick={() => setFailedAudioForContact(activeContactId, null)}
+                  >
+                    Descartar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary wa-attachment-bar__cancel"
+                    disabled={sendingBlocked}
+                    onClick={() => void handleRetryFailedAudio()}
+                  >
+                    {isSending ? 'Enviando...' : 'Reenviar áudio'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pendingImage && activeContactId && (
               <div className="wa-attachment-bar">
                 <div className="wa-attachment-bar__info">
                   <img
@@ -464,7 +729,8 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="btn btn--secondary wa-attachment-bar__cancel"
-                  onClick={() => setPendingImage(null)}
+                  disabled={isSending}
+                  onClick={() => setPendingImageForContact(activeContactId, null)}
                 >
                   Remover foto
                 </button>
@@ -509,6 +775,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="wa-media-btn"
+                  disabled={sendingBlocked}
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Enviar foto"
                   title="Enviar foto"
@@ -532,6 +799,7 @@ export function SimplifiedChatRF07({
                 <button
                   type="button"
                   className="wa-media-btn"
+                  disabled={sendingBlocked}
                   onClick={handleStartRecording}
                   aria-label="Gravar mensagem de voz"
                   title="Gravar áudio"
@@ -560,21 +828,28 @@ export function SimplifiedChatRF07({
                   id="chat-message-input"
                   type="text"
                   className="form-input wa-composer__input"
+                  disabled={isSendingDisabled}
                   placeholder={
-                    pendingImage
-                      ? 'Adicione uma legenda opcional...'
-                      : `Digite uma mensagem para ${activeThread.contactName.split(' ')[0]}...`
+                    isSendingDisabled
+                      ? 'Proteção de mensagens indisponível. Clique em "Tentar de novo" acima.'
+                      : pendingImage
+                        ? 'Adicione uma legenda opcional...'
+                        : `Digite uma mensagem para ${activeThread.contactName.split(' ')[0]}...`
                   }
                   value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
+                  onChange={(event) => {
+                    if (activeContactId) {
+                      setDraftForContact(activeContactId, event.target.value);
+                    }
+                  }}
                   autoComplete="off"
                 />
                 <button
                   type="submit"
                   className="btn btn--primary wa-composer__send"
-                  disabled={!canSubmit}
+                  disabled={!canSubmit || sendingBlocked}
                 >
-                  <span>Enviar</span>
+                  <span>{isSending ? 'Enviando...' : 'Enviar'}</span>
                   <svg
                     viewBox="0 0 24 24"
                     width="18"

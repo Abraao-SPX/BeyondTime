@@ -18,8 +18,10 @@
   /* Tipografia institucional de alto contraste e conforto visual (sem tons roxos) */
   --text-primary: #1C1617;
   --text-secondary: #584F4C;
-  --text-muted: #7A706B;
+  --text-muted: #635954;
   --text-on-brand: #FFFFFF;
+  --space-md: 16px;
+  --border-soft: #E5DED5;
 
   /* Identidade cromática oficial (carmesim / vinho nobre / ouro quente) */
   --brand-primary: #6E0B14;
@@ -114,8 +116,9 @@ html.high-contrast {
 
   --text-primary: #F7F4F1;
   --text-secondary: #C8C2BC;
-  --text-muted: #9C948E;
+  --text-muted: #B8B0AA;
   --text-on-brand: #FFFFFF;
+  --border-soft: #3D383A;
 
   --brand-primary: #E02847;
   --brand-primary-hover: #F04562;
@@ -451,16 +454,16 @@ html.high-contrast .btn-home-outline:hover {
 
 html.high-contrast .btn-home-gradient,
 html.high-contrast .btn-home-cta-primary {
-  background: var(--brand-wine);
-  color: #130514;
-  border-color: var(--brand-wine);
+  background: #8F112B;
+  color: #FFFFFF;
+  border-color: #FFD54F;
 }
 
 html.high-contrast .btn-home-gradient:hover,
 html.high-contrast .btn-home-cta-primary:hover {
-  background: var(--brand-gold);
+  background: #FFD54F;
   color: #130514;
-  border-color: var(--brand-gold);
+  border-color: #FFD54F;
   filter: none;
   transform: none;
 }

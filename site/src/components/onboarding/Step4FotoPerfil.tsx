@@ -28,6 +28,7 @@ export function Step4FotoPerfil({
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
 
     setIsProcessingPhoto(true);

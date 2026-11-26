@@ -24,7 +24,57 @@ class LoginRateLimitFilterTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.findAndRegisterModules();
-        filter = new LoginRateLimitFilter(objectMapper, 15, 60, true);
+        filter = new LoginRateLimitFilter(objectMapper, 15, 60, true, "172.18.0.2,127.0.0.1");
+    }
+
+    @Test
+    void shouldIgnoreSpoofedHeadersWhenTrustForwardedDisabledOrProxyUntrusted() throws ServletException, IOException {
+        LoginRateLimitFilter strictFilter = new LoginRateLimitFilter(objectMapper, 15, 60, false, "172.18.0.2");
+        FilterChain filterChain = mock(FilterChain.class);
+
+        // Atacante tenta variar X-Real-IP e X-Forwarded-For a cada tentativa, mas continua limitado pelo remoteAddr real
+        for (int i = 0; i < 15; i++) {
+            MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+            req.setServletPath("/api/v1/auth/login");
+            req.setRemoteAddr("198.51.100.99");
+            req.addHeader("X-Real-IP", "10.0.0." + i);
+            req.addHeader("X-Forwarded-For", "10.1.0." + i);
+            MockHttpServletResponse res = new MockHttpServletResponse();
+            strictFilter.doFilter(req, res, filterChain);
+            assertThat(res.getStatus()).isEqualTo(200);
+        }
+
+        MockHttpServletRequest req16 = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        req16.setServletPath("/api/v1/auth/login");
+        req16.setRemoteAddr("198.51.100.99");
+        req16.addHeader("X-Real-IP", "10.99.99.99");
+        MockHttpServletResponse res16 = new MockHttpServletResponse();
+        strictFilter.doFilter(req16, res16, filterChain);
+        assertThat(res16.getStatus()).isEqualTo(429);
+    }
+
+    @Test
+    void shouldUseRightmostUntrustedIpFromXForwardedForBehindTrustedProxy() throws ServletException, IOException {
+        FilterChain filterChain = mock(FilterChain.class);
+
+        // Atacante forja o IP à esquerda em X-Forwarded-For, mas o proxy confiável (172.18.0.2) anexa 198.51.100.55 à direita
+        for (int i = 0; i < 15; i++) {
+            MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+            req.setServletPath("/api/v1/auth/login");
+            req.setRemoteAddr("172.18.0.2");
+            req.addHeader("X-Forwarded-For", "203.0.113." + i + ", 198.51.100.55, 172.18.0.2");
+            MockHttpServletResponse res = new MockHttpServletResponse();
+            filter.doFilter(req, res, filterChain);
+            assertThat(res.getStatus()).isEqualTo(200);
+        }
+
+        MockHttpServletRequest reqBlocked = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        reqBlocked.setServletPath("/api/v1/auth/login");
+        reqBlocked.setRemoteAddr("172.18.0.2");
+        reqBlocked.addHeader("X-Forwarded-For", "203.0.113.250, 198.51.100.55, 172.18.0.2");
+        MockHttpServletResponse resBlocked = new MockHttpServletResponse();
+        filter.doFilter(reqBlocked, resBlocked, filterChain);
+        assertThat(resBlocked.getStatus()).isEqualTo(429);
     }
 
     @Test
