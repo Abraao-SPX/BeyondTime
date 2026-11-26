@@ -245,6 +245,8 @@ export function AppNavigator() {
 
       {route === 'facialVerification' && (
         <FacialVerificationFlowScreen
+          session={authSession}
+          firstName={onboardingData.fullName.trim().split(/\s+/)[0] || 'Usuário'}
           onBack={() => setRoute('onboarding')}
           onSkipForLater={() => {
             setActiveTab('discover');

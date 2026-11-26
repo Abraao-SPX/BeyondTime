@@ -132,6 +132,10 @@ export function CriarMinhaConta({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(orphanNotice);
   const [createdSession, setCreatedSession] = useState<AuthSession | null>(existingSession);
+  const [lastSavedProfile, setLastSavedProfile] = useState<ServerProfile | null>(initialProfile);
+  const [isFaceVerified, setIsFaceVerified] = useState<boolean>(
+    Boolean(initialProfile?.verifiedBadge50plus)
+  );
   const [socialIdToken, setSocialIdToken] = useState<string | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [socialProvider, setSocialProvider] = useState<SocialProvider | null>(() => {
@@ -281,6 +285,10 @@ export function CriarMinhaConta({
         }));
       }
 
+      setLastSavedProfile(finalServerProfile);
+      if (finalServerProfile.verifiedBadge50plus) {
+        setIsFaceVerified(true);
+      }
       onProfileSaved?.(finalServerProfile);
 
       const age = calculateAgeFromBirthDate(formData.birthDate) ?? 50;
@@ -479,6 +487,20 @@ export function CriarMinhaConta({
             isSocialAccount={Boolean(socialIdToken) || Boolean(existingSession)}
             isEditMode={isEditMode}
             socialProvider={socialProvider}
+            authSession={createdSession || existingSession}
+            isFaceVerified={isFaceVerified}
+            onFaceVerified={() => {
+              setIsFaceVerified(true);
+              if (lastSavedProfile) {
+                const verifiedProfile: ServerProfile = {
+                  ...lastSavedProfile,
+                  verifiedBadge50plus: true,
+                  verificationStatus: 'VERIFIED',
+                };
+                setLastSavedProfile(verifiedProfile);
+                onProfileSaved?.(verifiedProfile);
+              }
+            }}
             onPasswordChange={(value) => setFormData((prev) => ({ ...prev, password: value }))}
             onConfirmPasswordChange={(value) =>
               setFormData((prev) => ({ ...prev, confirmPassword: value }))
@@ -492,6 +514,9 @@ export function CriarMinhaConta({
               setStep(2);
             }}
             onFinishToLogin={() => {
+              if (!isFaceVerified && !isEditMode) {
+                return;
+              }
               const finalSession = createdSession || existingSession;
               if (finalSession) {
                 onAuthSuccess({ ...finalSession });

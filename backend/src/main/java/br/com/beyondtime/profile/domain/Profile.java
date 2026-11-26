@@ -91,6 +91,13 @@ public class Profile {
         this.updatedAt = OffsetDateTime.now();
     }
 
+    public void grantVerifiedBadge50Plus() {
+        this.verifiedBadge50plus = true;
+        this.verificationStatus = "VERIFIED";
+        this.verifiedAt = OffsetDateTime.now();
+        this.updatedAt = OffsetDateTime.now();
+    }
+
     public UUID getId() {
         return id;
     }

@@ -700,7 +700,8 @@ class AuthControllerIntegrationTest {
         when(firebaseTokenVerifierService.verify(eq("valid-50plus-id-token")))
                 .thenReturn(new FirebaseTokenClaims("valid-50plus-uid-500", "elena.fb@beyondtime.com.br", true, "Elena FB", OAuthProvider.FACEBOOK));
 
-        SocialLoginRequest valid50PlusRequest = new SocialLoginRequest("valid-50plus-id-token", LocalDate.now().minusYears(58));
+        LocalDate expectedBirthDate = LocalDate.now(br.com.beyondtime.shared.util.AgeValidator.SERGIPE_ZONE).minusYears(58);
+        SocialLoginRequest valid50PlusRequest = new SocialLoginRequest("valid-50plus-id-token", expectedBirthDate);
 
         mockMvc.perform(post("/api/v1/auth/social")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -713,7 +714,7 @@ class AuthControllerIntegrationTest {
 
         // Verifica persistência no banco (3FN/5FN - RF04)
         User savedUser = userRepository.findByEmailIgnoreCase("elena.fb@beyondtime.com.br").orElseThrow();
-        assertThat(savedUser.getBirthDate()).isEqualTo(LocalDate.now().minusYears(58));
+        assertThat(savedUser.getBirthDate()).isEqualTo(expectedBirthDate);
 
         boolean oauthExists = oauthAccountRepository.findByProviderAndProviderUserId(OAuthProvider.FACEBOOK, "valid-50plus-uid-500").isPresent();
         assertThat(oauthExists).isTrue();

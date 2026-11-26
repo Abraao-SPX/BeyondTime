@@ -5,6 +5,8 @@ import random
 import string
 import time
 import json
+import uuid
+import re
 import hmac
 import hashlib
 import base64
@@ -45,6 +47,37 @@ MAX_ATTEMPTS_PER_MINUTE = 5
 RATE_LIMIT_WINDOW_SECONDS = 60
 PENDING_CHALLENGES: dict[str, tuple[list[str], float]] = {}  # token -> (colors, created_timestamp)
 CHALLENGE_TTL_SECONDS = 120  # Desafios expiram em 2 minutos
+
+TRUST_FORWARDED_HEADERS = os.getenv("TRUST_FORWARDED_HEADERS", "true").lower() == "true"
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
+REQUIRE_CHALLENGE_TOKEN = os.getenv("REQUIRE_CHALLENGE_TOKEN", "true").lower() == "true"
+
+
+def extrair_client_ip(request: Request) -> str:
+    """Obtém o IP real do cliente respeitando proxy reverso (Nginx/Cloudflare) quando habilitado."""
+    if TRUST_FORWARDED_HEADERS:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            first_ip = xff.split(",")[0].strip()
+            if first_ip:
+                return first_ip
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip and real_ip.strip():
+            return real_ip.strip()
+    return request.client.host if request.client else "unknown"
+
+
+def exigir_chave_interna(request: Request):
+    """Protege endpoints administrativos/LGPD (fail-closed) com header X-Internal-Api-Key."""
+    if not INTERNAL_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Endpoint administrativo protegido: defina INTERNAL_API_KEY no servidor biométrico."
+        )
+    provided = request.headers.get("x-internal-api-key", "").strip()
+    if not provided or not hmac.compare_digest(provided, INTERNAL_API_KEY):
+        raise HTTPException(status_code=403, detail="Acesso administrativo não autorizado.")
+
 
 def aplicar_rate_limit(client_ip: str):
     """Bloqueia tentativas consecutivas automatizadas por força bruta."""
@@ -92,13 +125,14 @@ def gerar_jwt_biometria(user_id: str, distance: float, threshold: float) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
     now = int(time.time())
     payload = {
+        "jti": str(uuid.uuid4()),
         "sub": user_id,
         "verified": True,
         "biometrics_model": "YuNet-SFace",
         "distance": round(distance, 4),
         "threshold": threshold,
         "iat": now,
-        "exp": now + (24 * 3600), # Válido por 24 horas
+        "exp": now + (5 * 60), # Válido estritamente por 5 minutos (Anti-Replay)
         "iss": "reconhecimento-facil-service"
     }
     header_bytes = json.dumps(header, separators=(',', ':')).encode('utf-8')
@@ -218,8 +252,9 @@ def validate_token_endpoint(token: str = Query(..., description="Token JWT biom�
     return {"valid": True, "claims": payload}
 
 @app.get("/audit/logs")
-def get_audit_logs(limit: int = Query(50, ge=1, le=200)):
-    """Retorna os registros de auditoria mais recentes para análise antifraude."""
+def get_audit_logs(request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Retorna os registros de auditoria mais recentes para análise antifraude (uso interno)."""
+    exigir_chave_interna(request)
     return {"total": len(AUDIT_LOGS), "logs": AUDIT_LOGS[-limit:]}
 
 # Inicializa detector Haar Cascade nativo do OpenCV para detecção de face no baseline (fallback seguro)
@@ -235,8 +270,11 @@ except Exception:
 # BIOMETRIA FACIAL ADAPTATIVA (YUNET + SFACE) - RECONHECIMENTO FÁCIL
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Conformidade LGPD: gravação de imagens de debug desativada por padrão em produção
+ENABLE_DEBUG_PROBE_SAVE = os.getenv("ENABLE_DEBUG_PROBE_SAVE", "false").lower() == "true"
 DEBUG_DIR = os.path.join(BASE_DIR, "debug")
-os.makedirs(DEBUG_DIR, exist_ok=True)
+if ENABLE_DEBUG_PROBE_SAVE:
+    os.makedirs(DEBUG_DIR, exist_ok=True)
 
 STORAGE_DIR = os.path.join(BASE_DIR, "storage")
 STORAGE_FACES_DIR = os.path.join(STORAGE_DIR, "faces")
@@ -735,7 +773,7 @@ def avaliar_liveness_minifasnet(
     e gerando falsos positivos de tela (prob_screen > 99%) em rostos humanos reais.
     """
     if net_minifasnet is None or frame is None or face_box is None:
-        return True, 1.0, "MiniFASNet desativado ou indisponível.", {"status": "skipped"}
+        return False, 0.0, "Modelo anti-spoofing MiniFASNet indisponível (modo fail-closed).", {"status": "unavailable"}
 
     try:
         crop_img = MiniFASNetCropper.crop(frame, face_box, scale=2.7, out_w=80, out_h=80)
@@ -775,7 +813,7 @@ def avaliar_liveness_minifasnet(
         return True, prob_live, "Pessoa real ao vivo autenticada.", detalhes
     except Exception as e:
         print(f"WARN: Erro durante inferência MiniFASNet: {e}")
-        return True, 1.0, f"Erro MiniFASNet: {e}", {"error": str(e)}
+        return False, 0.0, "Falha interna na validação anti-spoofing (modo fail-closed).", {"error": str(e)}
 
 def detectar_face_roi(frame: np.ndarray) -> tuple[int, int, int, int] | None:
     """
@@ -941,7 +979,7 @@ def validar_reflexo_delta_rgb(
     video_path: str,
     cores_esperadas: list[str],
     mock_roi: tuple[int, int, int, int] | None = None
-) -> tuple[bool, str, tuple[int, int, int, int] | None]:
+) -> tuple[bool, str, tuple[int, int, int, int] | None, int | None]:
     """
     Valida a prova de vida calculando o ganho relativo (Delta) de cada canal de cor
     em relação ao frame de iluminação inicial (baseline), resistindo a salas iluminadas.
@@ -949,12 +987,12 @@ def validar_reflexo_delta_rgb(
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        return False, "Não foi possível abrir o arquivo de vídeo gravado.", None
+        return False, "Não foi possível abrir o arquivo de vídeo gravado.", None, None
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total_frames < 6:
         cap.release()
-        return False, f"Vídeo muito curto para análise ({total_frames} frames).", None
+        return False, f"Vídeo muito curto para análise ({total_frames} frames).", None, None
 
     # 1. Detecção dinâmica do rosto e orientação correta nos primeiros frames
     face_roi = mock_roi
@@ -976,13 +1014,13 @@ def validar_reflexo_delta_rgb(
 
         if face_roi is None:
             cap.release()
-            return False, "Nenhum rosto identificado no vídeo", None
+            return False, "Nenhum rosto identificado no vídeo", None, None
 
     # 2. Leitura do frame baseline (início do vídeo com tela escura)
     frame_base_raw = frames_buffer[0] if frames_buffer else cap.read()[1]
     if frame_base_raw is None:
         cap.release()
-        return False, "Não foi possível ler o primeiro frame de iluminação base.", None
+        return False, "Não foi possível ler o primeiro frame de iluminação base.", None, rot_code
 
     frame_base = cv2.rotate(frame_base_raw, rot_code) if rot_code is not None else frame_base_raw
     b_base, g_base, r_base = extrair_cor_media_face(frame_base, face_roi)
@@ -1003,7 +1041,7 @@ def validar_reflexo_delta_rgb(
 
     total_validos = len(frames_restantes)
     if total_validos < 6:
-        return False, f"Vídeo com frames insuficientes ({total_validos} frames).", face_roi
+        return False, f"Vídeo com frames insuficientes ({total_validos} frames).", face_roi, rot_code
 
     segmento = total_validos // len(cores_esperadas)
     respostas_corretas = 0
@@ -1047,9 +1085,9 @@ def validar_reflexo_delta_rgb(
     # Em ambientes reais, validar 2 de 3 cores garante que é uma pessoa real (fotos pontuam 0/3)
     minimo_exigido = 2 if len(cores_esperadas) >= 3 else len(cores_esperadas)
     if respostas_corretas >= minimo_exigido:
-        return True, "Reflexo espectral correspondente à pele real.", face_roi
+        return True, "Reflexo espectral correspondente à pele real.", face_roi, rot_code
 
-    return False, f"Reflexo não compatível ({respostas_corretas}/{len(cores_esperadas)} cores validadas).", face_roi
+    return False, f"Reflexo não compatível ({respostas_corretas}/{len(cores_esperadas)} cores validadas).", face_roi, rot_code
 
 def calcular_distancia_usuario(probe_embedding: np.ndarray, user: dict) -> float:
     """
@@ -1091,14 +1129,21 @@ async def register_biometrics(
     Extrai o frame mais nítido com Laplaciano, detecta e alinha a face com YuNet,
     calcula o embedding de 128 dimensões com SFace e salva no SQLite e storage/faces.
     """
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = extrair_client_ip(request)
     aplicar_rate_limit(client_ip)
 
     name_clean = name.strip()
     if not name_clean:
         raise HTTPException(status_code=400, detail="O nome do usuário é obrigatório.")
 
-    uid = user_id.strip() if user_id and user_id.strip() else f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
+    if user_id and user_id.strip():
+        # Sanitização contra Path Traversal: permite apenas caracteres alfanuméricos, traço e underline
+        uid_input = user_id.strip()
+        uid = os.path.basename(uid_input)
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', uid):
+            raise HTTPException(status_code=400, detail="Identificador de usuário com formato inválido.")
+    else:
+        uid = f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
 
     # Validação do session_token e cores para prova de vida
     cores = None
@@ -1122,6 +1167,11 @@ async def register_biometrics(
                 "status": "Desafio expirado."
             }
         cores = challenge_colors  # Usa as cores oficiais vinculadas ao challenge
+    elif REQUIRE_CHALLENGE_TOKEN:
+        raise HTTPException(
+            status_code=400,
+            detail="Token de desafio (session_token) obrigatório. Solicite /challenge antes de registrar."
+        )
     elif expected_colors and expected_colors.strip():
         cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
 
@@ -1133,8 +1183,9 @@ async def register_biometrics(
             shutil.copyfileobj(video.file, f)
 
         face_roi = None
+        rot_code = None
         if cores:
-            is_live, liveness_msg, face_roi = validar_reflexo_delta_rgb(video_path, cores)
+            is_live, liveness_msg, face_roi, rot_code = validar_reflexo_delta_rgb(video_path, cores)
             if not is_live:
                 return {
                     "success": False,
@@ -1143,8 +1194,8 @@ async def register_biometrics(
                     "status": liveness_msg
                 }
 
-        # Seleciona o frame mais nítido
-        melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi)
+        # Seleciona o frame mais nítido propagando a rotação detectada
+        melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi, rot_code=rot_code)
 
         # Extrai embedding e recorte facial alinhado com YuNet + SFace
         feat, aligned_crop, upright_frame, face_data = extrair_face_completa(melhor_frame)
@@ -1192,12 +1243,18 @@ async def register_biometrics(
             "success": True
         })
 
+        # Emite token JWT biométrico também no cadastro aprovado (evita exigir 2 capturas no onboarding 50+)
+        jwt_token = gerar_jwt_biometria(uid, 0.0, 0.35)
+
         return {
             "success": True,
+            "verified": True,
+            "is_live": True,
             "user_id": uid,
             "name": name_clean,
             "photo_url": f"/faces/{photo_filename}",
             "samples_count": 1,
+            "jwt_token": jwt_token,
             "message": f"Biometria facial de {name_clean} cadastrada com sucesso! Primeira amostra âncora armazenada."
         }
 
@@ -1207,8 +1264,9 @@ async def register_biometrics(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.get("/users")
-def list_registered_users():
-    """Retorna a lista de todos os usuários cadastrados com suas contagens de amostras aprendidas."""
+def list_registered_users(request: Request):
+    """Retorna a lista de todos os usuários cadastrados (uso interno protegido)."""
+    exigir_chave_interna(request)
     users = db_listar_usuarios()
     return {
         "total": len(users),
@@ -1227,8 +1285,9 @@ def list_registered_users():
     }
 
 @app.get("/users/{user_id}/history")
-def get_user_biometric_history(user_id: str):
-    """Retorna o histórico de amostras biométricas aprendidas nos logins do usuário."""
+def get_user_biometric_history(user_id: str, request: Request):
+    """Retorna o histórico de amostras biométricas aprendidas (uso interno protegido)."""
+    exigir_chave_interna(request)
     user = db_buscar_usuario(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -1243,8 +1302,9 @@ def get_user_biometric_history(user_id: str):
     }
 
 @app.get("/faces/{filename}")
-def get_face_photo(filename: str):
-    """Serve a foto facial salva no banco de dados biométrico."""
+def get_face_photo(filename: str, request: Request):
+    """Serve a foto facial salva no banco de dados biométrico (uso interno protegido)."""
+    exigir_chave_interna(request)
     safe_name = os.path.basename(filename)
     file_path = os.path.join(STORAGE_FACES_DIR, safe_name)
     resolved = os.path.realpath(file_path)
@@ -1255,8 +1315,9 @@ def get_face_photo(filename: str):
     return FileResponse(file_path, media_type="image/jpeg")
 
 @app.delete("/users/{user_id}")
-def delete_registered_user(user_id: str):
-    """Remove um usuário, suas fotos biométricas e seu histórico de amostras."""
+def delete_registered_user(user_id: str, request: Request):
+    """Remove um usuário, suas fotos biométricas e seu histórico de amostras (RF14/LGPD)."""
+    exigir_chave_interna(request)
     user = db_buscar_usuario(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -1290,11 +1351,11 @@ async def verify_identity(
     Verificação biométrica ao vivo contra o banco de dados (1:N ou 1:1) ou foto de perfil.
     NÃO exige foto da galeria quando o banco já possui usuários cadastrados.
     """
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = extrair_client_ip(request)
     aplicar_rate_limit(client_ip)
 
     cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
-    # Validação do session_token (se fornecido)
+    # Validação do session_token
     if session_token and session_token.strip():
         challenge_data = PENDING_CHALLENGES.pop(session_token.strip(), None)
         if challenge_data is None:
@@ -1313,6 +1374,11 @@ async def verify_identity(
                 "status": "Desafio expirado."
             }
         cores = challenge_colors  # Usa as cores oficiais do challenge
+    elif REQUIRE_CHALLENGE_TOKEN:
+        raise HTTPException(
+            status_code=400,
+            detail="Token de desafio (session_token) obrigatório. Solicite /challenge antes de verificar."
+        )
 
     temp_dir = tempfile.mkdtemp()
 
@@ -1329,7 +1395,7 @@ async def verify_identity(
                 shutil.copyfileobj(profile_photo.file, f)
 
         # 2. ETAPA 1: Prova de Vida Ativa com reflexo espectral
-        is_live, liveness_msg, face_roi = validar_reflexo_delta_rgb(video_path, cores)
+        is_live, liveness_msg, face_roi, rot_code = validar_reflexo_delta_rgb(video_path, cores)
         if not is_live:
             registrar_auditoria({
                 "client_ip": client_ip,
@@ -1345,9 +1411,10 @@ async def verify_identity(
                 "status": liveness_msg
             }
 
-        # 3. ETAPA 2: Seleciona o melhor frame com maior nitidez (Laplaciano)
-        melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi)
-        cv2.imwrite(os.path.join(DEBUG_DIR, "last_probe_frame.jpg"), melhor_frame)
+        # 3. ETAPA 2: Seleciona o melhor frame com maior nitidez (Laplaciano) propagando rotação
+        melhor_frame = selecionar_melhor_frame_nitido(video_path, max_frames=40, roi_box=face_roi, rot_code=rot_code)
+        if ENABLE_DEBUG_PROBE_SAVE:
+            cv2.imwrite(os.path.join(DEBUG_DIR, "last_probe_frame.jpg"), melhor_frame)
 
         # 4. Extrai embedding biométrico do vídeo ao vivo com YuNet + SFace
         feat_probe, aligned_probe, upright_probe, face_data_probe = extrair_face_completa(melhor_frame)
@@ -1379,7 +1446,8 @@ async def verify_identity(
                 "anti_spoofing": fas_detalhes
             }
 
-        cv2.imwrite(os.path.join(DEBUG_DIR, "last_aligned_probe.jpg"), aligned_probe)
+        if ENABLE_DEBUG_PROBE_SAVE:
+            cv2.imwrite(os.path.join(DEBUG_DIR, "last_aligned_probe.jpg"), aligned_probe)
 
         verified = False
         distance = 1.0
