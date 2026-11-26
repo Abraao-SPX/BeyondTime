@@ -269,11 +269,12 @@ export function MobileFacialHandoffPage() {
   }, [biometricsBaseUrl, cameraActive, stage, triggerCountdownAndCapture]);
 
   // ============================================================================
-  // TELA CHEIA LIMPA (CONTAGEM REGRESSIVA 3s + FLASHES DE COR — SÓ O ROSTO!)
+  // TELA CHEIA LIMPA (CONTAGEM REGRESSIVA 3s + FLASHES DE COR FORTES — SÓ O ROSTO!)
   // ============================================================================
   if (stage === 'countdown' || stage === 'recording') {
+    const isColorFlash = stage === 'recording' && flashColor !== null && flashColor !== '#000000';
     const activeBg = flashColor || '#050811';
-    const ovalBorderColor = stage === 'countdown' ? '#10B981' : '#FFFFFF';
+    const ovalBorderColor = stage === 'countdown' ? '#10B981' : isColorFlash ? activeBg : '#FFFFFF';
 
     return (
       <div
@@ -283,7 +284,7 @@ export function MobileFacialHandoffPage() {
           width: '100vw',
           height: '100dvh',
           backgroundColor: activeBg,
-          transition: 'background-color 180ms ease',
+          transition: 'background-color 120ms linear',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -293,12 +294,15 @@ export function MobileFacialHandoffPage() {
       >
         <div
           style={{
-            width: 'min(76vw, 310px)',
-            height: 'min(58dvh, 410px)',
+            width: isColorFlash ? 'min(54vw, 210px)' : 'min(74vw, 300px)',
+            height: isColorFlash ? 'min(36dvh, 265px)' : 'min(56dvh, 400px)',
             borderRadius: '50%',
             overflow: 'hidden',
             border: `4px solid ${ovalBorderColor}`,
-            boxShadow: '0 0 32px rgba(0, 0, 0, 0.35)',
+            boxShadow: isColorFlash
+              ? `0 0 80px 30px ${activeBg}`
+              : '0 0 32px rgba(0, 0, 0, 0.35)',
+            transition: 'width 160ms ease, height 160ms ease',
             position: 'relative',
             backgroundColor: '#000000',
             display: 'flex',
@@ -319,6 +323,20 @@ export function MobileFacialHandoffPage() {
               display: 'block',
             }}
           />
+
+          {/* Emissão extra de cor pura sobre o oval durante o flash para maximizar luminosidade no rosto */}
+          {isColorFlash && (
+            <div
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: activeBg,
+                opacity: 0.45,
+                pointerEvents: 'none',
+              }}
+            />
+          )}
 
           {stage === 'countdown' && countdown !== null && (
             <div

@@ -405,10 +405,11 @@ export function FacialVerificationQrModal({
     return () => window.removeEventListener('keydown', handleKey);
   }, [handleClose, isBusy]);
 
-  // Tela cheia 100% limpa no celular durante contagem 3s + flashes de cor (só o rosto no oval)
+  // Tela cheia 100% limpa no celular durante contagem 3s + flashes de cor fortes (só o rosto no oval)
   if (activeMode === 'camera' && (cameraPhase === 'countdown' || cameraPhase === 'recording')) {
+    const isColorFlash = cameraPhase === 'recording' && flashColor !== null && flashColor !== '#000000';
     const activeBg = flashColor || '#050811';
-    const ovalBorderColor = cameraPhase === 'countdown' ? '#10B981' : '#FFFFFF';
+    const ovalBorderColor = cameraPhase === 'countdown' ? '#10B981' : isColorFlash ? activeBg : '#FFFFFF';
 
     return (
       <div
@@ -421,7 +422,7 @@ export function FacialVerificationQrModal({
           width: '100vw',
           height: '100dvh',
           backgroundColor: activeBg,
-          transition: 'background-color 180ms ease',
+          transition: 'background-color 120ms linear',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -431,12 +432,15 @@ export function FacialVerificationQrModal({
       >
         <div
           style={{
-            width: 'min(76vw, 310px)',
-            height: 'min(58dvh, 410px)',
+            width: isColorFlash ? 'min(54vw, 210px)' : 'min(74vw, 300px)',
+            height: isColorFlash ? 'min(36dvh, 265px)' : 'min(56dvh, 400px)',
             borderRadius: '50%',
             overflow: 'hidden',
             border: `4px solid ${ovalBorderColor}`,
-            boxShadow: '0 0 32px rgba(0, 0, 0, 0.35)',
+            boxShadow: isColorFlash
+              ? `0 0 80px 30px ${activeBg}`
+              : '0 0 32px rgba(0, 0, 0, 0.35)',
+            transition: 'width 160ms ease, height 160ms ease',
             position: 'relative',
             backgroundColor: '#000000',
             display: 'flex',
@@ -457,6 +461,19 @@ export function FacialVerificationQrModal({
               display: 'block',
             }}
           />
+
+          {isColorFlash && (
+            <div
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: activeBg,
+                opacity: 0.45,
+                pointerEvents: 'none',
+              }}
+            />
+          )}
 
           {cameraPhase === 'countdown' && countdown !== null && (
             <div

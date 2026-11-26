@@ -164,9 +164,11 @@ export async function recordAndSubmitLiveness(params: {
 
   const { mimeType, filename } = pickSupportedVideoFormat();
   const chunks: BlobPart[] = [];
-  const recorder = mimeType
-    ? new MediaRecorder(stream, { mimeType })
-    : new MediaRecorder(stream);
+  const recorderOptions: MediaRecorderOptions = { videoBitsPerSecond: 650_000 };
+  if (mimeType) {
+    recorderOptions.mimeType = mimeType;
+  }
+  const recorder = new MediaRecorder(stream, recorderOptions);
 
   recorder.ondataavailable = (ev) => {
     if (ev.data && ev.data.size > 0) chunks.push(ev.data);
