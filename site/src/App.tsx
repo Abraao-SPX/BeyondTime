@@ -205,7 +205,7 @@ export function App() {
     if (viewId === 'register' && isRegisterDirty) {
       return true;
     }
-    return contacts[viewId].trim().length > 0;
+    return false;
   }
 
   function handleNavigate(targetView: AuthViewId, triggerEl: HTMLElement) {
@@ -215,6 +215,12 @@ export function App() {
       lastTriggerRef.current = triggerEl;
       setPendingView(targetView);
       return;
+    }
+
+    // Aproveita o e-mail já digitado ao ir do Login para Recuperar Senha ou Criar Conta
+    const currentEmail = contacts[activeView].trim();
+    if (currentEmail.length > 0 && contacts[targetView].trim().length === 0) {
+      updateContact(targetView, currentEmail);
     }
 
     setActiveView(targetView);
@@ -256,6 +262,7 @@ export function App() {
     setIsLoadingProfile(true);
     setSocialDraft(draft ?? null);
     setIsEditingProfile(false);
+    setIsRegisterDirty(false);
     setAuthSession(session);
     setShowLanding(false);
     setAccountDeletedNotice(null);
@@ -278,6 +285,7 @@ export function App() {
       setServerProfile(null);
       setIsProfileMissing(false);
       setIsEditingProfile(false);
+      setIsRegisterDirty(false);
       setOrphanNotice(null);
       return;
     }
@@ -351,6 +359,7 @@ export function App() {
       setIsLoadingProfile(false);
       setIsProfileMissing(false);
       setIsEditingProfile(false);
+      setIsRegisterDirty(false);
       setOrphanNotice(null);
       setSocialDraft(null);
       setIsDeleteModalOpen(false);

@@ -380,8 +380,30 @@ function privateKeyJwkToBytes(jwk: Partial<EcJwk>): Uint8Array | null {
   return pad32(base64UrlToBytes(jwk.d));
 }
 
+const VAULT_ZK_PASSPHRASE_PREFIX = 'beyondtime-vault-v3-zk:';
+const MIN_CUSTOM_PASSPHRASE_LENGTH = 12;
+
 function getVaultPassphraseV2(session: AuthSession): string {
   return `beyondtime-vault-v2:${session.userId}:${session.email.trim().toLowerCase()}`;
+}
+
+function normalizeCustomVaultPassphrase(
+  session: AuthSession,
+  customPassphrase?: string
+): string | null {
+  const trimmed = customPassphrase?.trim();
+  if (!trimmed) return null;
+  const lowered = trimmed.toLowerCase();
+  if (
+    trimmed.length < MIN_CUSTOM_PASSPHRASE_LENGTH ||
+    lowered === session.userId.trim().toLowerCase() ||
+    lowered === session.email.trim().toLowerCase()
+  ) {
+    throw new Error(
+      'A frase-chave do cofre E2EE deve ter pelo menos 12 caracteres e não pode ser igual ao e-mail ou identificador da conta.'
+    );
+  }
+  return `${VAULT_ZK_PASSPHRASE_PREFIX}${trimmed}`;
 }
 
 async function deriveVaultWrappingKey(
@@ -397,9 +419,15 @@ async function deriveVaultWrappingKey(
   });
 }
 
-async function wrapPrivateKeyJwk(
+/**
+ * Envelopa a chave privada ECDH P-256 para armazenamento no cofre do servidor.
+ * SEC-CRIT-02: nunca utiliza o fallback legado fraco (apenas `userId`) na criação de novos cofres;
+ * aceita `customPassphrase` opcional de alta entropia (zero-knowledge) mantendo compatibilidade.
+ */
+export async function wrapPrivateKeyJwk(
   session: AuthSession,
-  privateKeyJwk: EcJwk
+  privateKeyJwk: EcJwk,
+  customPassphrase?: string
 ): Promise<{
   encryptedPrivateKey: string;
   kdfSalt: string;
@@ -408,8 +436,10 @@ async function wrapPrivateKeyJwk(
 }> {
   const salt = getSecureRandomBytes(16);
   const iv = getSecureRandomBytes(12);
+  const zkPassphrase = normalizeCustomVaultPassphrase(session, customPassphrase);
+  const effectivePassphrase = zkPassphrase ?? getVaultPassphraseV2(session);
   const wrappingKey = await deriveVaultWrappingKey(
-    getVaultPassphraseV2(session),
+    effectivePassphrase,
     salt,
     VAULT_KDF_ITERATIONS
   );
@@ -423,30 +453,61 @@ async function wrapPrivateKeyJwk(
   };
 }
 
-async function tryUnwrapPrivateKeyJwk(
+interface UnwrappedVaultResult {
+  privateKeyJwk: EcJwk;
+  needsVaultMigration: boolean;
+}
+
+export async function tryUnwrapPrivateKeyJwk(
   session: AuthSession,
   vault: {
     encryptedPrivateKey: string;
     kdfSalt: string;
     kdfIv: string;
     kdfIterations: number;
-  }
-): Promise<EcJwk | null> {
+  },
+  customPassphrase?: string
+): Promise<UnwrappedVaultResult | null> {
   const salt = base64ToBytes(vault.kdfSalt);
   const iv = base64ToBytes(vault.kdfIv);
   const cipher = base64ToBytes(vault.encryptedPrivateKey);
-  const passphrases = [getVaultPassphraseV2(session), session.userId];
 
-  for (const passphrase of passphrases) {
+  const candidates: Array<{ passphrase: string; needsVaultMigration: boolean }> = [];
+  const trimmedCustom = customPassphrase?.trim();
+  if (trimmedCustom) {
+    candidates.push({
+      passphrase: `${VAULT_ZK_PASSPHRASE_PREFIX}${trimmedCustom}`,
+      needsVaultMigration: false,
+    });
+  }
+  candidates.push({
+    passphrase: getVaultPassphraseV2(session),
+    needsVaultMigration: Boolean(trimmedCustom),
+  });
+  // Fallback somente-leitura para cofres legados v1 (derivados apenas de userId),
+  // sinalizando migração imediata para o formato endurecido.
+  candidates.push({
+    passphrase: session.userId,
+    needsVaultMigration: true,
+  });
+
+  for (const candidate of candidates) {
     try {
-      const wrappingKey = await deriveVaultWrappingKey(passphrase, salt, vault.kdfIterations);
+      const wrappingKey = await deriveVaultWrappingKey(
+        candidate.passphrase,
+        salt,
+        vault.kdfIterations
+      );
       const decrypted = gcm(wrappingKey, iv).decrypt(cipher);
       const parsed = JSON.parse(bytesToUtf8(decrypted)) as EcJwk;
       if (parsed.kty === 'EC' && parsed.crv === 'P-256' && parsed.d) {
-        return parsed;
+        return {
+          privateKeyJwk: parsed,
+          needsVaultMigration: candidate.needsVaultMigration,
+        };
       }
     } catch {
-      // só tenta v1 se v2 falhar
+      // tenta próxima derivação compatível (v3-zk -> v2 -> v1 legado somente-leitura)
     }
   }
   return null;
@@ -475,10 +536,16 @@ function isSamePublicKeyJwk(localPub: EcJwk, serverPubJson: string | null | unde
  * 2. Se divergir ou não houver chave local, restaura o cofre via GET /api/v1/chat/keys/me sem sobrescrever.
  * 3. Só gera novo par quando não há cofre restaurável, avisando em português simples se houve divergência.
  */
+export interface EnsureChatKeyPairOptions {
+  customPassphrase?: string;
+}
+
 export async function ensureUserChatKeyPair(
   session: AuthSession,
-  vaultApi: ChatKeyVaultApi
+  vaultApi: ChatKeyVaultApi,
+  options?: EnsureChatKeyPairOptions
 ): Promise<LocalChatKeyPair | null> {
+  const customPassphrase = options?.customPassphrase;
   try {
     const localStored = await readLocalStoredKeyPair(session.userId);
     const serverVault = await vaultApi.fetchMyVault(session);
@@ -496,7 +563,11 @@ export async function ensureUserChatKeyPair(
           };
         }
         if (!serverVault) {
-          const wrapped = await wrapPrivateKeyJwk(session, localStored.privateKeyJwk);
+          const wrapped = await wrapPrivateKeyJwk(
+            session,
+            localStored.privateKeyJwk,
+            customPassphrase
+          );
           const saved = await vaultApi.upsertMyVault(session, {
             publicKeyJwk: JSON.stringify(localStored.publicKeyJwk),
             ...wrapped,
@@ -516,8 +587,9 @@ export async function ensureUserChatKeyPair(
 
     // Novo dispositivo ou divergência local/servidor: restaura o cofre existente sem sobrescrever
     if (serverVault) {
-      const restoredPrivJwk = await tryUnwrapPrivateKeyJwk(session, serverVault);
-      if (restoredPrivJwk) {
+      const unwrapped = await tryUnwrapPrivateKeyJwk(session, serverVault, customPassphrase);
+      if (unwrapped) {
+        const restoredPrivJwk = unwrapped.privateKeyJwk;
         const privBytes = privateKeyJwkToBytes(restoredPrivJwk);
         if (privBytes) {
           const publicKeyJwk: EcJwk = {
@@ -527,16 +599,36 @@ export async function ensureUserChatKeyPair(
             y: restoredPrivJwk.y,
             ext: true,
           };
+          let keyVersion = serverVault.keyVersion || 1;
+          // SEC-CRIT-02: Migra automaticamente cofres legados (v1 baseado apenas em userId)
+          // ou promove para v3-zk quando uma frase-chave dedicada é fornecida.
+          if (unwrapped.needsVaultMigration) {
+            try {
+              const migratedWrapped = await wrapPrivateKeyJwk(
+                session,
+                restoredPrivJwk,
+                customPassphrase
+              );
+              const migrated = await vaultApi.upsertMyVault(session, {
+                publicKeyJwk: serverVault.publicKeyJwk || JSON.stringify(publicKeyJwk),
+                ...migratedWrapped,
+                keyAlgorithm: 'ECDH-P256',
+              });
+              keyVersion = migrated.keyVersion || keyVersion;
+            } catch {
+              // Falha temporária na migração não impede a leitura das mensagens já restauradas
+            }
+          }
           await writeLocalStoredKeyPair(session.userId, {
             publicKeyJwk,
             privateKeyJwk: restoredPrivJwk,
-            keyVersion: serverVault.keyVersion || 1,
+            keyVersion,
           });
           return {
             publicKeyJwk: serverVault.publicKeyJwk || JSON.stringify(publicKeyJwk),
             privateKeyBytes: privBytes,
             privateKeyJwk: restoredPrivJwk,
-            keyVersion: serverVault.keyVersion || 1,
+            keyVersion,
           };
         }
       }
@@ -545,7 +637,7 @@ export async function ensureUserChatKeyPair(
     // Primeiro acesso sem cofre válido (ou cofre irrecuperável): gera novo par ECDH P-256 sem depender de globalThis.crypto (AUD-006)
     const privateKeyBytes = generateHermesSafeP256PrivateKey();
     const { publicKeyJwk, privateKeyJwk } = buildJwkPairFromPrivateBytes(privateKeyBytes);
-    const wrapped = await wrapPrivateKeyJwk(session, privateKeyJwk);
+    const wrapped = await wrapPrivateKeyJwk(session, privateKeyJwk, customPassphrase);
     const saved = await vaultApi.upsertMyVault(session, {
       publicKeyJwk: JSON.stringify(publicKeyJwk),
       ...wrapped,

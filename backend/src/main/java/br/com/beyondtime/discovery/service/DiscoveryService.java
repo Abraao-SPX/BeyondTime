@@ -33,18 +33,24 @@ import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import br.com.beyondtime.shared.util.AgeValidator;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.ConnectionCallback;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.Period;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -79,6 +85,8 @@ public class DiscoveryService {
     private final ChatMatchRepository matchRepository;
     private final ConversationRepository conversationRepository;
     private final AvatarService avatarService;
+    private final JdbcTemplate jdbcTemplate;
+    private volatile Boolean postgreSqlCached;
 
     public DiscoveryService(
             ProfileRepository profileRepository,
@@ -95,7 +103,8 @@ public class DiscoveryService {
             ProfileInteractionRepository interactionRepository,
             ChatMatchRepository matchRepository,
             ConversationRepository conversationRepository,
-            AvatarService avatarService) {
+            AvatarService avatarService,
+            JdbcTemplate jdbcTemplate) {
         this.profileRepository = profileRepository;
         this.userRepository = userRepository;
         this.profileHobbyRepository = profileHobbyRepository;
@@ -111,6 +120,7 @@ public class DiscoveryService {
         this.matchRepository = matchRepository;
         this.conversationRepository = conversationRepository;
         this.avatarService = avatarService;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional(readOnly = true)
@@ -161,7 +171,7 @@ public class DiscoveryService {
         Set<Integer> requiredHobbyIds = resolveFilterHobbyIds(hobbyFilters, hobbyById);
         boolean requireVerified = Boolean.TRUE.equals(onlyVerified);
 
-        LocalDate maxBirthDate = LocalDate.now().minusYears(50);
+        LocalDate maxBirthDate = LocalDate.now(AgeValidator.SERGIPE_ZONE).minusYears(50);
         List<Profile> candidateProfiles = profileRepository.findDiscoveryCandidates(
                 UserStatus.ACTIVE,
                 maxBirthDate,
@@ -234,17 +244,23 @@ public class DiscoveryService {
     public MatchInteractionResponse likeUser(UUID currentUserId, MatchInteractionRequest request) {
         UUID targetUserId = request.targetUserId();
         validateInteractionEligibility(currentUserId, targetUserId);
+        enforceDefensiveModalConfirmation(request);
 
-        boolean confirmedViaModal = request.confirmedViaModal() == null || request.confirmedViaModal();
+        UUID userA = currentUserId.toString().compareTo(targetUserId.toString()) < 0 ? currentUserId : targetUserId;
+        UUID userB = currentUserId.toString().compareTo(targetUserId.toString()) < 0 ? targetUserId : currentUserId;
+        // SEC-ALTA-06: lock transacional determinístico por par ordenado para eliminar race condition de lost mutual match
+        acquirePairTransactionLock(userA, userB);
+
+        boolean confirmedViaModal = true;
         AffinitySummary affinitySummary = computeAffinityBetweenUsers(currentUserId, targetUserId);
 
         ProfileInteraction interaction = interactionRepository
                 .findByFromUserIdAndToUserId(currentUserId, targetUserId)
                 .map(existing -> {
                     existing.updateAction("LIKE", confirmedViaModal, affinitySummary.affinityDecimal());
-                    return interactionRepository.save(existing);
+                    return interactionRepository.saveAndFlush(existing);
                 })
-                .orElseGet(() -> interactionRepository.save(new ProfileInteraction(
+                .orElseGet(() -> interactionRepository.saveAndFlush(new ProfileInteraction(
                         currentUserId,
                         targetUserId,
                         "LIKE",
@@ -268,9 +284,6 @@ public class DiscoveryService {
                     null
             );
         }
-
-        UUID userA = currentUserId.toString().compareTo(targetUserId.toString()) < 0 ? currentUserId : targetUserId;
-        UUID userB = currentUserId.toString().compareTo(targetUserId.toString()) < 0 ? targetUserId : currentUserId;
 
         short commonCount = (short) Math.min(affinitySummary.sharedHobbyNames().size(), Short.MAX_VALUE);
         ChatMatch match = findOrCreateActiveMatch(userA, userB, affinitySummary.affinityDecimal(), commonCount);
@@ -329,8 +342,9 @@ public class DiscoveryService {
     public MatchInteractionResponse passUser(UUID currentUserId, MatchInteractionRequest request) {
         UUID targetUserId = request.targetUserId();
         validateInteractionEligibility(currentUserId, targetUserId);
+        enforceDefensiveModalConfirmation(request);
 
-        boolean confirmedViaModal = request.confirmedViaModal() == null || request.confirmedViaModal();
+        boolean confirmedViaModal = true;
         AffinitySummary affinitySummary = computeAffinityBetweenUsers(currentUserId, targetUserId);
 
         interactionRepository.findByFromUserIdAndToUserId(currentUserId, targetUserId)
@@ -626,7 +640,7 @@ public class DiscoveryService {
                 candidate.age(),
                 candidate.cityName(),
                 cityWithState,
-                candidate.neighborhoodName(),
+                null, // SEC-MED-04: minimização LGPD no feed pré-match (oculta neighborhood, mantém apenas city)
                 locationLabel,
                 candidate.goal(),
                 profile.getBio(),
@@ -702,11 +716,53 @@ public class DiscoveryService {
         return Math.round(EARTH_RADIUS_KM * c * 10.0) / 10.0;
     }
 
+    private void enforceDefensiveModalConfirmation(MatchInteractionRequest request) {
+        if (Boolean.FALSE.equals(request.confirmedViaModal())) {
+            throw new BusinessException(
+                    "DEFENSIVE_CONFIRMATION_REQUIRED",
+                    "Confirme esta ação no modal de segurança (RF-06) para prosseguir.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+    }
+
+    private void acquirePairTransactionLock(UUID userA, UUID userB) {
+        if (jdbcTemplate == null || !isPostgreSql()) {
+            return;
+        }
+        String pairKey = userA.toString() + ":" + userB.toString();
+        long lockKey = computeDeterministicLockKey(pairKey);
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(?)", rs -> null, lockKey);
+    }
+
+    private boolean isPostgreSql() {
+        Boolean cached = postgreSqlCached;
+        if (cached != null) {
+            return cached;
+        }
+        boolean detected = Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) conn -> {
+            String productName = conn.getMetaData().getDatabaseProductName();
+            return productName != null && productName.toLowerCase(Locale.ROOT).contains("postgresql");
+        }));
+        postgreSqlCached = detected;
+        return detected;
+    }
+
+    private long computeDeterministicLockKey(String pairKey) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(pairKey.getBytes(StandardCharsets.UTF_8));
+            return ByteBuffer.wrap(digest).getLong();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 indisponível na JVM.", ex);
+        }
+    }
+
     private int calculateAge(LocalDate birthDate) {
         if (birthDate == null) {
-            return 50;
+            return 0;
         }
-        return Period.between(birthDate, LocalDate.now(ZoneId.of("America/Maceio"))).getYears();
+        return Period.between(birthDate, LocalDate.now(AgeValidator.SERGIPE_ZONE)).getYears();
     }
 
     private String normalizeCityFilter(String cityFilter) {

@@ -30,14 +30,15 @@ services:
       dockerfile: Dockerfile
     container_name: beyondtime-reconhecimento-facial
     ports:
-      - "${BIOMETRIA_PORT:-8000}:8000"
+      - "127.0.0.1:${BIOMETRIA_PORT:-8000}:8000"
     restart: unless-stopped
     environment:
       # Chave HS256 do token biométrico (validado pelo backend Java para o Selo 50+).
       # Se vazia, o serviço gera uma chave efêmera (só serve para testes locais).
       JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-}
       INTERNAL_API_KEY: ${BIOMETRIA_INTERNAL_API_KEY:-}
-      CORS_ALLOWED_ORIGINS: ${BIOMETRIA_CORS_ALLOWED_ORIGINS:-*}
+      CORS_ALLOWED_ORIGINS: ${BIOMETRIA_CORS_ALLOWED_ORIGINS:-https://bytime.me,https://www.bytime.me,http://localhost:8085,http://localhost:5173}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
     volumes:
       # Embeddings (SQLite) e recortes faciais persistidos fora do container
       - biometria_data:/app/storage
@@ -52,6 +53,9 @@ services:
     container_name: beyondtime-ia
     ports:
       - "127.0.0.1:8001:8000"
+    environment:
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      ANTIFRAUD_INTERNAL_TOKEN: ${ANTIFRAUD_INTERNAL_TOKEN:-}
     restart: unless-stopped
 
   # ==========================================
@@ -63,7 +67,7 @@ services:
       dockerfile: Dockerfile
     container_name: beyondtime-backend
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-beyondtime_db}
@@ -72,6 +76,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env}
       BIOMETRIA_JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-}
       LOGIN_TRUST_FORWARDED_HEADERS: "${LOGIN_TRUST_FORWARDED_HEADERS:-true}"
+      LOGIN_TRUSTED_PROXIES: "${LOGIN_TRUSTED_PROXIES:-127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}"
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
       SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
@@ -82,6 +87,7 @@ services:
       AVATARS_UPLOAD_DIR: /app/uploads/avatars
       CHAT_MEDIA_UPLOAD_DIR: /app/uploads/chat-media
       ANTIFRAUD_API_URL: http://anjo-da-guarda:8000
+      ANTIFRAUD_INTERNAL_TOKEN: ${ANTIFRAUD_INTERNAL_TOKEN:-}
       CHAT_VAULT_KEK: ${CHAT_VAULT_KEK:-}
       BIOMETRIA_API_URL: http://reconhecimento-facial:8000
       BIOMETRIA_INTERNAL_API_KEY: ${BIOMETRIA_INTERNAL_API_KEY:-}

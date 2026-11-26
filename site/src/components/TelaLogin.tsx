@@ -73,6 +73,7 @@ export function TelaLogin({
       setLockCountdownSeconds((prev) => {
         if (prev <= 1) {
           window.clearInterval(timer);
+          setFailedAttempts(0);
           return 0;
         }
         return prev - 1;
@@ -192,7 +193,7 @@ export function TelaLogin({
       return;
     }
 
-    const trimmedEmail = sanitizeTextInput(contact);
+    const trimmedEmail = sanitizeTextInput(contact).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail)) {
       setErrorMessage('Informe o e-mail cadastrado para entrar.');
       inputRef.current?.focus();
@@ -212,30 +213,32 @@ export function TelaLogin({
       setFeedbackMessage('Acesso confirmado. Carregando sua conta...');
       onAuthSuccess(session);
     } catch (err) {
-      const nextAttempts = failedAttempts + 1;
-      setFailedAttempts(nextAttempts);
-
       if (err instanceof ApiError) {
-        if (err.status === 429 || nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+        if (err.status === 429) {
           setLockCountdownSeconds(60);
-        }
-        const remaining = Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts);
-        if (err.status === 401 && remaining > 0) {
-          setErrorMessage(
-            `${err.message} (Tentativa ${nextAttempts} de ${MAX_LOGIN_ATTEMPTS} — restam ${remaining}).`
-          );
+          setErrorMessage(err.message);
+        } else if (err.status === 401) {
+          const nextAttempts = failedAttempts + 1;
+          setFailedAttempts(nextAttempts);
+          if (nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+            setLockCountdownSeconds(60);
+          }
+          const remaining = Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts);
+          if (remaining > 0) {
+            setErrorMessage(
+              `${err.message} (Tentativa ${nextAttempts} de ${MAX_LOGIN_ATTEMPTS} — restam ${remaining}).`
+            );
+          } else {
+            setErrorMessage(
+              `Limite de ${MAX_LOGIN_ATTEMPTS} tentativas excedido. Aguarde 60 segundos ou use "Esqueceu a senha?".`
+            );
+          }
         } else {
+          // Erro de rede (status 0) ou erro do servidor (5xx): não contabiliza tentativa falha nem bloqueia o botão
           setErrorMessage(err.message);
         }
       } else {
-        if (nextAttempts >= MAX_LOGIN_ATTEMPTS) {
-          setLockCountdownSeconds(60);
-          setErrorMessage(
-            `Limite de ${MAX_LOGIN_ATTEMPTS} tentativas excedido. Aguarde 60 segundos antes de tentar novamente.`
-          );
-        } else {
-          setErrorMessage('Não foi possível entrar agora. Tente novamente.');
-        }
+        setErrorMessage('Não foi possível entrar agora. Verifique sua conexão e tente novamente.');
       }
     } finally {
       setIsSubmitting(false);
@@ -251,7 +254,7 @@ export function TelaLogin({
           Entrar no BeyondTime
         </h1>
         <p className="auth-card__subtitle">
-          Bem-vindo de volta! Conecte-se para encontrar pessoas e grupos com afinidade em Sergipe.
+          Entre com Google, Facebook ou seu e-mail para acessar ou criar sua conta 50+ em Sergipe.
         </p>
       </header>
 
@@ -286,6 +289,7 @@ export function TelaLogin({
             value={contact}
             onChange={(event) => {
               onContactChange(event.target.value);
+              if (failedAttempts > 0) setFailedAttempts(0);
               if (errorMessage) setErrorMessage(null);
             }}
             aria-invalid={errorMessage !== null ? 'true' : undefined}

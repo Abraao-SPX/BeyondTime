@@ -163,6 +163,39 @@ export interface ChatMediaUploadResponseDto {
   sizeBytes: number;
 }
 
+export interface AntifraudCheckResponseDto {
+  alert: boolean;
+  riskLabel: string;
+  confidencePercent: number;
+  educationalTitle: string | null;
+  educationalMessage: string | null;
+  strikeCountInConversation?: number;
+  escalatedWarning?: boolean;
+  senderPreventivelySuspended?: boolean;
+  auditTicketCode?: string | null;
+}
+
+export interface CreateModerationReportDto {
+  reportedUserId: string;
+  conversationId?: string | null;
+  reasonCode: string;
+  description?: string | null;
+  confirmedViaModal?: boolean;
+  alsoBlock?: boolean;
+}
+
+export interface ModerationReportResponseDto {
+  reportId: string;
+  auditTicketCode: string;
+  reportedUserId: string;
+  conversationId?: string | null;
+  reasonCode: string;
+  preventiveFreezeApplied: boolean;
+  blockedApplied: boolean;
+  status: string;
+  createdAt: string;
+}
+
 // ==========================================================================
 // Helper HTTP autenticado (unificado com apiClient.ts — AUD-019 / AUD-020)
 // ==========================================================================
@@ -518,4 +551,54 @@ export async function downloadEncryptedChatMedia(
   }
 
   return new Uint8Array(await response.arrayBuffer());
+}
+
+// ==========================================================================
+// Endpoint RF-12 / RF-07 (Proxy Stateless ML Anti-Fraude — Anjo da Guarda)
+// ==========================================================================
+
+export async function checkChatMessageAntifraud(
+  session: AuthSession,
+  text: string,
+  context?: { conversationId?: string; messageId?: string }
+): Promise<AntifraudCheckResponseDto | null> {
+  const normalized = text.trim();
+  if (normalized.length < 6) {
+    return null;
+  }
+
+  try {
+    return await authedRequest<AntifraudCheckResponseDto>(session, '/api/v1/chat/antifraud/check', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: normalized.slice(0, 4000),
+        conversationId: context?.conversationId ?? null,
+        messageId: context?.messageId ?? null,
+      }),
+    });
+  } catch {
+    // Análise anti-fraude é assíncrona e resiliente: nunca trava nem interrompe o chat
+    return null;
+  }
+}
+
+// ==========================================================================
+// Endpoints RF-12 (Denúncia Rápida e Congelamento Cautelar)
+// ==========================================================================
+
+export async function createModerationReport(
+  session: AuthSession,
+  payload: CreateModerationReportDto
+): Promise<ModerationReportResponseDto> {
+  return authedRequest<ModerationReportResponseDto>(session, '/api/v1/moderation/reports', {
+    method: 'POST',
+    body: JSON.stringify({
+      reportedUserId: payload.reportedUserId,
+      conversationId: payload.conversationId ?? null,
+      reasonCode: payload.reasonCode,
+      description: payload.description?.trim() || null,
+      confirmedViaModal: payload.confirmedViaModal ?? true,
+      alsoBlock: payload.alsoBlock ?? true,
+    }),
+  });
 }

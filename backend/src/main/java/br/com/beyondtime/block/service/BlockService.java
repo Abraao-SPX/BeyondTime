@@ -99,7 +99,14 @@ public class BlockService {
         final String finalReason = (sanitizedReason != null && !sanitizedReason.isBlank())
                 ? sanitizedReason
                 : null;
-        final boolean confirmedViaModal = request.confirmedViaModal() == null || request.confirmedViaModal();
+        if (Boolean.FALSE.equals(request.confirmedViaModal())) {
+            throw new BusinessException(
+                    "DEFENSIVE_CONFIRMATION_REQUIRED",
+                    "Confirme o bloqueio no modal de segurança (RF-06) para prosseguir.",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+        final boolean confirmedViaModal = true;
 
         ChatUserBlock block = blockRepository.findByBlockerUserIdAndBlockedUserId(blockerUserId, blockedUserId)
                 .map(existing -> {

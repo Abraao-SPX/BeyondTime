@@ -10,7 +10,9 @@ import {
   SERGIPE_DISCOVERY_CATALOG,
 } from '../../services/wave2Service';
 import {
+  checkChatMessageAntifraud,
   createBlockContact,
+  createModerationReport,
   deleteBlockContact,
   downloadEncryptedChatMedia,
   fetchBlockedContacts,
@@ -48,6 +50,7 @@ import type {
   BlockedContact,
   ChatMessage,
   ChatThread,
+  ModerationReasonCode,
   OutgoingMessagePayload,
   ScoredCandidate,
   Wave2State,
@@ -57,6 +60,7 @@ import { BlockContactModalRF08 } from './BlockContactModalRF08';
 import { BlockedContactsPanelRF08 } from './BlockedContactsPanelRF08';
 import { FacialVerificationQrModal } from './FacialVerificationQrModal';
 import { MatchAffinityFeedRF05 } from './MatchAffinityFeedRF05';
+import { ReportContactModalRF12 } from './ReportContactModalRF12';
 import { SimplifiedChatRF07 } from './SimplifiedChatRF07';
 
 interface AuthenticatedWorkspaceProps {
@@ -102,6 +106,23 @@ function parseDurationLabelToSeconds(label?: string): number {
 
 type PendingBlockTarget = Pick<BlockedContact, 'id' | 'fullName' | 'age' | 'city' | 'avatarUrl'>;
 
+interface PendingReportTarget extends PendingBlockTarget {
+  conversationId?: string;
+  defaultReasonCode: ModerationReasonCode;
+}
+
+function mapRiskLabelToDefaultReason(riskLabel?: string): ModerationReasonCode {
+  switch ((riskLabel || '').toUpperCase()) {
+    case 'AMEACA_EXTORSAO':
+      return 'HARASSMENT';
+    case 'LINK_MALICIOSO':
+    case 'MENSAGEM_SUSPEITA':
+      return 'SPAM';
+    default:
+      return 'MONEY_OR_PIX_REQUEST';
+  }
+}
+
 export function AuthenticatedWorkspace({
   authSession,
   serverProfile,
@@ -119,7 +140,7 @@ export function AuthenticatedWorkspace({
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('discover');
   const [wave2State, setWave2State] = useState<Wave2State>(() =>
-    loadWave2State(authSession.email)
+    loadWave2State(authSession.userId)
   );
   const [serverCandidates, setServerCandidates] = useState<ScoredCandidate[]>([]);
   const [serverThreads, setServerThreads] = useState<ChatThread[]>([]);
@@ -131,6 +152,7 @@ export function AuthenticatedWorkspace({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
+  const [pendingReport, setPendingReport] = useState<PendingReportTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
   const [chatKeyUnavailable, setChatKeyUnavailable] = useState(false);
   const [isRetryingChatKey, setIsRetryingChatKey] = useState(false);
@@ -140,6 +162,7 @@ export function AuthenticatedWorkspace({
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
   const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
+  const checkedAntifraudIdsRef = useRef<Set<string>>(new Set());
   const createdObjectUrlsRef = useRef<Set<string>>(new Set());
   const prevFiltersRef = useRef<{ city: string; goal: ConnectionGoal | 'Todos' }>({
     city: filterCity,
@@ -219,14 +242,63 @@ export function AuthenticatedWorkspace({
     [authSession]
   );
 
+  const analyzeIncomingMessageAsync = useCallback(
+    (conversationId: string, message: ChatMessage) => {
+      if (isPreviewMode || message.sender !== 'them') return;
+      const trimmed = message.text?.trim() ?? '';
+      if (trimmed.length < 6 || trimmed.startsWith('[Mensagem protegida')) return;
+      if (checkedAntifraudIdsRef.current.has(message.id)) return;
+      checkedAntifraudIdsRef.current.add(message.id);
+
+      void checkChatMessageAntifraud(authSession, trimmed, {
+        conversationId,
+        messageId: message.id,
+      }).then((result) => {
+        if (!result?.alert) return;
+        const educationalTitle =
+          result.educationalTitle || 'Dica de Segurança do Anjo da Guarda';
+        const educationalMessage =
+          result.educationalMessage ||
+          'Atenção: esta mensagem contém sinais que merecem cautela. Proteja seus dados pessoais e financeiros.';
+
+        setServerThreads((prev) =>
+          prev.map((thread) => {
+            if (thread.conversationId !== conversationId) return thread;
+            return {
+              ...thread,
+              messages: thread.messages.map((item) =>
+                item.id === message.id
+                  ? {
+                      ...item,
+                      antifraudAlert: {
+                        riskLabel: result.riskLabel,
+                        confidencePercent: result.confidencePercent,
+                        educationalTitle,
+                        educationalMessage,
+                        strikeCountInConversation: result.strikeCountInConversation,
+                        escalatedWarning: result.escalatedWarning,
+                        senderPreventivelySuspended: result.senderPreventivelySuspended,
+                        auditTicketCode: result.auditTicketCode,
+                      },
+                    }
+                  : item
+              ),
+            };
+          })
+        );
+      });
+    },
+    [authSession, isPreviewMode]
+  );
+
   // O selo só é exibido quando o backend confirma a verificação (RF-11).
   const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true || verifiedNow;
 
   useEffect(() => {
     if (isPreviewMode) {
-      saveWave2State(authSession.email, wave2State);
+      saveWave2State(authSession.userId, wave2State);
     }
-  }, [authSession.email, isPreviewMode, wave2State]);
+  }, [authSession.userId, isPreviewMode, wave2State]);
 
   const mapConversationDtoToThread = useCallback(
     async (dto: ConversationSummaryDto): Promise<ChatThread> => {
@@ -401,6 +473,10 @@ export function AuthenticatedWorkspace({
                 };
               })
             );
+
+            if (!isFromMe) {
+              analyzeIncomingMessageAsync(incoming.conversationId, uiMsg);
+            }
           })();
         },
         onReadReceipt: (receipt) => {
@@ -434,7 +510,14 @@ export function AuthenticatedWorkspace({
       stompRef.current?.disconnect();
       stompRef.current = null;
     };
-  }, [authSession, hydrateRemoteMessage, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
+  }, [
+    analyzeIncomingMessageAsync,
+    authSession,
+    hydrateRemoteMessage,
+    isPreviewMode,
+    mapConversationDtoToThread,
+    reloadRemoteConversations,
+  ]);
 
   const handleRetryChatKey = useCallback(async () => {
     if (isPreviewMode || isRetryingChatKey) return;
@@ -542,9 +625,15 @@ export function AuthenticatedWorkspace({
         setServerThreads((prev) =>
           prev.map((t) => {
             if (t.conversationId !== convId) return t;
+            const existingAlertById = new Map(
+              t.messages
+                .filter((msg) => msg.antifraudAlert)
+                .map((msg) => [msg.id, msg.antifraudAlert])
+            );
             const byId = new Map<string, ChatMessage>();
             for (const msg of decrypted) {
-              byId.set(msg.id, msg);
+              const preservedAlert = existingAlertById.get(msg.id);
+              byId.set(msg.id, preservedAlert ? { ...msg, antifraudAlert: preservedAlert } : msg);
             }
             for (const msg of t.messages) {
               if (!byId.has(msg.id)) {
@@ -554,6 +643,12 @@ export function AuthenticatedWorkspace({
             return { ...t, messages: Array.from(byId.values()) };
           })
         );
+
+        // Analisa de forma assíncrona as mensagens recebidas mais recentes ao abrir a conversa
+        const recentIncoming = decrypted.filter((m) => m.sender === 'them').slice(-15);
+        for (const incomingMsg of recentIncoming) {
+          analyzeIncomingMessageAsync(convId, incomingMsg);
+        }
       } catch {
         loadedHistoryIdsRef.current.delete(convId);
       }
@@ -562,7 +657,15 @@ export function AuthenticatedWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, activeThreadId, authSession, hydrateRemoteMessage, isPreviewMode, visibleThreads]);
+  }, [
+    activeTab,
+    activeThreadId,
+    analyzeIncomingMessageAsync,
+    authSession,
+    hydrateRemoteMessage,
+    isPreviewMode,
+    visibleThreads,
+  ]);
 
   // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
   // (inclusive quando outra conversa assume o foco após um bloqueio em RF-08).
@@ -895,6 +998,62 @@ export function AuthenticatedWorkspace({
     })();
   }
 
+  function handleConfirmReport(reasonCode: ModerationReasonCode, description?: string) {
+    if (!pendingReport) return;
+    const target = pendingReport;
+    setPendingReport(null);
+
+    if (isPreviewMode) {
+      const blockedEntry = createBlockedEntry(target, description || 'Denúncia registrada');
+      setWave2State((prev) => ({
+        ...prev,
+        blockedContacts: prev.blockedContacts.some((b) => b.id === blockedEntry.id)
+          ? prev.blockedContacts
+          : [blockedEntry, ...prev.blockedContacts],
+        threads: prev.threads.filter((t) => t.contactId !== blockedEntry.id),
+      }));
+      if (activeThreadId === target.id) setActiveThreadId(null);
+      if (recentMatch?.id === target.id) setRecentMatch(null);
+      setSafetyFeedback(
+        `Denúncia contra ${target.fullName} registrada com congelamento cautelar e bloqueio imediato.`
+      );
+      return;
+    }
+
+    void (async () => {
+      try {
+        const report = await createModerationReport(authSession, {
+          reportedUserId: target.id,
+          conversationId: target.conversationId ?? null,
+          reasonCode,
+          description: description ?? null,
+          confirmedViaModal: true,
+          alsoBlock: true,
+        });
+        const blockedEntry = createBlockedEntry(
+          target,
+          `Denúncia registrada (${report.auditTicketCode})`
+        );
+        setServerBlocked((prev) =>
+          prev.some((b) => b.id === blockedEntry.id) ? prev : [blockedEntry, ...prev]
+        );
+        setServerThreads((prev) => prev.filter((t) => t.contactId !== target.id));
+        setServerCandidates((prev) => prev.filter((c) => c.id !== target.id));
+        if (activeThreadId === target.id) setActiveThreadId(null);
+        if (recentMatch?.id === target.id) setRecentMatch(null);
+        setSafetyFeedback(
+          `Denúncia registrada (protocolo ${report.auditTicketCode}). A conta de ${target.fullName} entrou em congelamento cautelar para auditoria e foi ocultada das suas conversas.`
+        );
+      } catch (err) {
+        setSafetyFeedback(
+          err instanceof ApiError
+            ? err.message
+            : 'Não foi possível registrar sua denúncia agora. Tente novamente em instantes.'
+        );
+      }
+    })();
+  }
+
   function handleUnblockContact(contactId: string) {
     if (isPreviewMode) {
       const target = wave2State.blockedContacts.find((b) => b.id === contactId);
@@ -1088,6 +1247,17 @@ export function AuthenticatedWorkspace({
               age: thread.contactAge,
               city: thread.contactCity,
               avatarUrl: thread.contactAvatarUrl,
+            })
+          }
+          onRequestReport={(thread: ChatThread, suggestedRiskLabel?: string) =>
+            setPendingReport({
+              id: thread.contactId,
+              fullName: thread.contactName,
+              age: thread.contactAge,
+              city: thread.contactCity,
+              avatarUrl: thread.contactAvatarUrl,
+              conversationId: thread.conversationId,
+              defaultReasonCode: mapRiskLabelToDefaultReason(suggestedRiskLabel),
             })
           }
           onGoToDiscover={() => setActiveTab('discover')}
@@ -1324,6 +1494,15 @@ export function AuthenticatedWorkspace({
           contactName={pendingBlock.fullName}
           onConfirm={handleConfirmBlock}
           onCancel={() => setPendingBlock(null)}
+        />
+      )}
+
+      {pendingReport && (
+        <ReportContactModalRF12
+          contactName={pendingReport.fullName}
+          defaultReasonCode={pendingReport.defaultReasonCode}
+          onConfirm={handleConfirmReport}
+          onCancel={() => setPendingReport(null)}
         />
       )}
 

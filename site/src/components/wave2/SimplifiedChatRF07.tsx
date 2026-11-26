@@ -14,6 +14,7 @@ interface SimplifiedChatRF07Props {
     payload: string | OutgoingMessagePayload
   ) => Promise<boolean> | boolean | void;
   onRequestBlock: (thread: ChatThread) => void;
+  onRequestReport: (thread: ChatThread, suggestedRiskLabel?: string) => void;
   onGoToDiscover: () => void;
 }
 
@@ -107,6 +108,7 @@ export function SimplifiedChatRF07({
   onSelectThread,
   onSendMessage,
   onRequestBlock,
+  onRequestReport,
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
   const [draftByContact, setDraftByContact] = useState<Record<string, string>>({});
@@ -122,6 +124,7 @@ export function SimplifiedChatRF07({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [mediaNotice, setMediaNotice] = useState<string | null>(null);
   const [unplayableAudioIds, setUnplayableAudioIds] = useState<Record<string, boolean>>({});
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<Record<string, boolean>>({});
   const sendingBlocked = isSending || isSendingDisabled;
 
   const isMountedRef = useRef(true);
@@ -575,13 +578,22 @@ export function SimplifiedChatRF07({
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="btn btn--secondary chat-block-btn"
-                onClick={() => onRequestBlock(activeThread)}
-              >
-                Bloquear contato
-              </button>
+              <div className="wa-main__header-actions">
+                <button
+                  type="button"
+                  className="btn btn--secondary chat-block-btn"
+                  onClick={() => onRequestReport(activeThread)}
+                >
+                  Denunciar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary chat-block-btn"
+                  onClick={() => onRequestBlock(activeThread)}
+                >
+                  Bloquear contato
+                </button>
+              </div>
             </header>
 
             <div className="wa-safety-bar" role="note">
@@ -623,48 +635,126 @@ export function SimplifiedChatRF07({
                   </div>
                 </div>
               ) : (
-                activeThread.messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`chat-bubble-row chat-bubble-row--${msg.sender}`}
-                  >
-                    <div className={`chat-bubble chat-bubble--${msg.sender}`}>
-                      {msg.imageUrl && (
-                        <img
-                          src={msg.imageUrl}
-                          alt={msg.imageName || 'Foto enviada na conversa'}
-                          className="chat-bubble__image"
-                        />
-                      )}
-                      {msg.audioUrl && (
-                        <div className="chat-bubble__audio-wrap">
-                          <span className="chat-bubble__audio-label">
-                            Mensagem de voz ({msg.audioDurationLabel || '00:01'})
-                          </span>
-                          {unplayableAudioIds[msg.id] || !canBrowserPlayAudioUrl(msg.audioUrl) ? (
-                            <p className="chat-bubble__text">
-                              Este áudio não pode ser tocado neste navegador.
-                            </p>
-                          ) : (
-                            <audio
-                              controls
-                              src={msg.audioUrl}
-                              className="chat-bubble__audio"
-                              aria-label="Reproduzir mensagem de voz"
-                              onError={() =>
-                                setUnplayableAudioIds((prev) => ({ ...prev, [msg.id]: true }))
-                              }
+                activeThread.messages.map((msg) => {
+                  const showAntifraudCard =
+                    msg.sender === 'them' &&
+                    Boolean(msg.antifraudAlert) &&
+                    !dismissedAlertIds[msg.id];
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`chat-bubble-row chat-bubble-row--${msg.sender}`}
+                    >
+                      <div className="chat-message-group">
+                        <div className={`chat-bubble chat-bubble--${msg.sender}`}>
+                          {msg.imageUrl && (
+                            <img
+                              src={msg.imageUrl}
+                              alt={msg.imageName || 'Foto enviada na conversa'}
+                              className="chat-bubble__image"
                             />
                           )}
+                          {msg.audioUrl && (
+                            <div className="chat-bubble__audio-wrap">
+                              <span className="chat-bubble__audio-label">
+                                Mensagem de voz ({msg.audioDurationLabel || '00:01'})
+                              </span>
+                              {unplayableAudioIds[msg.id] || !canBrowserPlayAudioUrl(msg.audioUrl) ? (
+                                <p className="chat-bubble__text">
+                                  Este áudio não pode ser tocado neste navegador.
+                                </p>
+                              ) : (
+                                <audio
+                                  controls
+                                  src={msg.audioUrl}
+                                  className="chat-bubble__audio"
+                                  aria-label="Reproduzir mensagem de voz"
+                                  onError={() =>
+                                    setUnplayableAudioIds((prev) => ({ ...prev, [msg.id]: true }))
+                                  }
+                                />
+                              )}
+                            </div>
+                          )}
+                          {msg.text && <p className="chat-bubble__text">{msg.text}</p>}
+                          <span className="chat-bubble__time">
+                            {msg.sentAt} {msg.sender === 'me' ? '• Enviada' : ''}
+                          </span>
                         </div>
-                      )}
-                      {msg.text && <p className="chat-bubble__text">{msg.text}</p>}
-                      <span className="chat-bubble__time">
-                        {msg.sentAt} {msg.sender === 'me' ? '• Enviada' : ''}
-                      </span>
+
+                        {showAntifraudCard && msg.antifraudAlert && (
+                          <aside
+                            className={`chat-antifraud-card${
+                              msg.antifraudAlert.escalatedWarning ||
+                              msg.antifraudAlert.senderPreventivelySuspended
+                                ? ' chat-antifraud-card--escalated'
+                                : ''
+                            }`}
+                            role="note"
+                            aria-label="Dica de Segurança do Anjo da Guarda"
+                          >
+                            <div className="chat-antifraud-card__header">
+                              <svg
+                                viewBox="0 0 24 24"
+                                width="22"
+                                height="22"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden="true"
+                              >
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                <path d="M12 8v4" />
+                                <path d="M12 16h.01" />
+                              </svg>
+                              <strong className="chat-antifraud-card__title">
+                                {msg.antifraudAlert.educationalTitle}
+                              </strong>
+                            </div>
+                            <p className="chat-antifraud-card__body">
+                              {msg.antifraudAlert.educationalMessage}
+                            </p>
+                            {msg.antifraudAlert.auditTicketCode && (
+                              <p className="chat-antifraud-card__meta">
+                                Protocolo de auditoria: <strong>{msg.antifraudAlert.auditTicketCode}</strong>
+                              </p>
+                            )}
+                            <div className="chat-antifraud-card__actions">
+                              <button
+                                type="button"
+                                className="btn btn--secondary chat-antifraud-card__btn"
+                                onClick={() =>
+                                  setDismissedAlertIds((prev) => ({ ...prev, [msg.id]: true }))
+                                }
+                              >
+                                Entendi
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--danger chat-antifraud-card__btn"
+                                onClick={() =>
+                                  onRequestReport(activeThread, msg.antifraudAlert?.riskLabel)
+                                }
+                              >
+                                Denunciar e bloquear
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--secondary chat-antifraud-card__btn"
+                                onClick={() => onRequestBlock(activeThread)}
+                              >
+                                Apenas bloquear
+                              </button>
+                            </div>
+                          </aside>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
               <div ref={messagesEndRef} />
             </div>

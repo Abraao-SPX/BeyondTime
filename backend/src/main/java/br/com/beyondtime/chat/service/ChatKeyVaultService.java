@@ -1,5 +1,6 @@
 package br.com.beyondtime.chat.service;
 
+import br.com.beyondtime.biometrics.repository.VerificationAttemptRepository;
 import br.com.beyondtime.chat.domain.UsedBiometricUnlockJti;
 import br.com.beyondtime.chat.domain.UserChatKey;
 import br.com.beyondtime.chat.dto.BiometricVaultUnlockResponse;
@@ -7,6 +8,7 @@ import br.com.beyondtime.chat.dto.ChatKeyVaultResponse;
 import br.com.beyondtime.chat.dto.PublicChatKeyResponse;
 import br.com.beyondtime.chat.dto.UpsertBiometricChatVaultRequest;
 import br.com.beyondtime.chat.dto.UpsertChatKeyVaultRequest;
+import br.com.beyondtime.chat.repository.ChatUserBlockRepository;
 import br.com.beyondtime.chat.repository.UsedBiometricUnlockJtiRepository;
 import br.com.beyondtime.chat.repository.UserChatKeyRepository;
 import br.com.beyondtime.chat.service.ChatBiometricTokenVerifier.VerifiedBiometricClaims;
@@ -25,16 +27,22 @@ public class ChatKeyVaultService {
 
     private final UserChatKeyRepository userChatKeyRepository;
     private final UsedBiometricUnlockJtiRepository usedJtiRepository;
+    private final VerificationAttemptRepository verificationAttemptRepository;
+    private final ChatUserBlockRepository chatUserBlockRepository;
     private final ChatVaultEnvelopeCrypto envelopeCrypto;
     private final ChatBiometricTokenVerifier biometricTokenVerifier;
 
     public ChatKeyVaultService(
             UserChatKeyRepository userChatKeyRepository,
             UsedBiometricUnlockJtiRepository usedJtiRepository,
+            VerificationAttemptRepository verificationAttemptRepository,
+            ChatUserBlockRepository chatUserBlockRepository,
             ChatVaultEnvelopeCrypto envelopeCrypto,
             ChatBiometricTokenVerifier biometricTokenVerifier) {
         this.userChatKeyRepository = userChatKeyRepository;
         this.usedJtiRepository = usedJtiRepository;
+        this.verificationAttemptRepository = verificationAttemptRepository;
+        this.chatUserBlockRepository = chatUserBlockRepository;
         this.envelopeCrypto = envelopeCrypto;
         this.biometricTokenVerifier = biometricTokenVerifier;
     }
@@ -122,8 +130,10 @@ public class ChatKeyVaultService {
             );
         }
 
-        // Anti-replay: cada JWT biométrico só pode destrancar o cofre 1 única vez
-        if (usedJtiRepository.existsById(claims.jti())) {
+        String jti = claims.jti().trim();
+        // Anti-replay (incluindo anti-replay cruzado com selo RF-11 — SEC-MED-02): cada JWT biométrico só pode ser usado 1 única vez
+        if (usedJtiRepository.existsById(jti)
+                || verificationAttemptRepository.existsByBiometricServiceJwtId(jti)) {
             throw new BusinessException(
                     "BIOMETRIC_TOKEN_REPLAY",
                     "Este comprovante de leitura facial já foi utilizado. Faça uma nova validação facial.",
@@ -144,7 +154,7 @@ public class ChatKeyVaultService {
             );
         }
 
-        usedJtiRepository.saveAndFlush(new UsedBiometricUnlockJti(claims.jti(), userId));
+        usedJtiRepository.saveAndFlush(new UsedBiometricUnlockJti(jti, userId));
 
         String vaultSecret = envelopeCrypto.unseal(entity.getSealedVaultSecret(), entity.getSealedVaultIv());
 
@@ -166,6 +176,20 @@ public class ChatKeyVaultService {
     @Transactional(readOnly = true)
     public Optional<ChatKeyVaultResponse> findMyVault(UUID userId) {
         return userChatKeyRepository.findById(userId).map(this::toVaultResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public PublicChatKeyResponse getPublicKeyForUser(UUID requesterUserId, UUID targetUserId) {
+        if (requesterUserId != null
+                && !requesterUserId.equals(targetUserId)
+                && chatUserBlockRepository.existsBlockBetween(requesterUserId, targetUserId)) {
+            throw new BusinessException(
+                    "CONTACT_BLOCKED",
+                    "Chave pública indisponível devido a bloqueio ativo entre os usuários.",
+                    HttpStatus.FORBIDDEN
+            );
+        }
+        return getPublicKey(targetUserId);
     }
 
     @Transactional(readOnly = true)

@@ -1,24 +1,31 @@
 import hashlib
 import hmac
-import html
 import logging
 import os
 import re
+import unicodedata
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 import joblib
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ml-antifraude")
 
-# 1. Cria a aplicação web
-app = FastAPI(title="API Anjo da Guarda - BeyondTime")
+# 1. Cria a aplicação web (docs/OpenAPI desabilitados por padrão em produção)
+ENABLE_API_DOCS = os.environ.get("ENABLE_API_DOCS", "false").lower() == "true"
+app = FastAPI(
+    title="API Anjo da Guarda - BeyondTime",
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELO_PATH = os.environ.get("MODELO_PATH", os.path.join(BASE_DIR, "modelo_anjo.joblib"))
 HASH_PATH = os.environ.get("MODELO_HASH_PATH", os.path.join(BASE_DIR, "modelo_anjo.joblib.sha256"))
+INTERNAL_TOKEN = os.environ.get("ANTIFRAUD_INTERNAL_TOKEN", "").strip()
 
 modelo: Optional[Any] = None
 modo_ativo: str = "inicializando"
@@ -28,11 +35,6 @@ modelo_info: Dict[str, Any] = {
     "sha256_verificado": False,
     "status": "pendente",
 }
-
-XSS_OUTPUT_PATTERN = re.compile(
-    r"<\s*/?\s*[a-z!]|javascript\s*:|vbscript\s*:|data\s*:\s*text/html|\bon[a-z]{2,30}\s*=",
-    re.IGNORECASE,
-)
 
 
 def calcular_sha256(arquivo_path: str) -> str:
@@ -134,29 +136,33 @@ def limpar_texto(texto: str) -> str:
     return t
 
 
-def sanitizar_saida(texto: str, max_len: int = 280) -> str:
-    if XSS_OUTPUT_PATTERN.search(texto):
-        return "[CONTEUDO_SANITIZADO]"
-    return html.escape(texto, quote=True)[:max_len]
+def remover_acentos(texto: str) -> str:
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(ch)
+    )
 
 
 def analisar_heuristico(texto_limpo: str) -> Tuple[str, float]:
     """Fallback heurístico defensivo para detecção de fraudes contra 50+ (SEC-CRIT-03)."""
-    t = texto_limpo.lower()
+    t = remover_acentos(texto_limpo.lower())
 
-    # 1. Credenciais, senhas e códigos SMS
+    # 1. Credenciais, senhas, códigos SMS, gov.br, falsa central e motoboy
     if re.search(
         r"\b(senha|token|cvv|6\s*digitos|codigo\s*de\s*(seguranca|verificacao|confirmacao|acesso))\b"
-        r"|(\bcodigo\b.*\b(sms|celular|zap|whatsapp)\b)"
-        r"|(\b(digite|passe|mande|envia|informe)\b.*\b(codigo|senha|cartao)\b)",
+        r"|(\bcodigo\b.*\b(sms|celular|zap|whatsapp|gov\.?br|anydesk|teamviewer)\b)"
+        r"|(\b(digite|passe|mande|envia|informe)\b.*\b(codigo|senha|cartao|gov\.?br|token)\b)"
+        r"|(\b(motoboy|portador)\b.*\b(cartao|senha)\b)"
+        r"|(\bcentral\s*de\s*seguranca\b.*\b(senha|token|cartao|bloqueio|compra\s*suspeita)\b)",
         t,
     ):
         return "PEDIDO_CREDENCIAL", 96.0
 
-    # 2. Links maliciosos / Phishing
+    # 2. Links maliciosos / Phishing / Acesso Remoto / INSS falso
     if re.search(
         r"(https?://\S+|www\.\S+|bit\.ly/\S+|tinyurl\.com/\S+|t\.co/\S+|\b\w+\.apk\b|\b\w+\.exe\b)"
-        r"|(\b(clica|clique|acesse|baixe|abra)\b.*\b(link|anexo|fotos|album|arquivo)\b)",
+        r"|(\b(anydesk|teamviewer|rustdesk|acesso\s*remoto)\b)"
+        r"|(\b(inss|prova\s*de\s*vida|recadastramento\s*biometrico)\b.*\b(link|bloqueado|suspenso|regularize|clique|acesse)\b)"
+        r"|(\b(clica|clique|acesse|baixe|abra|instale)\b.*\b(link|anexo|fotos|album|arquivo|aplicativo|modulo)\b)",
         t,
     ):
         return "LINK_MALICIOSO", 94.0
@@ -164,66 +170,73 @@ def analisar_heuristico(texto_limpo: str) -> Tuple[str, float]:
     # 3. Ameaça e Extorsão
     if re.search(
         r"\b(delegado|delegacia|viatura|policia|mandado|cadeia|prisao|fianca|intimacao)\b"
-        r"|(\b(se\s*nao\s*pagar|vai\s*preso|parar\s*na\s*sua\s*casa)\b)",
+        r"|(\b(se\s*nao\s*pagar|vai\s*preso|parar\s*na\s*sua\s*casa|vazar\s*(os\s*)?prints|penhora)\b)",
         t,
     ):
         return "AMEACA_EXTORSAO", 95.0
 
-    # 4. Falsa herança, doação ou pacote retido / alfândega
+    # 4. Falsa herança, doação, falso advogado / precatório ou pacote retido / Correios
     if re.search(
         r"\b(doenca\s*terminal|fortuna\s*acumulada|taxa\s*cartoraria|tabeliao|saldo\s*remanescente)\b"
-        r"|(\bdoar\b.*\b(dolares|milhoes|fortuna)\b)",
+        r"|(\bdoar\b.*\b(dolares|milhoes|fortuna)\b)"
+        r"|(\b(precatorio|rpv|alvara\s*judicial|custas\s*processuais|processo\s*ganho)\b.*\b(pix|taxa|pagar|guia|liberar|honorarios)\b)",
         t,
     ):
         return "FALSA_DOACAO_HERANCA", 93.0
 
     if re.search(
-        r"\b(mala\s*(com)?\s*dolares|barras\s*de\s*ouro|alfandega|receita\s*federal|taxa\s*aduaneira|pacote\s*(retido|confiscado))\b",
+        r"\b(mala\s*(com)?\s*dolares|barras\s*de\s*ouro|alfandega|receita\s*federal|taxa\s*aduaneira|despacho\s*postal|pacote\s*(retido|confiscado))\b"
+        r"|(\b(correios|objeto\s*postal|encomenda)\b.*\b(taxado|taxa|alfandega|retid[oa]|pix)\b)",
         t,
     ):
         return "ENCOMENDA_TAXA", 93.0
 
-    # 5. Investimento milagroso / Criptomoedas
+    # 5. Investimento milagroso / Criptomoedas / Tarefa remunerada / Urubu do Pix
     if re.search(
-        r"\b(cripto|criptomoeda|bitcoin|rendendo|lucro\s*garantido|retorno\s*garantido|piramide)\b"
+        r"\b(cripto|criptomoeda|bitcoin|rendendo|lucro\s*garantido|retorno\s*garantido|piramide|urubu\s*do\s*pix)\b"
+        r"|(\b(tarefa\s*remunerada|tarefas?\s*vip|missoes\s*vip|deposito\s*de\s*recarga)\b)"
+        r"|(\b(curtindo\s*videos|avaliando\s*(lojas|hoteis))\b.*\b(pix|ganhe|comiss[oa]|dinheiro)\b)"
         r"|(\b\d+%\s*ao\s*dia\b)|(\bdobre\s*seu\s*dinheiro\b)",
         t,
     ):
         return "INVESTIMENTO_SUSPEITO", 92.0
 
-    # 6. Falso Intermediário (parente / mecânico / rodoviária)
+    # 6. Falso Intermediário / Falso Parente ("Oi mãe, troquei de número")
     if re.search(
-        r"\b(neto|filho|sobrinho|mecanico|terminal\s*rodoviario|sem\s*bateria|celular\s*novo|numero\s*novo)\b.*\b(pix|socorrer|dinheiro|guincho|ajuda)\b"
-        r"|(\boi\s*(tia|tio|mae|pai|vovo|vo)\b.*\b(pix|socorro|guincho)\b)",
+        r"\b(neto|filho|sobrinho|mecanico|terminal\s*rodoviario|sem\s*bateria|celular\s*novo|numero\s*novo)\b.*\b(pix|socorrer|dinheiro|guincho|ajuda|salva)\b"
+        r"|(\b(troquei\s*de\s*numero|numero\s*novo|mudei\s*de\s*whatsapp)\b)"
+        r"|(\boi\s*(tia|tio|mae|pai|vovo|vo)\b.*\b(pix|socorro|guincho|troquei|celular\s*quebrou|limite)\b)",
         t,
     ):
         return "FALSO_INTERMEDIARIO", 94.0
 
-    # 7. Emergência financeira com saúde / socorro
+    # 7. Emergência financeira com saúde / socorro / sequestro
     if re.search(
-        r"\b(infarto|hospital|acidente|guincho|internado|cirurgia|urgencia\s*medica)\b.*\b(pix|deposito|transferencia|dinheiro)\b",
+        r"\b(infarto|hospital|acidente|guincho|internado|cirurgia|urgencia\s*medica|sequestrado|resgate)\b.*\b(pix|deposito|transferencia|dinheiro)\b",
         t,
     ):
         return "EMERGENCIA_FINANCEIRA", 92.0
 
-    # 8. Pedido de dinheiro / PIX explícito
+    # 8. Pedido de dinheiro / PIX explícito / Pix errado / Falsa vaga / Conta segura
     if re.search(
-        r"\b(pix|p\.i\.x|p-i-x)\b.*\b(chave|urgente|saldo|fazer|manda|transfere|deposite|conta)\b"
-        r"|(\b(fazer|manda|faz|passa|transfere)\b.*\b(um\s*pix|dinheiro|reais|saldo)\b)",
+        r"\b(pix|p\.i\.x|p-i-x)\b.*\b(chave|urgente|saldo|fazer|manda|transfere|deposite|conta|errado|devolve|estorno|teste|admissional)\b"
+        r"|(\b(pix\s*errado|deposito\s*errado|conta\s*segura|exame\s*admissional)\b.*\b(pix|devolve|chave|transfere|pague)\b)"
+        r"|(\b(fazer|manda|faz|passa|transfere|empresta)\b.*\b(um\s*pix|dinheiro|reais|saldo|boleto)\b)",
         t,
     ):
         return "PEDIDO_DINHEIRO", 90.0
 
-    # 9. Mensagem de segredo / manipulação suspeita
+    # 9. Mensagem de segredo / manipulação suspeita / migração de plataforma
     if re.search(
-        r"\b(apaga\s*(essa|nossa)\s*conversa|nao\s*fale\s*com\s*(seus\s*)?(filhos|parentes)|segredo\s*nosso|nao\s*conta\s*pra\s*ninguem)\b",
+        r"\b(apaga\s*(essa|nossa)\s*conversa|nao\s*fale\s*com\s*(seus\s*)?(filhos|parentes)|segredo\s*nosso|nao\s*conta\s*pra\s*ninguem)\b"
+        r"|(\b(sair\s*desse\s*aplicativo|conversar\s*no\s*whatsapp|passa\s*seu\s*(zap|whatsapp|numero))\b)",
         t,
     ):
         return "MENSAGEM_SUSPEITA", 88.0
 
     # 10. Sondagem financeira
     if re.search(
-        r"\b(aposentadoria|quanto\s*ganha|casa\s*propria\s*ou\s*aluguel|mora\s*sozinho|limite\s*do\s*cartao)\b",
+        r"\b(aposentadoria|quanto\s*ganha|casa\s*propria\s*ou\s*aluguel|mora\s*sozinh[oa]|limite\s*do\s*cartao|margem\s*(de\s*emprestimo\s*)?consignad[oa])\b",
         t,
     ):
         return "SONDAGEM_FINANCEIRA", 87.0
@@ -255,7 +268,18 @@ def health():
 
 
 @app.post("/analisar")
-def analisar_mensagem(mensagem: MensagemChat):
+def analisar_mensagem(
+    mensagem: MensagemChat,
+    response: Response,
+    x_antifraud_token: Optional[str] = Header(default=None, alias="X-Antifraud-Token"),
+):
+    if INTERNAL_TOKEN:
+        if not x_antifraud_token or not hmac.compare_digest(x_antifraud_token.strip(), INTERNAL_TOKEN):
+            raise HTTPException(status_code=401, detail="Acesso interno não autorizado.")
+
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+
     texto_limpo = limpar_texto(mensagem.texto)
     if not texto_limpo:
         raise HTTPException(
@@ -274,9 +298,8 @@ def analisar_mensagem(mensagem: MensagemChat):
     else:
         previsao, certeza = analisar_heuristico(texto_limpo)
 
+    # Privacidade: não ecoa o texto original nem o texto higienizado na resposta
     return {
-        "texto_original": sanitizar_saida(mensagem.texto),
-        "texto_limpo_ia": sanitizar_saida(texto_limpo),
-        "intencao": previsao,
+        "intencao": str(previsao),
         "certeza_percentual": round(certeza, 2),
     }

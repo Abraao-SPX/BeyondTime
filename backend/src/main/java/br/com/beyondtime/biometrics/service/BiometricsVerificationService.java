@@ -6,6 +6,7 @@ import br.com.beyondtime.biometrics.domain.VerificationType;
 import br.com.beyondtime.biometrics.dto.VerifyBiometricsRequest;
 import br.com.beyondtime.biometrics.dto.VerifyBiometricsResponse;
 import br.com.beyondtime.biometrics.repository.VerificationAttemptRepository;
+import br.com.beyondtime.chat.repository.UsedBiometricUnlockJtiRepository;
 import br.com.beyondtime.profile.domain.Profile;
 import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.shared.exception.BusinessException;
@@ -28,14 +29,17 @@ public class BiometricsVerificationService {
     private final BiometricTokenValidator tokenValidator;
     private final ProfileRepository profileRepository;
     private final VerificationAttemptRepository verificationAttemptRepository;
+    private final UsedBiometricUnlockJtiRepository usedBiometricUnlockJtiRepository;
 
     public BiometricsVerificationService(
             BiometricTokenValidator tokenValidator,
             ProfileRepository profileRepository,
-            VerificationAttemptRepository verificationAttemptRepository) {
+            VerificationAttemptRepository verificationAttemptRepository,
+            UsedBiometricUnlockJtiRepository usedBiometricUnlockJtiRepository) {
         this.tokenValidator = tokenValidator;
         this.profileRepository = profileRepository;
         this.verificationAttemptRepository = verificationAttemptRepository;
+        this.usedBiometricUnlockJtiRepository = usedBiometricUnlockJtiRepository;
     }
 
     @Transactional
@@ -76,9 +80,10 @@ public class BiometricsVerificationService {
         Profile profile = profileRepository.findByUserId(authenticatedUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("Perfil do usuário", authenticatedUserId));
 
-        // 4. Proteção anti-replay: impede reutilização do mesmo token biométrico (jti único)
+        // 4. Proteção anti-replay (incluindo anti-replay cruzado com cofre E2EE — SEC-MED-02): impede reutilização do mesmo token biométrico (jti único)
         String jwtIdentifier = claims.jti().trim();
-        if (verificationAttemptRepository.existsByBiometricServiceJwtId(jwtIdentifier)) {
+        if (verificationAttemptRepository.existsByBiometricServiceJwtId(jwtIdentifier)
+                || usedBiometricUnlockJtiRepository.existsById(jwtIdentifier)) {
             throw new BusinessException(
                     "BIOMETRIC_TOKEN_REPLAY",
                     "Este token de verificação facial já foi utilizado. Realize uma nova captura.",

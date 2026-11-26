@@ -525,7 +525,8 @@ public class AuthService {
         executeDelete("DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?", user.getId(), user.getId());
         executeDelete("DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?", user.getId(), user.getId());
 
-        // Exclusão de sessões temporárias de handoff biométrico (LGPD / RF14)
+        // Exclusão de tentativas de verificação biométrica e sessões temporárias de handoff (LGPD / RF14 / SEC-ALTA-02)
+        executeDelete("DELETE FROM verification_attempts WHERE user_id = ?", user.getId());
         executeDelete("DELETE FROM biometric_handoff_sessions WHERE user_id = ?", user.getId());
 
         lgpdDataRequestRepository.save(

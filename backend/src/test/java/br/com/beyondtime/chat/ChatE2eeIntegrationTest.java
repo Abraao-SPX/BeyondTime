@@ -130,6 +130,7 @@ class ChatE2eeIntegrationTest {
                 "sub", sub,
                 "verified", verified,
                 "biometrics_model", "YuNet-SFace-MiniFASNetV2",
+                "iss", "reconhecimento-facil-service",
                 "jti", jti,
                 "exp", expEpochSeconds
         ));
