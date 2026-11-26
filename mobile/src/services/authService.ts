@@ -15,6 +15,8 @@ export interface RegisterRequest {
   birthDate: string; // YYYY-MM-DD (RF02)
 }
 
+export type AuthProviderType = 'email' | 'social' | 'google' | 'facebook';
+
 export interface AuthSession {
   accessToken: string;
   refreshToken: string;
@@ -23,6 +25,7 @@ export interface AuthSession {
   userId: string;
   email: string;
   role: string;
+  authProvider?: AuthProviderType;
 }
 
 export interface ServerProfile {
@@ -145,19 +148,20 @@ export async function loginWithEmail(
   email: string,
   password: string
 ): Promise<AuthSession> {
-  return requestJson<AuthSession>('/api/v1/auth/login', {
+  const session = await requestJson<AuthSession>('/api/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({
       email: email.trim(),
       password,
     }),
   });
+  return { ...session, authProvider: session.authProvider ?? 'email' };
 }
 
 export async function registerAccount(
   payload: RegisterRequest
 ): Promise<AuthSession> {
-  return requestJson<AuthSession>('/api/v1/auth/register', {
+  const session = await requestJson<AuthSession>('/api/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
       email: payload.email.trim(),
@@ -166,19 +170,21 @@ export async function registerAccount(
       birthDate: payload.birthDate,
     }),
   });
+  return { ...session, authProvider: session.authProvider ?? 'email' };
 }
 
 export async function loginWithSocial(
   idToken: string,
   birthDate?: string
 ): Promise<AuthSession> {
-  return requestJson<AuthSession>('/api/v1/auth/social', {
+  const session = await requestJson<AuthSession>('/api/v1/auth/social', {
     method: 'POST',
     body: JSON.stringify({
       idToken: idToken.trim(),
       birthDate: birthDate || null,
     }),
   });
+  return { ...session, authProvider: session.authProvider ?? 'social' };
 }
 
 export async function requestPasswordReset(

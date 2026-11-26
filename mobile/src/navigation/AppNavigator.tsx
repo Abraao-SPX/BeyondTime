@@ -441,12 +441,20 @@ export function AppNavigator() {
     return () => subscription.remove();
   }, [activeConversationId, activeTab, route]);
 
-  const handleDeleteAccount = async (password: string): Promise<void> => {
+  const isSocialAccount =
+    authSession !== null &&
+    authSession.authProvider !== undefined &&
+    authSession.authProvider !== 'email';
+
+  const handleDeleteAccount = async (password?: string): Promise<void> => {
     if (!authSession) {
       throw new Error('Sua sessão expirou. Entre novamente para excluir sua conta.');
     }
     const currentSession = authSession;
-    await deleteAccountDefinitively(currentSession, password);
+    await deleteAccountDefinitively(
+      currentSession,
+      isSocialAccount ? undefined : password
+    );
     activeSessionRef.current = null;
     myKeyPairRef.current = null;
     if (stompRef.current) {
@@ -990,6 +998,7 @@ export function AppNavigator() {
                 {activeTab === 'profile' && (
                   <HomePlaceholderScreen
                     userData={onboardingData}
+                    isSocialAccount={isSocialAccount}
                     blockedContacts={blockedContacts}
                     onUnblockContact={handleUnblockContact}
                     onRepeatFacialVerification={() => setRoute('facialVerification')}

@@ -27,17 +27,19 @@ import type { BlockedContactMobile } from '../types/social';
 
 interface HomePlaceholderScreenProps {
   userData: OnboardingData;
+  isSocialAccount?: boolean;
   blockedContacts?: BlockedContactMobile[];
   onUnblockContact?: (id: string) => void;
   onRepeatFacialVerification: () => void;
   onSignOut: () => void;
-  onDeleteAccount?: (password: string) => Promise<void>;
+  onDeleteAccount?: (password?: string) => Promise<void>;
 }
 
 const DELETE_COUNTDOWN_SECONDS = 5;
 
 export function HomePlaceholderScreen({
   userData,
+  isSocialAccount = false,
   blockedContacts,
   onUnblockContact,
   onRepeatFacialVerification,
@@ -82,14 +84,14 @@ export function HomePlaceholderScreen({
 
   const handleConfirmDeleteAccount = async () => {
     if (!onDeleteAccount || isDeleting || deleteCountdown > 0) return;
-    if (!deletePassword.trim()) {
+    if (!isSocialAccount && !deletePassword.trim()) {
       setDeleteError('Por segurança, digite sua senha atual para confirmar a exclusão.');
       return;
     }
     setDeleteError(null);
     setIsDeleting(true);
     try {
-      await onDeleteAccount(deletePassword);
+      await onDeleteAccount(isSocialAccount ? undefined : deletePassword);
       setShowDeleteModal(false);
       setDeletePassword('');
     } catch (err: unknown) {
@@ -359,28 +361,51 @@ export function HomePlaceholderScreen({
               Esta ação apaga seu perfil, conversas, fotos e dados pessoais de forma permanente e não pode ser desfeita.
             </Text>
 
-            <TextInput
-              value={deletePassword}
-              onChangeText={(t) => {
-                setDeletePassword(t);
-                setDeleteError(null);
-              }}
-              secureTextEntry
-              maxLength={72}
-              placeholder="Digite sua senha atual para confirmar"
-              placeholderTextColor={palette.textMuted}
-              accessibilityLabel="Senha atual para confirmar exclusão da conta"
-              style={{
-                minHeight: TOUCH_TARGET_MIN,
-                borderWidth: 1.5,
-                borderColor: palette.borderStrong,
-                borderRadius: 12,
-                paddingHorizontal: 14,
-                color: palette.textPrimary,
-                backgroundColor: palette.background,
-                fontSize: fs(16),
-              }}
-            />
+            {isSocialAccount ? (
+              <View
+                style={{
+                  backgroundColor: palette.primarySoft,
+                  borderColor: palette.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 12,
+                }}
+              >
+                <Text
+                  style={{
+                    color: palette.textPrimary,
+                    fontSize: fs(15),
+                    lineHeight: fs(22),
+                  }}
+                >
+                  Contas conectadas via Google ou Facebook não exigem senha. Aguarde a contagem de
+                  segurança e toque no botão abaixo para confirmar.
+                </Text>
+              </View>
+            ) : (
+              <TextInput
+                value={deletePassword}
+                onChangeText={(t) => {
+                  setDeletePassword(t);
+                  setDeleteError(null);
+                }}
+                secureTextEntry
+                maxLength={72}
+                placeholder="Digite sua senha atual para confirmar"
+                placeholderTextColor={palette.textMuted}
+                accessibilityLabel="Senha atual para confirmar exclusão da conta"
+                style={{
+                  minHeight: TOUCH_TARGET_MIN,
+                  borderWidth: 1.5,
+                  borderColor: palette.borderStrong,
+                  borderRadius: 12,
+                  paddingHorizontal: 14,
+                  color: palette.textPrimary,
+                  backgroundColor: palette.background,
+                  fontSize: fs(16),
+                }}
+              />
+            )}
 
             {deleteError ? (
               <Text style={{ color: palette.errorText, fontSize: fs(14) }}>{deleteError}</Text>
