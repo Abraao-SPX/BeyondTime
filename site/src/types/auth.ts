@@ -45,6 +45,7 @@ export interface AuthSession {
   role: string;
   authProvider?: 'email' | 'google' | 'facebook' | 'social';
   rememberMe?: boolean;
+  biometricSessionVerified?: boolean;
 }
 
 export interface SocialOnboardingDraft {

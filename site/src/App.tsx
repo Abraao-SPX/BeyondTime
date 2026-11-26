@@ -19,6 +19,7 @@ import {
   fetchMyProfile,
   loadAuthSession,
   logoutAccount,
+  markSessionBiometricVerified,
   registerSessionLifecycleCallbacks,
   resolveApiAssetUrl,
   type ServerProfile,
@@ -470,13 +471,16 @@ export function App() {
   const displayHobbies = rawHobbies?.map((h) => sanitizeTextInput(h)).filter(Boolean);
   const displayAvatarUrl = resolveApiAssetUrl(serverProfile?.avatarUrl) || savedProfile?.photoDataUrl || null;
 
-  // RF-11: Portão Biométrico Obrigatório (fail-closed) — só entra na página principal se o rosto foi verificado e aprovado
+  // RF-11: Portão Biométrico Obrigatório (fail-closed)
+  // - 1º acesso: cadastra o rosto e concede o Selo de Verificado 50+ (/register + anti-spoofing)
+  // - Próximos logins: exige reconhecimento facial 1:1 (/verify + anti-spoofing) para confirmar que é o titular
   const needsMandatoryFacialVerification =
     authSession !== null &&
     !isLoadingProfile &&
     !isProfileMissing &&
     !isEditingProfile &&
-    serverProfile?.verifiedBadge50plus !== true;
+    authSession.userId !== 'dev-preview-50plus' &&
+    (serverProfile?.verifiedBadge50plus !== true || authSession.biometricSessionVerified !== true);
 
   useEffect(() => {
     if (needsMandatoryFacialVerification) {
@@ -628,11 +632,14 @@ export function App() {
               <section className="completion-summary" aria-live="polite">
                 <p className="defensive-modal__badge">Etapa Obrigatória de Segurança — RF-11</p>
                 <h1 className="auth-card__title">
-                  Olá, {serverProfile?.firstName || 'bem-vindo(a)'}! Confirme seu rosto para entrar
+                  {serverProfile?.verifiedBadge50plus
+                    ? `Olá de volta, ${serverProfile?.firstName || 'bem-vindo(a)'}! Confirme seu rosto para entrar`
+                    : `Olá, ${serverProfile?.firstName || 'bem-vindo(a)'}! Cadastre seu rosto para entrar`}
                 </h1>
                 <p className="auth-card__subtitle">
-                  Para proteger toda a comunidade 50+, o acesso à página principal é liberado
-                  somente após a verificação facial pelo celular (código QR, sem baixar aplicativo).
+                  {serverProfile?.verifiedBadge50plus
+                    ? 'Por segurança contra golpes e acessos indevidos, confirme pelo celular que é você entrando na conta (código QR, sem baixar aplicativo).'
+                    : 'Para proteger toda a comunidade 50+, cadastre seu rosto pelo celular para receber o Selo de Verificado 50+ e liberar seu acesso (código QR, sem baixar aplicativo).'}
                 </p>
 
                 <div className="action-stack action-stack--compact" style={{ marginTop: '20px' }}>
@@ -670,6 +677,9 @@ export function App() {
                     onVerified={(res) => {
                       if (res.verifiedBadge50plus) {
                         setIsMandatoryQrOpen(false);
+                        setAuthSession((prev) =>
+                          prev ? markSessionBiometricVerified(prev) : prev
+                        );
                         setServerProfile((prev) =>
                           prev
                             ? {

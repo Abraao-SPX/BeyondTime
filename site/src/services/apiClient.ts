@@ -343,6 +343,15 @@ export async function confirmPasswordReset(
   });
 }
 
+export function markSessionBiometricVerified(session: AuthSession): AuthSession {
+  const updated: AuthSession = {
+    ...session,
+    biometricSessionVerified: true,
+  };
+  saveAuthSession(updated, Boolean(updated.rememberMe));
+  return updated;
+}
+
 export async function refreshSession(
   refreshToken: string,
   expectedGen: number = authSessionGeneration
@@ -357,6 +366,9 @@ export async function refreshSession(
   }
   if (previousSession?.authProvider) {
     session.authProvider = previousSession.authProvider;
+  }
+  if (previousSession?.biometricSessionVerified) {
+    session.biometricSessionVerified = true;
   }
   const rememberMe = Boolean(previousSession?.rememberMe);
   session.rememberMe = rememberMe;

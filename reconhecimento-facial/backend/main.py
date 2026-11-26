@@ -340,8 +340,17 @@ def get_challenge():
     return {
         "session_token": token,
         "colors": cores_sorteadas,
-        "flash_duration_ms": 500
+        "flash_duration_ms": 1050
     }
+
+@app.get("/enrollment-status/{user_id}")
+def get_enrollment_status(user_id: str):
+    """Retorna apenas se o UUID já possui biometria facial cadastrada (sem expor PII)."""
+    uid = (user_id or "").strip()
+    if not uid or len(uid) > 96:
+        raise HTTPException(status_code=400, detail="Identificador inválido.")
+    existe = db_buscar_usuario(uid) is not None
+    return {"enrolled": existe}
 
 @app.get("/verify/token/validate")
 def validate_token_endpoint(token: str = Query(..., description="Token JWT biométrico")):
@@ -1125,63 +1134,69 @@ def validar_reflexo_delta_rgb(
         cap.release()
         return False, f"Vídeo muito curto para análise ({total_frames} frames).", None, None
 
-    # 1. Detecção dinâmica do rosto e orientação correta nos primeiros frames
+    # 1. Leitura integral dos frames e detecção dinâmica da orientação/rosto
+    raw_frames = []
+    while cap.isOpened():
+        ret, f = cap.read()
+        if not ret:
+            break
+        raw_frames.append(f)
+    cap.release()
+
+    total_frames = len(raw_frames)
+    if total_frames < 9:
+        return False, f"Vídeo muito curto para análise ({total_frames} frames).", None, None
+
     face_roi = mock_roi
     rot_code = None
-    frames_buffer = []
 
     if face_roi is None:
-        check_frames = min(15, total_frames)
-        for _ in range(check_frames):
-            ret, f = cap.read()
-            if not ret:
-                break
-            frames_buffer.append(f)
-            _, detected_roi, detected_rot = detectar_face_com_rotacao(f)
+        # Procura o rosto distribuindo amostras ao longo do vídeo (caso os primeiros frames estejam escuros)
+        indices_busca = list(range(min(10, total_frames))) + list(range(0, total_frames, max(1, total_frames // 10)))
+        vistos = set()
+        for idx in indices_busca:
+            if idx in vistos or idx >= total_frames:
+                continue
+            vistos.add(idx)
+            _, detected_roi, detected_rot = detectar_face_com_rotacao(raw_frames[idx])
             if detected_roi is not None:
                 face_roi = detected_roi
                 rot_code = detected_rot
                 break
 
         if face_roi is None:
-            cap.release()
-            return False, "Nenhum rosto identificado no vídeo", None, None
+            return False, "Nenhum rosto identificado no vídeo. Posicione o rosto no centro do oval.", None, None
 
-    # 2. Leitura do frame baseline (início do vídeo com tela escura)
-    frame_base_raw = frames_buffer[0] if frames_buffer else cap.read()[1]
-    if frame_base_raw is None:
-        cap.release()
-        return False, "Não foi possível ler o primeiro frame de iluminação base.", None, rot_code
+    frames_rot = [
+        cv2.rotate(f, rot_code) if rot_code is not None else f
+        for f in raw_frames
+    ]
 
-    frame_base = cv2.rotate(frame_base_raw, rot_code) if rot_code is not None else frame_base_raw
-    b_base, g_base, r_base = extrair_cor_media_face(frame_base, face_roi)
-    b_base = max(b_base, 1.0)
-    g_base = max(g_base, 1.0)
-    r_base = max(r_base, 1.0)
+    # 2. Baseline de iluminação inicial (média dos primeiros frames com tela escura ~400ms)
+    base_count = max(1, min(6, int(total_frames * 0.10)))
+    base_vals = [extrair_cor_media_face(f, face_roi) for f in frames_rot[:base_count]]
+    b_base = max(float(np.mean([v[0] for v in base_vals])), 1.0)
+    g_base = max(float(np.mean([v[1] for v in base_vals])), 1.0)
+    r_base = max(float(np.mean([v[2] for v in base_vals])), 1.0)
 
-    # 3. Segmentação temporal do vídeo pelas cores com amostragem em janela
-    frames_restantes = []
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if rot_code is not None:
-            frame = cv2.rotate(frame, rot_code)
-        frames_restantes.append(frame)
-    cap.release()
+    # 3. Recorta a janela temporal onde as 3 cores piscam (~10% até ~94% do vídeo, excluindo baseline inicial e cauda escura)
+    start_color_idx = min(base_count, max(1, total_frames - 6))
+    end_color_idx = max(start_color_idx + len(cores_esperadas) * 2, int(total_frames * 0.94))
+    frames_restantes = frames_rot[start_color_idx:min(total_frames, end_color_idx)]
 
     total_validos = len(frames_restantes)
     if total_validos < 6:
         return False, f"Vídeo com frames insuficientes ({total_validos} frames).", face_roi, rot_code
 
-    segmento = total_validos // len(cores_esperadas)
+    segmento = max(1, total_validos // len(cores_esperadas))
     respostas_corretas = 0
 
     for cor_idx, cor in enumerate(cores_esperadas):
         cor_esperada = cor.strip().upper()
-        # Amostra múltiplos frames no miolo do flash para evitar ruído de exposição/piscadas
-        inicio = cor_idx * segmento + max(1, segmento // 4)
-        fim = (cor_idx + 1) * segmento - max(1, segmento // 4)
+        # Amostra múltiplos frames no miolo de cada cor (descartando 20% das bordas de transição da câmera)
+        margem = max(1, segmento // 5) if segmento >= 5 else 0
+        inicio = cor_idx * segmento + margem
+        fim = (cor_idx + 1) * segmento - margem
         janela = frames_restantes[inicio:max(inicio + 1, fim)]
 
         cor_validada = False
@@ -1195,18 +1210,18 @@ def validar_reflexo_delta_rgb(
             diff_g = g_atual - g_base
             diff_b = b_atual - b_base
 
-            # Exige que o canal da cor esperada domine os outros canais em pelo menos 10%
-            # e apresente um ganho de luz real (evitando reflexos espúrios em telas de computador)
+            # Exige dominância clara do canal da cor esperada sobre os demais canais
+            # calibrado para funcionar também em ambientes internos iluminados (mantendo fotos estáticas em 0/3)
             if cor_esperada == "VERMELHO":
-                if delta_r > max(delta_g, delta_b) * 1.10 and (delta_r > 0.04 or diff_r > 2.0):
+                if delta_r > max(delta_g, delta_b) * 1.05 and (delta_r > 0.022 or diff_r > 1.4):
                     cor_validada = True
                     break
             elif cor_esperada == "AZUL":
-                if delta_b > max(delta_r, delta_g) * 1.10 and (delta_b > 0.04 or diff_b > 2.0):
+                if delta_b > max(delta_r, delta_g) * 1.05 and (delta_b > 0.022 or diff_b > 1.4):
                     cor_validada = True
                     break
             elif cor_esperada == "VERDE":
-                if delta_g > max(delta_r, delta_b) * 1.10 and (delta_g > 0.04 or diff_g > 2.0):
+                if delta_g > max(delta_r, delta_b) * 1.05 and (delta_g > 0.022 or diff_g > 1.4):
                     cor_validada = True
                     break
 

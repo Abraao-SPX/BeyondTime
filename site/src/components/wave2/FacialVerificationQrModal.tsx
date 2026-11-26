@@ -9,6 +9,7 @@ import {
 } from '../../services/apiClient';
 import type { AuthSession } from '../../types/auth';
 import {
+  checkFaceAlignment,
   isMobileDevice,
   recordAndSubmitLiveness,
   resolveBiometricsBaseUrl,
@@ -23,13 +24,9 @@ interface FacialVerificationQrModalProps {
 
 /**
  * Modal oficial de Verificação Facial Biométrica (RF-11 — Selo de Verificado 50+).
- *
- * Comportamento inteligente por dispositivo:
- * - No PC/Desktop: abre direto no QR Code com sessão efêmera de handoff (5 min, uso único).
- *   O usuário aponta a câmera do celular, faz a verificação no navegador (sem baixar app nem logar de novo)
- *   e o PC detecta automaticamente a aprovação em tempo real via polling.
- * - No celular (navegador): abre direto na câmera frontal.
- * - No PC sem celular por perto: oferece plano B discreto ("Usar a câmera deste computador").
+ * - No PC/Desktop: exibe exclusivamente o QR Code para verificação pelo navegador do celular (sem opção de câmera no PC).
+ * - No celular (navegador): abre a câmera frontal com auto-detecção de rosto OU botão "Começar",
+ *   contagem regressiva de 3 segundos e tela cheia 100% limpa mostrando só o rosto no oval durante os flashes.
  */
 export function FacialVerificationQrModal({
   authSession: propSession = null,
@@ -54,21 +51,26 @@ export function FacialVerificationQrModal({
     'Gerando código QR seguro para o seu celular...'
   );
 
-  // Estado do fluxo câmera local (celular ou webcam no PC)
+  // Estado do fluxo câmera local (apenas quando aberto direto no navegador do celular)
   const [cameraActive, setCameraActive] = useState(false);
-  const [cameraPhase, setCameraPhase] = useState<'idle' | 'recording' | 'processing' | 'approved' | 'error'>('idle');
+  const [cameraPhase, setCameraPhase] = useState<
+    'idle' | 'countdown' | 'recording' | 'processing' | 'approved' | 'error'
+  >('idle');
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [flashColor, setFlashColor] = useState<string | null>(null);
   const [cameraMessage, setCameraMessage] = useState<string>(
-    'Posicione seu rosto de frente em um local iluminado e clique em "Iniciar verificação".'
+    'Posicione seu rosto no oval ou toque em Começar.'
   );
 
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const notifiedVerifiedRef = useRef(false);
   const onVerifiedRef = useRef(onVerified);
   const handoffRequestSeqRef = useRef(0);
+  const sequenceLockRef = useRef(false);
+  const countdownTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     onVerifiedRef.current = onVerified;
@@ -76,13 +78,29 @@ export function FacialVerificationQrModal({
 
   const biometricsBaseUrl = useMemo(() => resolveBiometricsBaseUrl(), []);
 
+  const attachVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el && streamRef.current && el.srcObject !== streamRef.current) {
+      el.srcObject = streamRef.current;
+      void el.play().catch(() => {});
+    }
+  }, []);
+
+  const clearCountdownTimer = useCallback(() => {
+    if (countdownTimerRef.current !== null) {
+      window.clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+  }, []);
+
   const stopCamera = useCallback(() => {
+    clearCountdownTimer();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     setCameraActive(false);
-  }, []);
+  }, [clearCountdownTimer]);
 
   const handleClose = useCallback(() => {
     stopCamera();
@@ -94,7 +112,6 @@ export function FacialVerificationQrModal({
     return () => stopCamera();
   }, [stopCamera]);
 
-  // Cria uma nova sessão de handoff QR no backend quando em modo QR
   const initQrHandoff = useCallback(async () => {
     const requestSeq = ++handoffRequestSeqRef.current;
     const session = resolveActiveSession();
@@ -130,15 +147,57 @@ export function FacialVerificationQrModal({
     }
   }, [resolveActiveSession]);
 
+  const startCamera = useCallback(async (silentFail: boolean = false): Promise<MediaStream | null> => {
+    if (streamRef.current) {
+      if (videoRef.current && videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        await videoRef.current.play().catch(() => {});
+      }
+      setCameraActive(true);
+      return streamRef.current;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (!silentFail) {
+        setCameraPhase('error');
+        setCameraMessage(
+          'Seu navegador não suporta captura de câmera aqui. Use a opção pelo código QR.'
+        );
+      }
+      return null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setCameraActive(true);
+      return stream;
+    } catch {
+      if (!silentFail) {
+        setCameraPhase('error');
+        setCameraMessage(
+          'Permita o uso da câmera na barra do navegador e toque em "Começar".'
+        );
+      }
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (activeMode === 'qr') {
       void initQrHandoff();
     } else {
       handoffRequestSeqRef.current += 1;
+      void startCamera(true);
     }
-  }, [activeMode, initQrHandoff]);
+  }, [activeMode, initQrHandoff, startCamera]);
 
-  // Renderiza o SVG do QR Code apontando para /verificar-rosto?t=<handoffToken>
   const qrTargetUrl = useMemo(() => {
     const configuredOrigin = (import.meta.env.VITE_FACIAL_VERIFICATION_URL as string | undefined)
       ?.trim()
@@ -172,7 +231,7 @@ export function FacialVerificationQrModal({
     };
   }, [qrTargetUrl]);
 
-  // Polling leve (2,5s) no PC para detectar automaticamente quando o celular concluir
+  // Polling (2,5s) no PC — aguarda estritamente status === 'COMPLETED' desta sessão QR
   useEffect(() => {
     if (activeMode !== 'qr' || handoffState !== 'waiting' || !handoffToken) {
       return;
@@ -187,16 +246,14 @@ export function FacialVerificationQrModal({
         const statusRes = await fetchBiometricHandoffStatus(session, handoffToken);
         if (cancelled) return;
 
-        if (statusRes.status === 'COMPLETED' || statusRes.verifiedBadge50plus) {
+        if (statusRes.status === 'COMPLETED') {
           setHandoffState('approved');
-          setHandoffMessage(
-            'Verificação concluída pelo celular! Seu perfil agora possui o Selo de Verificado 50+.'
-          );
+          setHandoffMessage('Identidade confirmada pelo celular com sucesso!');
           if (!notifiedVerifiedRef.current) {
             notifiedVerifiedRef.current = true;
             onVerifiedRef.current?.({
               success: true,
-              message: 'Selo de Verificado 50+ concedido com sucesso.',
+              message: 'Verificação facial concluída com sucesso.',
               profileId: '',
               userId: session.userId,
               verifiedBadge50plus: true,
@@ -220,100 +277,217 @@ export function FacialVerificationQrModal({
     };
   }, [activeMode, handoffState, handoffToken, resolveActiveSession]);
 
+  const executeLiveCameraRecording = useCallback(
+    async (stream: MediaStream) => {
+      const session = resolveActiveSession();
+      if (!session?.accessToken || !session?.userId) {
+        sequenceLockRef.current = false;
+        setCameraPhase('error');
+        setCameraMessage('Faça login primeiro para validar sua biometria.');
+        return;
+      }
+
+      setCameraPhase('recording');
+      setCountdown(null);
+      try {
+        const biometricJwt = await recordAndSubmitLiveness({
+          stream,
+          biometricsBaseUrl,
+          userId: session.userId,
+          firstName: (firstName || session.email.split('@')[0] || 'Usuário').trim(),
+          onStatus: (msg) => {
+            setCameraMessage(msg);
+            if (
+              msg.includes('Reconhecendo') ||
+              msg.includes('Cadastrando') ||
+              msg.includes('Validando')
+            ) {
+              setCameraPhase('processing');
+            }
+          },
+          onFlashColor: setFlashColor,
+        });
+
+        setCameraPhase('processing');
+        setCameraMessage('Liberando seu acesso seguro...');
+        const verifiedResponse = await verifyMyBiometrics(session, biometricJwt);
+
+        stopCamera();
+        setCameraPhase('approved');
+        setCameraMessage(verifiedResponse.message || 'Identidade confirmada com sucesso!');
+        if (!notifiedVerifiedRef.current) {
+          notifiedVerifiedRef.current = true;
+          onVerified?.(verifiedResponse);
+        }
+      } catch (err) {
+        setFlashColor(null);
+        setCountdown(null);
+        sequenceLockRef.current = false;
+        setCameraPhase('error');
+        setCameraMessage(
+          err instanceof Error
+            ? err.message
+            : 'Não foi possível concluir a verificação facial agora.'
+        );
+      }
+    },
+    [biometricsBaseUrl, firstName, onVerified, resolveActiveSession, stopCamera]
+  );
+
+  const triggerCameraCountdown = useCallback(async () => {
+    if (sequenceLockRef.current) return;
+    sequenceLockRef.current = true;
+
+    const stream = await startCamera(false);
+    if (!stream) {
+      sequenceLockRef.current = false;
+      return;
+    }
+
+    clearCountdownTimer();
+    setFlashColor(null);
+    setCountdown(3);
+    setCameraPhase('countdown');
+
+    let remaining = 3;
+    countdownTimerRef.current = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) {
+        setCountdown(remaining);
+      } else {
+        clearCountdownTimer();
+        setCountdown(null);
+        void executeLiveCameraRecording(stream);
+      }
+    }, 1000);
+  }, [clearCountdownTimer, executeLiveCameraRecording, startCamera]);
+
+  // Auto-detecção do rosto no modo câmera do celular
+  useEffect(() => {
+    if (activeMode !== 'camera' || cameraPhase !== 'idle' || !cameraActive || sequenceLockRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const interval = window.setInterval(async () => {
+      if (cancelled || inFlight || sequenceLockRef.current) return;
+      inFlight = true;
+      try {
+        const res = await checkFaceAlignment(videoRef.current, biometricsBaseUrl);
+        if (cancelled || sequenceLockRef.current) return;
+        if (res.detected && res.centered) {
+          void triggerCameraCountdown();
+        }
+      } finally {
+        inFlight = false;
+      }
+    }, 950);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeMode, biometricsBaseUrl, cameraActive, cameraPhase, triggerCameraCountdown]);
+
+  const isBusy =
+    cameraPhase === 'countdown' || cameraPhase === 'recording' || cameraPhase === 'processing';
+  const isApproved = handoffState === 'approved' || cameraPhase === 'approved';
+
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === 'Escape' && cameraPhase !== 'recording' && cameraPhase !== 'processing') {
+      if (event.key === 'Escape' && !isBusy) {
         handleClose();
       }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [cameraPhase, handleClose]);
+  }, [handleClose, isBusy]);
 
-  const startCamera = useCallback(async (): Promise<MediaStream | null> => {
-    if (streamRef.current) return streamRef.current;
+  // Tela cheia 100% limpa no celular durante contagem 3s + flashes de cor (só o rosto no oval)
+  if (activeMode === 'camera' && (cameraPhase === 'countdown' || cameraPhase === 'recording')) {
+    const activeBg = flashColor || '#050811';
+    const ovalBorderColor = cameraPhase === 'countdown' ? '#10B981' : '#FFFFFF';
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraPhase('error');
-      setCameraMessage(
-        'Seu navegador não suporta captura de câmera aqui. Use a opção "Pelo celular (QR Code)".'
-      );
-      return null;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
-      }
-      setCameraActive(true);
-      return stream;
-    } catch {
-      setCameraPhase('error');
-      setCameraMessage(
-        'Não foi possível acessar a câmera deste dispositivo. Permita a câmera ou use "Pelo celular (QR Code)".'
-      );
-      return null;
-    }
-  }, []);
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Verificação facial em andamento"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          width: '100vw',
+          height: '100dvh',
+          backgroundColor: activeBg,
+          transition: 'background-color 180ms ease',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          zIndex: 9999,
+        }}
+      >
+        <div
+          style={{
+            width: 'min(76vw, 310px)',
+            height: 'min(58dvh, 410px)',
+            borderRadius: '50%',
+            overflow: 'hidden',
+            border: `4px solid ${ovalBorderColor}`,
+            boxShadow: '0 0 32px rgba(0, 0, 0, 0.35)',
+            position: 'relative',
+            backgroundColor: '#000000',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <video
+            ref={attachVideoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transform: 'scaleX(-1)',
+              display: 'block',
+            }}
+          />
 
-  const runLiveCameraVerification = useCallback(async () => {
-    const session = resolveActiveSession();
-    if (!session?.accessToken || !session?.userId) {
-      setCameraPhase('error');
-      setCameraMessage(
-        'Finalize seu login ou cadastro primeiro para vincular o Selo de Verificado 50+ à sua conta.'
-      );
-      return;
-    }
-
-    const stream = await startCamera();
-    if (!stream) return;
-
-    setCameraPhase('recording');
-    try {
-      const biometricJwt = await recordAndSubmitLiveness({
-        stream,
-        biometricsBaseUrl,
-        userId: session.userId,
-        firstName: (firstName || session.email.split('@')[0] || 'Usuário').trim(),
-        onStatus: (msg) => {
-          setCameraMessage(msg);
-          if (msg.includes('Validando')) setCameraPhase('processing');
-        },
-        onFlashColor: setFlashColor,
-      });
-
-      setCameraPhase('processing');
-      setCameraMessage('Gravando Selo de Verificado 50+ no seu perfil...');
-      const verifiedResponse = await verifyMyBiometrics(session, biometricJwt);
-
-      stopCamera();
-      setCameraPhase('approved');
-      setCameraMessage(
-        verifiedResponse.message || 'Parabéns! Seu perfil recebeu o Selo de Verificado 50+.'
-      );
-      if (!notifiedVerifiedRef.current) {
-        notifiedVerifiedRef.current = true;
-        onVerified?.(verifiedResponse);
-      }
-    } catch (err) {
-      setFlashColor(null);
-      setCameraPhase('error');
-      setCameraMessage(
-        err instanceof Error
-          ? err.message
-          : 'Não foi possível concluir a verificação facial agora.'
-      );
-    }
-  }, [biometricsBaseUrl, firstName, onVerified, resolveActiveSession, startCamera, stopCamera]);
-
-  const isBusy = cameraPhase === 'recording' || cameraPhase === 'processing';
-  const isApproved = handoffState === 'approved' || cameraPhase === 'approved';
+          {cameraPhase === 'countdown' && countdown !== null && (
+            <div
+              aria-live="assertive"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0, 0, 0, 0.22)',
+                pointerEvents: 'none',
+              }}
+            >
+              <span
+                style={{
+                  color: '#FFFFFF',
+                  fontSize: '4.5rem',
+                  fontWeight: 800,
+                  textShadow: '0 4px 18px rgba(0, 0, 0, 0.75)',
+                  lineHeight: 1,
+                }}
+              >
+                {countdown}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -327,20 +501,6 @@ export function FacialVerificationQrModal({
         }
       }}
     >
-      {flashColor && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: flashColor,
-            opacity: 0.78,
-            zIndex: 9999,
-            pointerEvents: 'none',
-          }}
-        />
-      )}
-
       <div className="facial-qr-modal">
         <header className="facial-qr-modal__header">
           <div className="facial-qr-modal__badge" aria-hidden="true">
@@ -367,7 +527,7 @@ export function FacialVerificationQrModal({
           <p className="facial-qr-modal__subtitle">
             {activeMode === 'qr'
               ? 'Aponte a câmera do celular para o código abaixo. Não precisa baixar aplicativo nem fazer login novamente.'
-              : 'Confirme que você é uma pessoa real em 3 segundos para receber o Selo de Verificado 50+.'}
+              : 'Posicione o rosto no oval ou toque em Começar.'}
           </p>
         </header>
 
@@ -418,8 +578,8 @@ export function FacialVerificationQrModal({
                     <li className="facial-qr-modal__step-item">
                       <span className="facial-qr-modal__step-num" aria-hidden="true">3</span>
                       <div>
-                        <strong>Faça a prova de vida rápida</strong>
-                        <p>Assim que terminar no celular, esta tela atualiza sozinha com seu selo.</p>
+                        <strong>Confirme seu rosto no celular</strong>
+                        <p>Assim que concluir no celular, esta tela entra automaticamente.</p>
                       </div>
                     </li>
                   </ol>
@@ -432,7 +592,13 @@ export function FacialVerificationQrModal({
 
               <footer
                 className="facial-qr-modal__actions"
-                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}
+                style={{
+                  display: 'flex',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
               >
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   {(handoffState === 'expired' || handoffState === 'error') && (
@@ -445,23 +611,13 @@ export function FacialVerificationQrModal({
                       Gerar novo código
                     </button>
                   )}
-                  {!isApproved && (
-                    <button
-                      type="button"
-                      className="btn btn--secondary"
-                      style={{ minHeight: '48px' }}
-                      onClick={() => setActiveMode('camera')}
-                    >
-                      Usar a câmera deste computador
-                    </button>
-                  )}
                 </div>
 
                 <button
                   ref={closeButtonRef}
                   type="button"
                   className="btn btn--primary"
-                  style={{ minHeight: '48px' }}
+                  style={{ minHeight: '48px', width: '100%' }}
                   onClick={handleClose}
                 >
                   {isApproved ? 'Concluir' : 'Voltar'}
@@ -471,11 +627,16 @@ export function FacialVerificationQrModal({
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
               <div
+                onClick={() => {
+                  if (cameraPhase === 'idle' || cameraPhase === 'error') {
+                    void triggerCameraCountdown();
+                  }
+                }}
                 style={{
                   width: '100%',
-                  maxWidth: '380px',
-                  aspectRatio: '4 / 3',
-                  borderRadius: '16px',
+                  maxWidth: '340px',
+                  aspectRatio: '3 / 4',
+                  borderRadius: '18px',
                   overflow: 'hidden',
                   backgroundColor: '#111827',
                   border: '2px solid var(--border-subtle, #D1D5DB)',
@@ -483,10 +644,11 @@ export function FacialVerificationQrModal({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  cursor: 'pointer',
                 }}
               >
                 <video
-                  ref={videoRef}
+                  ref={attachVideoRef}
                   autoPlay
                   playsInline
                   muted
@@ -498,11 +660,22 @@ export function FacialVerificationQrModal({
                     display: cameraActive ? 'block' : 'none',
                   }}
                 />
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    width: '68%',
+                    height: '76%',
+                    borderRadius: '50%',
+                    border: '3px dashed rgba(255,255,255,0.9)',
+                    pointerEvents: 'none',
+                  }}
+                />
                 {!cameraActive && (
                   <p style={{ color: '#F9FAFB', padding: '16px', textAlign: 'center', margin: 0 }}>
                     {cameraPhase === 'approved'
-                      ? 'Selo de Verificado 50+ aprovado!'
-                      : 'Clique abaixo para ativar a câmera e iniciar a prova de vida.'}
+                      ? 'Verificação aprovada!'
+                      : 'Toque em Começar abaixo para abrir a câmera.'}
                   </p>
                 )}
               </div>
@@ -513,7 +686,7 @@ export function FacialVerificationQrModal({
 
               <footer
                 className="facial-qr-modal__actions"
-                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}
+                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', width: '100%' }}
               >
                 {cameraPhase !== 'approved' && (
                   <button
@@ -521,13 +694,13 @@ export function FacialVerificationQrModal({
                     className="btn btn--primary"
                     style={{ minHeight: '48px' }}
                     disabled={isBusy}
-                    onClick={runLiveCameraVerification}
+                    onClick={() => void triggerCameraCountdown()}
                   >
-                    {cameraPhase === 'recording'
-                      ? 'Gravando prova de vida...'
-                      : cameraPhase === 'processing'
-                        ? 'Validando biometria...'
-                        : 'Iniciar verificação'}
+                    {cameraPhase === 'processing'
+                      ? 'Reconhecendo seu rosto...'
+                      : cameraPhase === 'error'
+                        ? 'Tentar novamente'
+                        : 'Começar'}
                   </button>
                 )}
                 {!isApproved && (
@@ -541,7 +714,7 @@ export function FacialVerificationQrModal({
                       setActiveMode('qr');
                     }}
                   >
-                    Fazer pelo celular (QR Code)
+                    Fazer por código QR
                   </button>
                 )}
                 <button

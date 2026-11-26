@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import {
   ApiError,
   loginWithSocial,
+  markSessionBiometricVerified,
   registerAccount,
   resolveApiAssetUrl,
   uploadMyAvatar,
@@ -554,7 +555,10 @@ export function CriarMinhaConta({
               }
               const finalSession = createdSession || existingSession;
               if (finalSession) {
-                onAuthSuccess({ ...finalSession });
+                const verifiedSession = isFaceVerified
+                  ? markSessionBiometricVerified(finalSession)
+                  : { ...finalSession };
+                onAuthSuccess(verifiedSession);
               }
             }}
           />
