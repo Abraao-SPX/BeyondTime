@@ -26,32 +26,49 @@ public class ChatVaultEnvelopeCrypto {
     private static final int GCM_TAG_BITS = 128;
 
     private final SecretKey kek;
+    private final SecretKey legacyJwtDerivedKek;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public ChatVaultEnvelopeCrypto(
             @Value("${beyondtime.chat.vault.kek:}") String explicitKek,
             @Value("${beyondtime.security.jwt.secret:}") String fallbackJwtSecret) {
-        this.kek = resolveKek(explicitKek, fallbackJwtSecret);
+        SecretKey explicit = deriveExplicitKek(explicitKek);
+        SecretKey derivedLegacy = deriveLegacyJwtKek(fallbackJwtSecret);
+        if (explicit != null) {
+            this.kek = explicit;
+            this.legacyJwtDerivedKek = derivedLegacy;
+        } else if (derivedLegacy != null) {
+            this.kek = derivedLegacy;
+            this.legacyJwtDerivedKek = null;
+        } else {
+            throw new IllegalStateException("CHAT_VAULT_KEK (mínimo 32 bytes) é obrigatória para selar o cofre biométrico.");
+        }
     }
 
-    private SecretKey resolveKek(String explicitKek, String fallbackJwtSecret) {
+    private SecretKey deriveExplicitKek(String explicitKek) {
+        if (explicitKek == null || explicitKek.trim().getBytes(StandardCharsets.UTF_8).length < 32) {
+            return null;
+        }
         try {
-            if (explicitKek != null && explicitKek.trim().getBytes(StandardCharsets.UTF_8).length >= 32) {
-                MessageDigest digest = MessageDigest.getInstance("SHA-256");
-                byte[] keyBytes = digest.digest(explicitKek.trim().getBytes(StandardCharsets.UTF_8));
-                return new SecretKeySpec(keyBytes, "AES");
-            }
-            if (fallbackJwtSecret != null && fallbackJwtSecret.trim().getBytes(StandardCharsets.UTF_8).length >= 32) {
-                Mac mac = Mac.getInstance("HmacSHA256");
-                mac.init(new SecretKeySpec(fallbackJwtSecret.trim().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-                byte[] derived = mac.doFinal("beyondtime-chat-vault-kek-v1".getBytes(StandardCharsets.UTF_8));
-                return new SecretKeySpec(derived, "AES");
-            }
-            throw new IllegalStateException("CHAT_VAULT_KEK (mínimo 32 bytes) é obrigatória para selar o cofre biométrico.");
-        } catch (IllegalStateException ex) {
-            throw ex;
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] keyBytes = digest.digest(explicitKek.trim().getBytes(StandardCharsets.UTF_8));
+            return new SecretKeySpec(keyBytes, "AES");
         } catch (Exception ex) {
-            throw new IllegalStateException("Falha ao inicializar chave de envelope AES-256-GCM.", ex);
+            throw new IllegalStateException("Falha ao inicializar CHAT_VAULT_KEK AES-256-GCM.", ex);
+        }
+    }
+
+    private SecretKey deriveLegacyJwtKek(String fallbackJwtSecret) {
+        if (fallbackJwtSecret == null || fallbackJwtSecret.trim().getBytes(StandardCharsets.UTF_8).length < 32) {
+            return null;
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(fallbackJwtSecret.trim().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] derived = mac.doFinal("beyondtime-chat-vault-kek-v1".getBytes(StandardCharsets.UTF_8));
+            return new SecretKeySpec(derived, "AES");
+        } catch (Exception ex) {
+            throw new IllegalStateException("Falha ao derivar KEK legada de compatibilidade.", ex);
         }
     }
 
@@ -78,14 +95,11 @@ public class ChatVaultEnvelopeCrypto {
     }
 
     public String unseal(String sealedCiphertextB64, String sealedIvB64) {
+        byte[] iv;
+        byte[] ciphertext;
         try {
-            byte[] iv = Base64.getDecoder().decode(sealedIvB64);
-            byte[] ciphertext = Base64.getDecoder().decode(sealedCiphertextB64);
-
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, kek, new GCMParameterSpec(GCM_TAG_BITS, iv));
-            byte[] plainBytes = cipher.doFinal(ciphertext);
-            return new String(plainBytes, StandardCharsets.UTF_8);
+            iv = Base64.getDecoder().decode(sealedIvB64);
+            ciphertext = Base64.getDecoder().decode(sealedCiphertextB64);
         } catch (Exception ex) {
             throw new BusinessException(
                     "VAULT_UNSEAL_ERROR",
@@ -93,6 +107,30 @@ public class ChatVaultEnvelopeCrypto {
                     HttpStatus.INTERNAL_SERVER_ERROR
             );
         }
+
+        try {
+            return decryptWithKey(kek, iv, ciphertext);
+        } catch (Exception primaryEx) {
+            if (legacyJwtDerivedKek != null) {
+                try {
+                    return decryptWithKey(legacyJwtDerivedKek, iv, ciphertext);
+                } catch (Exception ignored) {
+                    // segue para erro padronizado
+                }
+            }
+            throw new BusinessException(
+                    "VAULT_UNSEAL_ERROR",
+                    "Não foi possível destrancar o envelope do cofre biométrico.",
+                    HttpStatus.INTERNAL_SERVER_ERROR
+            );
+        }
+    }
+
+    private String decryptWithKey(SecretKey key, byte[] iv, byte[] ciphertext) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+        byte[] plainBytes = cipher.doFinal(ciphertext);
+        return new String(plainBytes, StandardCharsets.UTF_8);
     }
 
     public record SealedEnvelope(String sealedCiphertext, String sealedIv) {

@@ -5,6 +5,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -15,9 +16,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -49,18 +52,35 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
     private final int maxRequestsPerMinute;
     private final long windowMillis;
     private final boolean trustForwardedHeaders;
+    private final Set<String> trustedProxies;
     private final Map<String, Deque<Long>> requestTimestampsByBucket = new ConcurrentHashMap<>();
     private final AtomicInteger requestCounter = new AtomicInteger(0);
 
     public LoginRateLimitFilter(
             ObjectMapper objectMapper,
+            int maxRequestsPerMinute,
+            long windowSeconds,
+            boolean trustForwardedHeaders) {
+        this(objectMapper, maxRequestsPerMinute, windowSeconds, trustForwardedHeaders, "127.0.0.1,::1");
+    }
+
+    @Autowired
+    public LoginRateLimitFilter(
+            ObjectMapper objectMapper,
             @Value("${beyondtime.security.login.ip-max-requests-per-minute:15}") int maxRequestsPerMinute,
             @Value("${beyondtime.security.login.ip-window-seconds:60}") long windowSeconds,
-            @Value("${beyondtime.security.login.trust-forwarded-headers:true}") boolean trustForwardedHeaders) {
+            @Value("${beyondtime.security.login.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
+            @Value("${beyondtime.security.login.trusted-proxies:127.0.0.1,::1}") String trustedProxiesCsv) {
         this.objectMapper = objectMapper;
         this.maxRequestsPerMinute = maxRequestsPerMinute;
         this.windowMillis = Math.max(1L, windowSeconds) * 1000L;
         this.trustForwardedHeaders = trustForwardedHeaders;
+        this.trustedProxies = trustedProxiesCsv == null
+                ? Set.of()
+                : Arrays.stream(trustedProxiesCsv.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toUnmodifiableSet());
     }
 
     @Override
@@ -172,22 +192,24 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String extractClientIp(HttpServletRequest request) {
-        if (trustForwardedHeaders) {
-            String realIp = request.getHeader("X-Real-IP");
-            if (realIp != null && !realIp.isBlank()) {
-                return realIp.trim();
-            }
+        String remoteAddr = request.getRemoteAddr() != null ? request.getRemoteAddr().trim() : "unknown";
+        if (trustForwardedHeaders && trustedProxies.contains(remoteAddr)) {
             String forwardedFor = request.getHeader("X-Forwarded-For");
             if (forwardedFor != null && !forwardedFor.isBlank()) {
                 String[] parts = forwardedFor.split(",");
-                for (String part : parts) {
-                    String candidate = part.trim();
-                    if (!candidate.isEmpty()) {
+                // Caminha da direita para a esquerda ignorando proxies confiáveis para obter o IP real adicionado pelo proxy (AUD-015)
+                for (int i = parts.length - 1; i >= 0; i--) {
+                    String candidate = parts[i].trim();
+                    if (!candidate.isEmpty() && !trustedProxies.contains(candidate)) {
                         return candidate;
                     }
                 }
             }
+            String realIp = request.getHeader("X-Real-IP");
+            if (realIp != null && !realIp.isBlank()) {
+                return realIp.trim();
+            }
         }
-        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
+        return remoteAddr;
     }
 }

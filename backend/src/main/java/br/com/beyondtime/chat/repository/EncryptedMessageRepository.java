@@ -14,7 +14,25 @@ import java.util.UUID;
 
 public interface EncryptedMessageRepository extends JpaRepository<EncryptedMessage, UUID> {
 
-    List<EncryptedMessage> findByConversationIdOrderBySentAtAsc(UUID conversationId, Pageable pageable);
+    List<EncryptedMessage> findByConversationIdOrderBySentAtDescIdDesc(UUID conversationId, Pageable pageable);
+
+    @Query("SELECT m FROM EncryptedMessage m " +
+           "WHERE m.conversationId = :conversationId " +
+           "AND (m.sentAt < :beforeSentAt OR (m.sentAt = :beforeSentAt AND m.id < :beforeId)) " +
+           "ORDER BY m.sentAt DESC, m.id DESC")
+    List<EncryptedMessage> findBeforeCursor(
+            @Param("conversationId") UUID conversationId,
+            @Param("beforeSentAt") OffsetDateTime beforeSentAt,
+            @Param("beforeId") UUID beforeId,
+            Pageable pageable);
+
+    @Query("SELECT m FROM EncryptedMessage m " +
+           "WHERE m.conversationId = :conversationId AND m.sentAt < :beforeSentAt " +
+           "ORDER BY m.sentAt DESC, m.id DESC")
+    List<EncryptedMessage> findBeforeSentAt(
+            @Param("conversationId") UUID conversationId,
+            @Param("beforeSentAt") OffsetDateTime beforeSentAt,
+            Pageable pageable);
 
     Optional<EncryptedMessage> findTopByConversationIdOrderBySentAtDesc(UUID conversationId);
 
