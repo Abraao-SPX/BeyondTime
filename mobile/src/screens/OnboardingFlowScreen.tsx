@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   BackHandler,
+  Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -11,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { AccessibleButton } from '../components/AccessibleButton';
 import { BeyondTimeSymbol } from '../components/BeyondTimeLogo';
 import { DefensiveExitModal } from '../components/DefensiveExitModal';
@@ -190,7 +194,7 @@ export function OnboardingFlowScreen({
       }
       if (age < 50) {
         setErrorMessage(
-          'O BeyondTime é uma comunidade exclusiva para pessoas com 50 anos ou mais (RF-02).'
+          'O BeyondTime é uma comunidade exclusiva para pessoas com 50 anos ou mais.'
         );
         return;
       }
@@ -268,15 +272,15 @@ export function OnboardingFlowScreen({
           goal: data.goal,
         });
 
-        if (
-          data.profilePhotoUri &&
-          (data.profilePhotoUri.startsWith('file://') ||
-            data.profilePhotoUri.startsWith('content://'))
-        ) {
+        if (data.profilePhotoUri) {
           try {
             await uploadPreResizedAvatar(session.accessToken, data.profilePhotoUri);
-          } catch {
-            // Upload de avatar pode ser tentado novamente depois sem bloquear o cadastro
+          } catch (uploadErr: unknown) {
+            const uploadMsg =
+              uploadErr instanceof Error
+                ? uploadErr.message
+                : 'Sua conta foi criada, mas não foi possível enviar sua foto agora.';
+            Alert.alert('Foto de perfil', uploadMsg);
           }
         }
 
@@ -623,23 +627,103 @@ export function OnboardingFlowScreen({
                 )}
               </View>
 
+              {data.profilePhotoUri ? (
+                <Image
+                  source={{ uri: data.profilePhotoUri }}
+                  style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 8 }}
+                  accessibilityLabel="Prévia da foto de perfil escolhida"
+                />
+              ) : null}
+
               <Text
                 style={[
                   styles.photoStatusText,
                   { color: palette.textPrimary, fontSize: fs(16) },
                 ]}
               >
-                {photoSelectedDemo
+                {data.profilePhotoUri
                   ? 'Foto selecionada com sucesso.'
                   : 'Nenhuma foto escolhida ainda'}
               </Text>
 
               <AccessibleButton
-                label={photoSelectedDemo ? 'Trocar foto selecionada' : 'Escolher ou tirar foto'}
+                label={data.profilePhotoUri ? 'Trocar foto da galeria' : 'Escolher foto da galeria'}
                 variant="outline"
                 onPress={() => {
-                  setPhotoSelectedDemo(true);
-                  updateField('profilePhotoUri', 'local://avatar-selecionado');
+                  void (async () => {
+                    setErrorMessage(null);
+                    try {
+                      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                      if (!perm.granted) {
+                        const msg =
+                          'Permita o acesso às suas fotos nas configurações do aparelho para escolher sua foto de perfil.';
+                        setErrorMessage(msg);
+                        if (!perm.canAskAgain && Platform.OS !== 'web') {
+                          Alert.alert('Permissão de Fotos', msg, [
+                            { text: 'Agora não', style: 'cancel' },
+                            {
+                              text: 'Abrir Configurações',
+                              onPress: () => void Linking.openSettings().catch(() => undefined),
+                            },
+                          ]);
+                        }
+                        return;
+                      }
+                      const result = await ImagePicker.launchImageLibraryAsync({
+                        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                        allowsEditing: true,
+                        aspect: [1, 1],
+                        quality: 0.82,
+                      });
+                      if (!result.canceled && result.assets?.[0]?.uri) {
+                        setPhotoSelectedDemo(true);
+                        updateField('profilePhotoUri', result.assets[0].uri);
+                      }
+                    } catch {
+                      setErrorMessage('Não foi possível abrir sua galeria de fotos agora.');
+                    }
+                  })();
+                }}
+                iconLeft={<CameraIcon size={20} color={palette.primaryText} />}
+              />
+
+              <AccessibleButton
+                label="Tirar foto com a câmera"
+                variant="secondary"
+                onPress={() => {
+                  void (async () => {
+                    setErrorMessage(null);
+                    try {
+                      const perm = await ImagePicker.requestCameraPermissionsAsync();
+                      if (!perm.granted) {
+                        const msg =
+                          'Permita o acesso à câmera nas configurações do aparelho para tirar sua foto de perfil.';
+                        setErrorMessage(msg);
+                        if (!perm.canAskAgain && Platform.OS !== 'web') {
+                          Alert.alert('Permissão de Câmera', msg, [
+                            { text: 'Agora não', style: 'cancel' },
+                            {
+                              text: 'Abrir Configurações',
+                              onPress: () => void Linking.openSettings().catch(() => undefined),
+                            },
+                          ]);
+                        }
+                        return;
+                      }
+                      const result = await ImagePicker.launchCameraAsync({
+                        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                        allowsEditing: true,
+                        aspect: [1, 1],
+                        quality: 0.82,
+                      });
+                      if (!result.canceled && result.assets?.[0]?.uri) {
+                        setPhotoSelectedDemo(true);
+                        updateField('profilePhotoUri', result.assets[0].uri);
+                      }
+                    } catch {
+                      setErrorMessage('Não foi possível abrir a câmera agora.');
+                    }
+                  })();
                 }}
                 iconLeft={<CameraIcon size={20} color={palette.primaryText} />}
               />
@@ -822,6 +906,7 @@ export function OnboardingFlowScreen({
             <TouchableOpacity
               onPress={() => updateField('acceptedTerms', !data.acceptedTerms)}
               accessibilityRole="checkbox"
+              accessibilityLabel="Concordo com os Termos de Uso e a Política de Privacidade"
               accessibilityState={{ checked: data.acceptedTerms }}
               style={styles.termsRow}
             >
@@ -839,23 +924,49 @@ export function OnboardingFlowScreen({
                 ) : null}
               </View>
               <Text style={[styles.termsText, { color: palette.textSecondary, fontSize: fs(15) }]}>
-                Li e concordo com os{' '}
-                <Text
-                  onPress={() => setLegalModal('termos')}
-                  style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}
-                >
-                  Termos de Uso
-                </Text>{' '}
-                e a{' '}
-                <Text
-                  onPress={() => setLegalModal('privacidade')}
-                  style={{ color: palette.primaryText, fontWeight: '700', textDecorationLine: 'underline' }}
-                >
-                  Política de Privacidade (LGPD)
-                </Text>
-                .
+                Li e concordo com os Termos de Uso e a Política de Privacidade (LGPD).
               </Text>
             </TouchableOpacity>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setLegalModal('termos')}
+                accessibilityRole="button"
+                accessibilityLabel="Ler Termos de Uso"
+                style={{
+                  minHeight: TOUCH_TARGET_MIN,
+                  paddingHorizontal: 14,
+                  justifyContent: 'center',
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: palette.borderStrong,
+                  backgroundColor: palette.surface,
+                }}
+              >
+                <Text style={{ color: palette.primaryText, fontSize: fs(14), fontWeight: '700' }}>
+                  Ler Termos de Uso
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setLegalModal('privacidade')}
+                accessibilityRole="button"
+                accessibilityLabel="Ler Política de Privacidade"
+                style={{
+                  minHeight: TOUCH_TARGET_MIN,
+                  paddingHorizontal: 14,
+                  justifyContent: 'center',
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: palette.borderStrong,
+                  backgroundColor: palette.surface,
+                }}
+              >
+                <Text style={{ color: palette.primaryText, fontSize: fs(14), fontWeight: '700' }}>
+                  Ler Política de Privacidade
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 

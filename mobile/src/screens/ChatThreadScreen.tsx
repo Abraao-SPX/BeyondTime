@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   BackHandler,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -12,6 +14,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import {
   CameraIcon,
   ChevronLeftIcon,
@@ -22,7 +27,7 @@ import {
 } from '../components/Icons';
 import { TOUCH_TARGET_MIN } from '../theme/theme';
 import { useTheme } from '../theme/ThemeContext';
-import type { ChatConversation, SendMessageOptions } from '../types/social';
+import type { ChatConversation, ChatMessage, SendMessageOptions } from '../types/social';
 
 interface ChatThreadScreenProps {
   conversation: ChatConversation;
@@ -31,24 +36,36 @@ interface ChatThreadScreenProps {
     conversationId: string,
     text: string,
     options?: SendMessageOptions
-  ) => void;
+  ) => Promise<boolean> | boolean | void;
   onBlockContact?: (profileId: string, fullName: string) => void;
 }
 
-const SAMPLE_CHAT_PHOTOS = [
-  {
-    id: 'photo-orla',
-    label: 'Fim de tarde na orla',
-    url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=700&q=80',
-  },
-  {
-    id: 'photo-cafe',
-    label: 'Café da tarde',
-    url: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=700&q=80',
-  },
-];
+interface PendingPhotoSelection {
+  uri: string;
+  mimeType: string;
+  label: string;
+}
 
 const WAVEFORM_BARS = [10, 18, 13, 24, 16, 28, 14, 22, 18, 26, 15, 20, 12];
+const MAX_AUDIO_DURATION_SECONDS = 600;
+
+function clampAudioDuration(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds < 1) return 1;
+  return Math.min(MAX_AUDIO_DURATION_SECONDS, Math.floor(seconds));
+}
+
+function promptOpenSettings(title: string, message: string): void {
+  if (Platform.OS === 'web') return;
+  Alert.alert(title, message, [
+    { text: 'Agora não', style: 'cancel' },
+    {
+      text: 'Abrir Configurações',
+      onPress: () => {
+        void Linking.openSettings().catch(() => undefined);
+      },
+    },
+  ]);
+}
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -71,21 +88,41 @@ export function ChatThreadScreen({
 }: ChatThreadScreenProps) {
   const { palette, isDark, fs } = useTheme();
   const [draft, setDraft] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
 
-  // Gravação de voz acessível (toque único, sem precisar ficar segurando)
+  // Gravação e reprodução real de voz (expo-av, toque único sem precisar segurar)
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [mediaNotice, setMediaNotice] = useState<string | null>(null);
 
-  // Bandeja de envio de foto
+  // Bandeja de envio de foto real (galeria ou câmera via expo-image-picker)
   const [showPhotoTray, setShowPhotoTray] = useState(false);
-  const [selectedPhotoId, setSelectedPhotoId] = useState(SAMPLE_CHAT_PHOTOS[0].id);
+  const [pendingPhoto, setPendingPhoto] = useState<PendingPhotoSelection | null>(null);
 
   const scrollRef = useRef<ScrollView>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const handleSendAudioRef = useRef<() => Promise<void>>(async () => undefined);
 
   const firstName = conversation.fullName.split(' ')[0] || conversation.fullName;
+
+  useEffect(() => {
+    return () => {
+      const activeRec = recordingRef.current;
+      recordingRef.current = null;
+      if (activeRec) {
+        void activeRec.stopAndUnloadAsync().catch(() => undefined);
+      }
+      const activeSound = soundRef.current;
+      soundRef.current = null;
+      if (activeSound) {
+        void activeSound.unloadAsync().catch(() => undefined);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -96,53 +133,274 @@ export function ChatThreadScreen({
   }, [onBackToList]);
 
   useEffect(() => {
+    setImgError(false);
+  }, [conversation.id, conversation.photoUrl]);
+
+  useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [conversation.messages.length]);
 
   useEffect(() => {
     if (!isRecording) return;
     const timer = setInterval(() => {
-      setRecordingSeconds((prev) => prev + 1);
+      setRecordingSeconds((prev) => {
+        if (prev >= MAX_AUDIO_DURATION_SECONDS) {
+          void handleSendAudioRef.current();
+          return MAX_AUDIO_DURATION_SECONDS;
+        }
+        return prev + 1;
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, [isRecording]);
 
-  const handleSendText = () => {
+  const handleSendText = async () => {
     const clean = draft.trim();
-    if (!clean) return;
-    onSendMessage(conversation.id, clean, { kind: 'text' });
-    setDraft('');
+    if (!clean || isSending) return;
+    setIsSending(true);
+    try {
+      const result = await onSendMessage(conversation.id, clean, { kind: 'text' });
+      if (result !== false) {
+        setDraft('');
+      }
+    } finally {
+      setIsSending(false);
+    }
   };
 
-  const handleStartRecording = () => {
+  const handleStartRecording = async () => {
     setShowPhotoTray(false);
-    setRecordingSeconds(1);
-    setIsRecording(true);
+    setPendingPhoto(null);
+    setMediaNotice(null);
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) {
+        const msg =
+          'Permita o acesso ao microfone nas configurações do aparelho para gravar mensagens de voz.';
+        setMediaNotice(msg);
+        if (!perm.canAskAgain) {
+          promptOpenSettings('Permissão de Microfone', msg);
+        }
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = recording;
+      setRecordingSeconds(1);
+      setIsRecording(true);
+    } catch {
+      setMediaNotice(
+        'Não foi possível iniciar a gravação de áudio neste aparelho. Você pode enviar texto ou foto.'
+      );
+      setIsRecording(false);
+      setRecordingSeconds(0);
+    }
   };
 
-  const handleCancelRecording = () => {
+  const handleCancelRecording = async () => {
+    const activeRec = recordingRef.current;
+    recordingRef.current = null;
     setIsRecording(false);
     setRecordingSeconds(0);
+    if (activeRec) {
+      try {
+        await activeRec.stopAndUnloadAsync();
+      } catch {
+        // ignora erro ao descartar gravação
+      }
+    }
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    } catch {
+      // ignora
+    }
   };
 
-  const handleSendAudio = () => {
-    const duration = Math.max(1, recordingSeconds);
-    onSendMessage(conversation.id, `Mensagem de voz (${formatDuration(duration)})`, {
-      kind: 'audio',
-      audioDurationSec: duration,
-    });
+  const handleSendAudio = async () => {
+    if (isSending) return;
+    const activeRec = recordingRef.current;
+    recordingRef.current = null;
+    const duration = clampAudioDuration(recordingSeconds);
     setIsRecording(false);
     setRecordingSeconds(0);
+
+    let recordedUri: string | undefined;
+    if (activeRec) {
+      try {
+        await activeRec.stopAndUnloadAsync();
+        recordedUri = activeRec.getURI() ?? undefined;
+      } catch {
+        // ignora erro ao finalizar gravação
+      }
+    }
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    } catch {
+      // ignora
+    }
+
+    if (!recordedUri) {
+      setMediaNotice('Não foi possível salvar o áudio gravado. Tente novamente.');
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      const ok = await onSendMessage(
+        conversation.id,
+        `Mensagem de voz (${formatDuration(duration)})`,
+        {
+          kind: 'audio',
+          audioDurationSec: duration,
+          audioUri: recordedUri,
+          mimeType: Platform.OS === 'web' ? 'audio/webm' : 'audio/mp4',
+        }
+      );
+      if (ok === false) {
+        setMediaNotice('Não foi possível enviar o áudio agora. Tente novamente.');
+      } else if (Platform.OS !== 'web' && recordedUri.startsWith('file://')) {
+        void FileSystem.deleteAsync(recordedUri, { idempotent: true }).catch(() => undefined);
+      }
+    } finally {
+      setIsSending(false);
+    }
+  };
+  handleSendAudioRef.current = handleSendAudio;
+
+  const handleTogglePlayAudio = async (msg: ChatMessage) => {
+    if (playingMessageId === msg.id) {
+      const currentSound = soundRef.current;
+      soundRef.current = null;
+      setPlayingMessageId(null);
+      if (currentSound) {
+        void currentSound.stopAsync().then(() => currentSound.unloadAsync()).catch(() => undefined);
+      }
+      return;
+    }
+
+    if (soundRef.current) {
+      const prev = soundRef.current;
+      soundRef.current = null;
+      void prev.stopAsync().then(() => prev.unloadAsync()).catch(() => undefined);
+    }
+
+    if (!msg.audioUri) {
+      setMediaNotice('Este áudio ainda está sendo carregado ou não possui arquivo anexado.');
+      return;
+    }
+
+    try {
+      setMediaNotice(null);
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: msg.audioUri },
+        { shouldPlay: true }
+      );
+      soundRef.current = sound;
+      setPlayingMessageId(msg.id);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setPlayingMessageId((curr) => (curr === msg.id ? null : curr));
+          void sound.unloadAsync().catch(() => undefined);
+          if (soundRef.current === sound) {
+            soundRef.current = null;
+          }
+        }
+      });
+    } catch {
+      setPlayingMessageId(null);
+      setMediaNotice('Não foi possível reproduzir esta mensagem de voz agora.');
+    }
   };
 
-  const handleSendSelectedPhoto = () => {
-    const chosen =
-      SAMPLE_CHAT_PHOTOS.find((p) => p.id === selectedPhotoId) ?? SAMPLE_CHAT_PHOTOS[0];
-    onSendMessage(conversation.id, chosen.label, {
-      kind: 'photo',
-      photoUrl: chosen.url,
-    });
-    setShowPhotoTray(false);
+  const handlePickPhotoFromLibrary = async () => {
+    setMediaNotice(null);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        const msg = 'Permita o acesso às fotos do aparelho para escolher uma imagem.';
+        setMediaNotice(msg);
+        if (!perm.canAskAgain) {
+          promptOpenSettings('Permissão de Fotos', msg);
+        }
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.78,
+      });
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        const asset = result.assets[0];
+        setPendingPhoto({
+          uri: asset.uri,
+          mimeType: asset.mimeType || 'image/jpeg',
+          label: asset.fileName || 'Foto enviada',
+        });
+      }
+    } catch {
+      setMediaNotice('Não foi possível abrir a galeria de fotos agora.');
+    }
+  };
+
+  const handleTakePhotoWithCamera = async () => {
+    setMediaNotice(null);
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        const msg = 'Permita o acesso à câmera do aparelho para tirar uma foto.';
+        setMediaNotice(msg);
+        if (!perm.canAskAgain) {
+          promptOpenSettings('Permissão de Câmera', msg);
+        }
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.78,
+      });
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        const asset = result.assets[0];
+        setPendingPhoto({
+          uri: asset.uri,
+          mimeType: asset.mimeType || 'image/jpeg',
+          label: 'Foto da câmera',
+        });
+      }
+    } catch {
+      setMediaNotice('Não foi possível abrir a câmera agora.');
+    }
+  };
+
+  const handleSendSelectedPhoto = async () => {
+    if (!pendingPhoto || isSending) return;
+    setIsSending(true);
+    try {
+      const ok = await onSendMessage(conversation.id, draft.trim() || pendingPhoto.label, {
+        kind: 'photo',
+        photoUrl: pendingPhoto.uri,
+        mimeType: pendingPhoto.mimeType,
+      });
+      if (ok !== false) {
+        setPendingPhoto(null);
+        setShowPhotoTray(false);
+        setDraft('');
+        setMediaNotice(null);
+      } else {
+        setMediaNotice('Não foi possível enviar a foto agora. Tente novamente.');
+      }
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const initials = conversation.fullName
@@ -178,7 +436,7 @@ export function ChatThreadScreen({
         </TouchableOpacity>
 
         <View style={styles.contactBlock}>
-          {!imgError ? (
+          {!imgError && conversation.photoUrl ? (
             <Image
               source={{ uri: conversation.photoUrl }}
               style={styles.headerAvatar}
@@ -318,9 +576,7 @@ export function ChatThreadScreen({
                     </View>
                   ) : msg.kind === 'audio' ? (
                     <TouchableOpacity
-                      onPress={() =>
-                        setPlayingMessageId((prev) => (prev === msg.id ? null : msg.id))
-                      }
+                      onPress={() => void handleTogglePlayAudio(msg)}
                       activeOpacity={0.8}
                       accessibilityRole="button"
                       accessibilityLabel={
@@ -401,7 +657,9 @@ export function ChatThreadScreen({
                   {msg.kind === 'audio'
                     ? `${msg.timestamp} • Mensagem de voz`
                     : isMe
-                      ? `${msg.timestamp} • Lida`
+                      ? msg.read
+                        ? `${msg.timestamp} • Lida`
+                        : `${msg.timestamp} • Enviada`
                       : msg.timestamp}
                 </Text>
               </View>
@@ -410,7 +668,20 @@ export function ChatThreadScreen({
         )}
       </ScrollView>
 
-      {/* Bandeja acessível de envio de foto */}
+      {mediaNotice ? (
+        <View
+          style={[
+            styles.safetyBanner,
+            { backgroundColor: palette.primarySoft, borderBottomColor: palette.border },
+          ]}
+        >
+          <Text style={[styles.safetyText, { color: palette.textPrimary, fontSize: fs(14) }]}>
+            {mediaNotice}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Bandeja acessível de envio de foto real (galeria ou câmera) */}
       {showPhotoTray && !isRecording ? (
         <View
           style={[
@@ -424,43 +695,83 @@ export function ChatThreadScreen({
               { color: palette.textPrimary, fontSize: fs(15) },
             ]}
           >
-            Escolha uma foto para enviar
+            Escolha uma foto do seu aparelho
           </Text>
 
-          <View style={styles.photoChoicesRow}>
-            {SAMPLE_CHAT_PHOTOS.map((photo) => {
-              const selected = selectedPhotoId === photo.id;
-              return (
-                <TouchableOpacity
-                  key={photo.id}
-                  onPress={() => setSelectedPhotoId(photo.id)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
+          {pendingPhoto ? (
+            <View style={styles.photoChoicesRow}>
+              <View
+                style={[
+                  styles.photoChoiceCard,
+                  {
+                    backgroundColor: palette.primarySoft,
+                    borderColor: palette.primary,
+                  },
+                ]}
+              >
+                <Image source={{ uri: pendingPhoto.uri }} style={styles.photoChoiceThumb} />
+                <Text
+                  numberOfLines={1}
                   style={[
-                    styles.photoChoiceCard,
-                    {
-                      backgroundColor: selected ? palette.primarySoft : palette.background,
-                      borderColor: selected ? palette.primary : palette.border,
-                    },
+                    styles.photoChoiceLabel,
+                    { color: palette.textPrimary, fontSize: fs(13) },
                   ]}
                 >
-                  <Image source={{ uri: photo.url }} style={styles.photoChoiceThumb} />
-                  <Text
-                    style={[
-                      styles.photoChoiceLabel,
-                      { color: palette.textPrimary, fontSize: fs(13) },
-                    ]}
-                  >
-                    {photo.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                  {pendingPhoto.label}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.trayActionsRow}>
+              <TouchableOpacity
+                onPress={() => void handlePickPhotoFromLibrary()}
+                accessibilityRole="button"
+                accessibilityLabel="Escolher foto da galeria"
+                style={[
+                  styles.trayBtnOutline,
+                  { backgroundColor: palette.background, borderColor: palette.borderStrong },
+                ]}
+              >
+                <CameraIcon size={18} color={palette.textPrimary} />
+                <Text
+                  style={[
+                    styles.trayBtnText,
+                    { color: palette.textPrimary, fontSize: fs(15) },
+                  ]}
+                >
+                  Galeria
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => void handleTakePhotoWithCamera()}
+                accessibilityRole="button"
+                accessibilityLabel="Tirar foto com a câmera"
+                style={[
+                  styles.trayBtnOutline,
+                  { backgroundColor: palette.background, borderColor: palette.borderStrong },
+                ]}
+              >
+                <CameraIcon size={18} color={palette.textPrimary} />
+                <Text
+                  style={[
+                    styles.trayBtnText,
+                    { color: palette.textPrimary, fontSize: fs(15) },
+                  ]}
+                >
+                  Câmera
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.trayActionsRow}>
             <TouchableOpacity
-              onPress={() => setShowPhotoTray(false)}
+              onPress={() => {
+                setPendingPhoto(null);
+                setShowPhotoTray(false);
+                setMediaNotice(null);
+              }}
               accessibilityRole="button"
               accessibilityLabel="Cancelar envio de foto"
               style={[
@@ -480,10 +791,17 @@ export function ChatThreadScreen({
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={handleSendSelectedPhoto}
+              onPress={() => void handleSendSelectedPhoto()}
+              disabled={!pendingPhoto || isSending}
               accessibilityRole="button"
               accessibilityLabel="Enviar foto selecionada"
-              style={[styles.trayBtnPrimary, { backgroundColor: palette.primaryHover }]}
+              style={[
+                styles.trayBtnPrimary,
+                {
+                  backgroundColor:
+                    pendingPhoto && !isSending ? palette.primaryHover : palette.border,
+                },
+              ]}
             >
               <SendIcon size={18} color={palette.textOnPrimary} />
               <Text
@@ -492,7 +810,7 @@ export function ChatThreadScreen({
                   { color: palette.textOnPrimary, fontSize: fs(15) },
                 ]}
               >
-                Enviar foto
+                {isSending ? 'Enviando...' : 'Enviar foto'}
               </Text>
             </TouchableOpacity>
           </View>

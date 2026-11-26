@@ -32,7 +32,10 @@ export function isMetropolitanAracaju(city: string): boolean {
 }
 
 export function getHobbyLabelById(hobbyId: string): string {
-  return HOBBIES_CATALOG.find((item) => item.id === hobbyId)?.label ?? hobbyId;
+  return (
+    HOBBIES_CATALOG.find((item) => item.id === hobbyId || item.slug === hobbyId)?.label ??
+    hobbyId
+  );
 }
 
 /**

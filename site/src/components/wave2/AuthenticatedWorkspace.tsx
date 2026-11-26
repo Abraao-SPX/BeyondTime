@@ -157,6 +157,7 @@ export function AuthenticatedWorkspace({
   const [chatKeyUnavailable, setChatKeyUnavailable] = useState(false);
   const [isRetryingChatKey, setIsRetryingChatKey] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [verifiedNow, setVerifiedNow] = useState(false);
 
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
@@ -291,7 +292,7 @@ export function AuthenticatedWorkspace({
   );
 
   // O selo só é exibido quando o backend confirma a verificação (RF-11).
-  const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true;
+  const isFaciallyVerified = serverProfile?.verifiedBadge50plus === true || verifiedNow;
 
   useEffect(() => {
     if (isPreviewMode) {
@@ -1505,7 +1506,18 @@ export function AuthenticatedWorkspace({
         />
       )}
 
-      {isQrModalOpen && <FacialVerificationQrModal onClose={() => setIsQrModalOpen(false)} />}
+      {isQrModalOpen && (
+        <FacialVerificationQrModal
+          firstName={displayFullName.trim().split(/\s+/)[0] || undefined}
+          onClose={() => setIsQrModalOpen(false)}
+          onVerified={(res) => {
+            if (res.verifiedBadge50plus) {
+              setVerifiedNow(true);
+              setSafetyFeedback('Selo de Verificado 50+ concedido com sucesso!');
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

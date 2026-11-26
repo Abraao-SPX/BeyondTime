@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
   AccessibilityInfo,
+  Alert,
   Animated,
   Easing,
   Linking,
@@ -137,9 +138,12 @@ export function SplashWelcomeScreen({
   ]);
 
   const handleOpenSupport = () => {
-    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Suporte%20BeyondTime%20Mobile`).catch(
-      () => undefined
-    );
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Suporte%20BeyondTime%20Mobile`).catch(() => {
+      Alert.alert(
+        'Suporte BeyondTime',
+        `Não encontramos um aplicativo de e-mail configurado neste aparelho. Envie sua mensagem para: ${SUPPORT_EMAIL}`
+      );
+    });
   };
 
   return (
