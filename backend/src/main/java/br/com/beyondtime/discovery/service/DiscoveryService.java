@@ -161,19 +161,27 @@ public class DiscoveryService {
         Set<Integer> requiredHobbyIds = resolveFilterHobbyIds(hobbyFilters, hobbyById);
         boolean requireVerified = Boolean.TRUE.equals(onlyVerified);
 
-        List<Profile> allProfiles = profileRepository.findAll();
+        LocalDate maxBirthDate = LocalDate.now().minusYears(50);
+        List<Profile> candidateProfiles = profileRepository.findDiscoveryCandidates(
+                UserStatus.ACTIVE,
+                maxBirthDate,
+                excludedUserIds
+        );
+
+        List<UUID> candidateUserIds = candidateProfiles.stream()
+                .map(Profile::getUserId)
+                .toList();
+
         Map<UUID, User> usersById = new HashMap<>();
-        for (User u : userRepository.findAll()) {
-            usersById.put(u.getId(), u);
+        if (!candidateUserIds.isEmpty()) {
+            for (User u : userRepository.findAllById(candidateUserIds)) {
+                usersById.put(u.getId(), u);
+            }
         }
 
         List<ScoredCandidateInternal> scored = new ArrayList<>();
-        for (Profile candidateProfile : allProfiles) {
+        for (Profile candidateProfile : candidateProfiles) {
             UUID candidateUserId = candidateProfile.getUserId();
-            if (excludedUserIds.contains(candidateUserId)) {
-                continue;
-            }
-
             User candidateUser = usersById.get(candidateUserId);
             if (candidateUser == null || candidateUser.getStatus() != UserStatus.ACTIVE) {
                 continue;

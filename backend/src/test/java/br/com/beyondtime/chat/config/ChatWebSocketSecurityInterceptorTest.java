@@ -1,6 +1,7 @@
 package br.com.beyondtime.chat.config;
 
 import br.com.beyondtime.auth.domain.User;
+import br.com.beyondtime.auth.domain.UserRole;
 import br.com.beyondtime.auth.domain.UserStatus;
 import br.com.beyondtime.auth.repository.UserRepository;
 import br.com.beyondtime.shared.security.AuthenticatedUser;
@@ -45,7 +46,7 @@ class ChatWebSocketSecurityInterceptorTest {
         User deletedUser = new User("del@beyondtime.test", null, "hash", LocalDate.of(1960, 1, 1));
         deletedUser.anonymizeAndMarkDeleted(OffsetDateTime.now());
         when(jwtService.parseAccessToken("tok-del"))
-                .thenReturn(new AuthenticatedUser(deletedUser.getId(), deletedUser.getEmail(), "USER"));
+                .thenReturn(new AuthenticatedUser(deletedUser.getId(), deletedUser.getEmail(), UserRole.USER));
         when(userRepository.findById(deletedUser.getId())).thenReturn(Optional.of(deletedUser));
 
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
@@ -60,7 +61,7 @@ class ChatWebSocketSecurityInterceptorTest {
         User suspendedUser = new User("susp@beyondtime.test", null, "hash", LocalDate.of(1960, 1, 1));
         suspendedUser.setStatus(UserStatus.SUSPENDED_PREVENTIVE);
         when(jwtService.parseAccessToken("tok-susp"))
-                .thenReturn(new AuthenticatedUser(suspendedUser.getId(), suspendedUser.getEmail(), "USER"));
+                .thenReturn(new AuthenticatedUser(suspendedUser.getId(), suspendedUser.getEmail(), UserRole.USER));
         when(userRepository.findById(suspendedUser.getId())).thenReturn(Optional.of(suspendedUser));
 
         StompHeaderAccessor suspAccessor = StompHeaderAccessor.create(StompCommand.CONNECT);
@@ -76,7 +77,7 @@ class ChatWebSocketSecurityInterceptorTest {
     void deveAceitarConnectParaUsuarioAtivoEPermitirApenasDestinosAutorizados() {
         User activeUser = new User("ativo@beyondtime.test", null, "hash", LocalDate.of(1960, 1, 1));
         when(jwtService.parseAccessToken("tok-ok"))
-                .thenReturn(new AuthenticatedUser(activeUser.getId(), activeUser.getEmail(), "USER"));
+                .thenReturn(new AuthenticatedUser(activeUser.getId(), activeUser.getEmail(), UserRole.USER));
         when(userRepository.findById(activeUser.getId())).thenReturn(Optional.of(activeUser));
 
         StompHeaderAccessor connectAcc = StompHeaderAccessor.create(StompCommand.CONNECT);
