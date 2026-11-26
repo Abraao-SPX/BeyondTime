@@ -1,3 +1,4 @@
 venv/
 *.joblib
+!modelo_anjo.joblib
 __pycache__/

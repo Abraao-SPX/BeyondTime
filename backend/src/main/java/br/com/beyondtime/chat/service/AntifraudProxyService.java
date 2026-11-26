@@ -4,6 +4,7 @@ import br.com.beyondtime.chat.dto.AntifraudCheckResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -21,14 +22,22 @@ import java.util.Set;
 public class AntifraudProxyService {
 
     private static final Logger log = LoggerFactory.getLogger(AntifraudProxyService.class);
-    private static final double ALERT_THRESHOLD_PERCENT = 75.0;
     private static final Set<String> SAFE_LABELS = Set.of("NORMAL", "CONVERSA_NORMAL", "SEGURO");
 
     private final RestClient restClient;
+    private final double alertThresholdPercent;
+    private final String internalToken;
 
+    public AntifraudProxyService(String baseUrl, int timeoutMs, double alertThresholdPercent) {
+        this(baseUrl, timeoutMs, alertThresholdPercent, "");
+    }
+
+    @Autowired
     public AntifraudProxyService(
-            @Value("${beyondtime.antifraud.base-url:http://ml-antifraude:8000}") String baseUrl,
-            @Value("${beyondtime.antifraud.timeout-ms:600}") int timeoutMs) {
+            @Value("${beyondtime.antifraud.base-url:http://127.0.0.1:8001}") String baseUrl,
+            @Value("${beyondtime.antifraud.timeout-ms:600}") int timeoutMs,
+            @Value("${beyondtime.antifraud.alert-threshold-percent:45.0}") double alertThresholdPercent,
+            @Value("${beyondtime.antifraud.internal-token:}") String internalToken) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(timeoutMs);
         requestFactory.setReadTimeout(timeoutMs);
@@ -37,6 +46,8 @@ public class AntifraudProxyService {
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
                 .build();
+        this.alertThresholdPercent = alertThresholdPercent;
+        this.internalToken = internalToken == null ? "" : internalToken.trim();
     }
 
     public AntifraudCheckResponse checkStateless(String decryptedText) {
@@ -45,9 +56,14 @@ public class AntifraudProxyService {
         }
 
         try {
-            JsonNode response = restClient.post()
+            RestClient.RequestBodySpec requestSpec = restClient.post()
                     .uri("/analisar")
-                    .contentType(MediaType.APPLICATION_JSON)
+                    .contentType(MediaType.APPLICATION_JSON);
+            if (!internalToken.isEmpty()) {
+                requestSpec = requestSpec.header("X-Antifraud-Token", internalToken);
+            }
+
+            JsonNode response = requestSpec
                     .body(Map.of("texto", decryptedText))
                     .retrieve()
                     .body(JsonNode.class);
@@ -59,7 +75,7 @@ public class AntifraudProxyService {
             String intencao = response.path("intencao").asText("NORMAL").trim().toUpperCase();
             double certeza = response.path("certeza_percentual").asDouble(0.0);
 
-            if (SAFE_LABELS.contains(intencao) || certeza < ALERT_THRESHOLD_PERCENT) {
+            if (SAFE_LABELS.contains(intencao) || certeza < alertThresholdPercent) {
                 return new AntifraudCheckResponse(false, intencao, certeza, null, null);
             }
 
@@ -80,15 +96,21 @@ public class AntifraudProxyService {
     private String buildEducationalGuidance(String riskLabel) {
         return switch (riskLabel) {
             case "PEDIDO_DINHEIRO", "EMERGENCIA_FINANCEIRA", "FALSO_INTERMEDIARIO" ->
-                    "Identificamos um possível pedido financeiro ou de Pix. Por segurança, nunca transfira dinheiro para pessoas que você ainda não conhece pessoalmente.";
+                    "Identificamos um possível pedido financeiro ou de Pix. Por segurança, nunca transfira dinheiro sem confirmar por chamada de vídeo ou telefone conhecido.";
             case "PEDIDO_CREDENCIAL" ->
-                    "Nunca compartilhe senhas, códigos de SMS, dados bancários ou fotos de documentos pelo chat.";
+                    "Nunca compartilhe senhas, códigos de SMS, conta gov.br, dados bancários, fotos de documentos ou cartões com terceiros.";
             case "LINK_MALICIOSO" ->
-                    "Cuidado com links externos ou arquivos para baixar. Evite clicar em endereços desconhecidos enviados por conversa.";
+                    "Cuidado com links externos, avisos urgentes do INSS ou pedidos para instalar aplicativos (como AnyDesk/TeamViewer). Evite clicar ou baixar arquivos enviados por conversa.";
             case "INVESTIMENTO_SUSPEITO", "FALSA_DOACAO_HERANCA", "ENCOMENDA_TAXA" ->
-                    "Desconfie de promessas de lucro garantido, heranças ou taxas para liberar pacotes. Essas abordagens costumam ser golpes.";
+                    "Desconfie de lucro garantido, tarefas remuneradas, precatórios ou taxas via Pix para liberar pacotes ou heranças. Essas abordagens costumam ser golpes.";
             case "AMEACA_EXTORSAO" ->
-                    "Você não precisa ceder a pressões ou ameaças. Você pode bloquear este contato imediatamente e acionar a denúncia.";
+                    "Você não precisa ceder a pressões, urgências ou ameaças. Você pode bloquear este contato imediatamente e acionar a denúncia.";
+            case "MENSAGEM_SUSPEITA" ->
+                    "Evite levar a conversa para fora do aplicativo com pessoas que você acabou de conhecer e desconfie de palavras disfarçadas para pedir Pix ou dados.";
+            case "SUBLIMACAO_MENSAGEM" ->
+                    "Desconfie de pedidos para apagar conversas ou esconder o contato da sua família. Conversas seguras não exigem segredo nem pressão emocional.";
+            case "SONDAGEM_FINANCEIRA" ->
+                    "Proteja sua privacidade: evite informar valores de aposentadoria, margem consignável, limites de cartão ou se você mora sozinho(a).";
             default ->
                     "Atenção: esta mensagem contém sinais que merecem cautela. Proteja seus dados pessoais e financeiros.";
         };
