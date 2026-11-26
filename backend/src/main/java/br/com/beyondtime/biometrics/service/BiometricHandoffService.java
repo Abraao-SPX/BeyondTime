@@ -109,7 +109,7 @@ public class BiometricHandoffService {
         );
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public BiometricHandoffSessionInfoResponse getPublicSessionInfo(String token) {
         BiometricHandoffSession session = findSessionOrThrow(token);
         OffsetDateTime now = OffsetDateTime.now();
@@ -140,7 +140,7 @@ public class BiometricHandoffService {
         );
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public VerifyBiometricsResponse completeHandoff(String token, VerifyBiometricsRequest request) {
         BiometricHandoffSession session = findSessionOrThrow(token);
         OffsetDateTime now = OffsetDateTime.now();

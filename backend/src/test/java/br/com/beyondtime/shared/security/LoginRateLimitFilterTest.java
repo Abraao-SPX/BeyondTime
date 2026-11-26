@@ -141,6 +141,46 @@ class LoginRateLimitFilterTest {
     }
 
     @Test
+    void shouldMatchTrustedProxiesUsingCidrRangesForDockerBridgeNetwork() throws ServletException, IOException {
+        LoginRateLimitFilter cidrFilter = new LoginRateLimitFilter(
+                objectMapper,
+                15,
+                60,
+                true,
+                "127.0.0.1/32,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+        );
+        FilterChain filterChain = mock(FilterChain.class);
+
+        for (int i = 0; i < 15; i++) {
+            MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+            req.setServletPath("/api/v1/auth/login");
+            req.setRemoteAddr("172.22.0.14"); // IP dinâmico do container Nginx na rede bridge Docker
+            req.addHeader("X-Forwarded-For", "198.51.100.77, 172.22.0.14");
+            MockHttpServletResponse res = new MockHttpServletResponse();
+            cidrFilter.doFilter(req, res, filterChain);
+            assertThat(res.getStatus()).isEqualTo(200);
+        }
+
+        // 16ª requisição do mesmo cliente atrás do CIDR confiável é bloqueada
+        MockHttpServletRequest reqBlocked = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        reqBlocked.setServletPath("/api/v1/auth/login");
+        reqBlocked.setRemoteAddr("172.22.0.14");
+        reqBlocked.addHeader("X-Forwarded-For", "198.51.100.77, 172.22.0.14");
+        MockHttpServletResponse resBlocked = new MockHttpServletResponse();
+        cidrFilter.doFilter(reqBlocked, resBlocked, filterChain);
+        assertThat(resBlocked.getStatus()).isEqualTo(429);
+
+        // Outro cliente distinto atrás do mesmo proxy CIDR continua liberado
+        MockHttpServletRequest reqOther = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        reqOther.setServletPath("/api/v1/auth/login");
+        reqOther.setRemoteAddr("10.88.0.5");
+        reqOther.addHeader("X-Forwarded-For", "198.51.100.88");
+        MockHttpServletResponse resOther = new MockHttpServletResponse();
+        cidrFilter.doFilter(reqOther, resOther, filterChain);
+        assertThat(resOther.getStatus()).isEqualTo(200);
+    }
+
+    @Test
     void shouldNotFilterGetRequests() throws ServletException, IOException {
         FilterChain filterChain = mock(FilterChain.class);
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/v1/auth/login");

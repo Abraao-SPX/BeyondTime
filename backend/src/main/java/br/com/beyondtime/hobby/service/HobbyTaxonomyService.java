@@ -10,8 +10,12 @@ import br.com.beyondtime.hobby.dto.UserHobbySelectionResponse;
 import br.com.beyondtime.hobby.repository.HobbyCategoryRepository;
 import br.com.beyondtime.hobby.repository.HobbyRepository;
 import br.com.beyondtime.hobby.repository.UserHobbyRepository;
+import br.com.beyondtime.profile.domain.ProfileHobby;
+import br.com.beyondtime.profile.repository.ProfileHobbyRepository;
+import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,14 +38,28 @@ public class HobbyTaxonomyService {
     private final HobbyCategoryRepository hobbyCategoryRepository;
     private final HobbyRepository hobbyRepository;
     private final UserHobbyRepository userHobbyRepository;
+    private final ProfileRepository profileRepository;
+    private final ProfileHobbyRepository profileHobbyRepository;
 
     public HobbyTaxonomyService(
             HobbyCategoryRepository hobbyCategoryRepository,
             HobbyRepository hobbyRepository,
             UserHobbyRepository userHobbyRepository) {
+        this(hobbyCategoryRepository, hobbyRepository, userHobbyRepository, null, null);
+    }
+
+    @Autowired
+    public HobbyTaxonomyService(
+            HobbyCategoryRepository hobbyCategoryRepository,
+            HobbyRepository hobbyRepository,
+            UserHobbyRepository userHobbyRepository,
+            ProfileRepository profileRepository,
+            ProfileHobbyRepository profileHobbyRepository) {
         this.hobbyCategoryRepository = hobbyCategoryRepository;
         this.hobbyRepository = hobbyRepository;
         this.userHobbyRepository = userHobbyRepository;
+        this.profileRepository = profileRepository;
+        this.profileHobbyRepository = profileHobbyRepository;
     }
 
     public List<HobbyCategoryCatalogResponse> getCatalog() {
@@ -121,6 +139,16 @@ public class HobbyTaxonomyService {
                 .toList();
 
         userHobbyRepository.saveAll(entitiesToSave);
+
+        // Sincronização transacional 3FN com profile_hobbies (SEC-ALTA-04 / RF-03)
+        if (profileRepository != null && profileHobbyRepository != null) {
+            profileRepository.findByUserId(userId).ifPresent(profile -> {
+                profileHobbyRepository.deleteAllByProfileId(profile.getId());
+                for (Integer hobbyId : distinctHobbyIds) {
+                    profileHobbyRepository.save(new ProfileHobby(profile.getId(), hobbyId));
+                }
+            });
+        }
 
         List<HobbyResponse> savedResponses = entitiesToSave.stream()
                 .map(UserHobby::getHobby)

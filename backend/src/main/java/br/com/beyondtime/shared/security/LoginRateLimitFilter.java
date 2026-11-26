@@ -10,17 +10,18 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.web.util.matcher.IpAddressMatcher;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,11 +49,14 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
             "/api/v1/auth/reset-password"
     );
 
+    private static final String DEFAULT_TRUSTED_PROXIES =
+            "127.0.0.1/32,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16";
+
     private final ObjectMapper objectMapper;
     private final int maxRequestsPerMinute;
     private final long windowMillis;
     private final boolean trustForwardedHeaders;
-    private final Set<String> trustedProxies;
+    private final List<IpAddressMatcher> trustedProxyMatchers;
     private final Map<String, Deque<Long>> requestTimestampsByBucket = new ConcurrentHashMap<>();
     private final AtomicInteger requestCounter = new AtomicInteger(0);
 
@@ -61,7 +65,7 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
             int maxRequestsPerMinute,
             long windowSeconds,
             boolean trustForwardedHeaders) {
-        this(objectMapper, maxRequestsPerMinute, windowSeconds, trustForwardedHeaders, "127.0.0.1,::1");
+        this(objectMapper, maxRequestsPerMinute, windowSeconds, trustForwardedHeaders, DEFAULT_TRUSTED_PROXIES);
     }
 
     @Autowired
@@ -70,17 +74,12 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
             @Value("${beyondtime.security.login.ip-max-requests-per-minute:15}") int maxRequestsPerMinute,
             @Value("${beyondtime.security.login.ip-window-seconds:60}") long windowSeconds,
             @Value("${beyondtime.security.login.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
-            @Value("${beyondtime.security.login.trusted-proxies:127.0.0.1,::1}") String trustedProxiesCsv) {
+            @Value("${beyondtime.security.login.trusted-proxies:127.0.0.1/32,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}") String trustedProxiesCsv) {
         this.objectMapper = objectMapper;
         this.maxRequestsPerMinute = maxRequestsPerMinute;
         this.windowMillis = Math.max(1L, windowSeconds) * 1000L;
         this.trustForwardedHeaders = trustForwardedHeaders;
-        this.trustedProxies = trustedProxiesCsv == null
-                ? Set.of()
-                : Arrays.stream(trustedProxiesCsv.split(","))
-                        .map(String::trim)
-                        .filter(s -> !s.isEmpty())
-                        .collect(Collectors.toUnmodifiableSet());
+        this.trustedProxyMatchers = parseTrustedProxyMatchers(trustedProxiesCsv);
     }
 
     @Override
@@ -193,14 +192,14 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
 
     private String extractClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr() != null ? request.getRemoteAddr().trim() : "unknown";
-        if (trustForwardedHeaders && trustedProxies.contains(remoteAddr)) {
+        if (trustForwardedHeaders && isTrustedProxy(remoteAddr)) {
             String forwardedFor = request.getHeader("X-Forwarded-For");
             if (forwardedFor != null && !forwardedFor.isBlank()) {
                 String[] parts = forwardedFor.split(",");
-                // Caminha da direita para a esquerda ignorando proxies confiáveis para obter o IP real adicionado pelo proxy (AUD-015)
+                // Caminha da direita para a esquerda ignorando proxies confiáveis para obter o IP real adicionado pelo proxy (AUD-015 / SEC-ALTA-01)
                 for (int i = parts.length - 1; i >= 0; i--) {
                     String candidate = parts[i].trim();
-                    if (!candidate.isEmpty() && !trustedProxies.contains(candidate)) {
+                    if (!candidate.isEmpty() && !isTrustedProxy(candidate)) {
                         return candidate;
                     }
                 }
@@ -211,5 +210,41 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
             }
         }
         return remoteAddr;
+    }
+
+    private List<IpAddressMatcher> parseTrustedProxyMatchers(String trustedProxiesCsv) {
+        if (trustedProxiesCsv == null || trustedProxiesCsv.isBlank()) {
+            return List.of();
+        }
+        List<IpAddressMatcher> matchers = new ArrayList<>();
+        for (String entry : trustedProxiesCsv.split(",")) {
+            String trimmed = entry.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                matchers.add(new IpAddressMatcher(trimmed));
+            } catch (IllegalArgumentException ignored) {
+                // Ignora entradas malformadas na configuração para manter fail-closed sem impedir inicialização
+            }
+        }
+        return List.copyOf(matchers);
+    }
+
+    private boolean isTrustedProxy(String ipAddress) {
+        if (ipAddress == null || ipAddress.isBlank() || trustedProxyMatchers.isEmpty()) {
+            return false;
+        }
+        for (IpAddressMatcher matcher : trustedProxyMatchers) {
+            try {
+                if (matcher.matches(ipAddress)) {
+                    return true;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Endereço não é IP válido (ex.: "unknown" ou cabeçalho forjado)
+                return false;
+            }
+        }
+        return false;
     }
 }

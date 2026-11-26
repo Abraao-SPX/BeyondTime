@@ -101,10 +101,14 @@ public class ChatBiometricTokenVerifier {
             String sub = root.hasNonNull("sub") ? root.get("sub").asText() : null;
             boolean verified = root.hasNonNull("verified") && root.get("verified").asBoolean();
             Long exp = root.hasNonNull("exp") ? root.get("exp").asLong() : null;
+            String iss = root.hasNonNull("iss") ? root.get("iss").asText() : null;
             String jti = root.hasNonNull("jti") ? root.get("jti").asText() : null;
 
             if (sub == null || sub.isBlank()) {
                 throw new BusinessException("INVALID_BIOMETRIC_TOKEN", "Token biométrico sem identificador do usuário.", HttpStatus.BAD_REQUEST);
+            }
+            if (iss == null || !"reconhecimento-facil-service".equals(iss.trim())) {
+                throw new BusinessException("INVALID_BIOMETRIC_ISSUER", "Emissor (iss) do token biométrico não reconhecido.", HttpStatus.UNAUTHORIZED);
             }
             if (jti == null || jti.isBlank()) {
                 throw new BusinessException("INVALID_BIOMETRIC_TOKEN", "Token biométrico sem identificador único (jti).", HttpStatus.BAD_REQUEST);

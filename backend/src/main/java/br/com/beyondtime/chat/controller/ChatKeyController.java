@@ -72,8 +72,8 @@ public class ChatKeyController {
     public ResponseEntity<PublicChatKeyResponse> getUserPublicKey(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
             @PathVariable UUID userId) {
-        requireAuth(currentUser);
-        return ResponseEntity.ok(keyVaultService.getPublicKey(userId));
+        AuthenticatedUser user = requireAuth(currentUser);
+        return ResponseEntity.ok(keyVaultService.getPublicKeyForUser(user.userId(), userId));
     }
 
     private AuthenticatedUser requireAuth(AuthenticatedUser currentUser) {

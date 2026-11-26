@@ -26,6 +26,7 @@ import br.com.beyondtime.profile.repository.ProfileRepository;
 import br.com.beyondtime.profile.service.AvatarService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.exception.ResourceNotFoundException;
+import br.com.beyondtime.shared.util.AgeValidator;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -35,7 +36,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.Period;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -177,6 +177,10 @@ public class ChatConversationService {
 
         for (ChatMatch match : activeMatches) {
             UUID otherUserId = match.getOtherUserId(currentUserId);
+            User otherUser = usersById.get(otherUserId);
+            if (otherUser == null || !otherUser.isActive()) {
+                continue;
+            }
             if (chatUserBlockRepository.existsBlockBetween(currentUserId, otherUserId)) {
                 continue;
             }
@@ -188,7 +192,7 @@ public class ChatConversationService {
                     currentUserId,
                     match,
                     convOpt.get(),
-                    Optional.ofNullable(usersById.get(otherUserId)),
+                    Optional.of(otherUser),
                     Optional.ofNullable(keysById.get(otherUserId)),
                     myHobbyIds
             ));
@@ -269,7 +273,7 @@ public class ChatConversationService {
                 .orElse("Contato BeyondTime");
 
         Integer contactAge = userOpt.map(User::getBirthDate)
-                .map(birthDate -> Period.between(birthDate, LocalDate.now(ZoneId.of("America/Maceio"))).getYears())
+                .map(birthDate -> Period.between(birthDate, LocalDate.now(AgeValidator.SERGIPE_ZONE)).getYears())
                 .orElse(null);
 
         String contactCity = profileOpt.map(Profile::getCityId)
