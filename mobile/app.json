@@ -14,7 +14,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "br.com.beyondtime",
       "infoPlist": {
-        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para foto de perfil, envio de fotos no chat e verificação segura.",
+        "NSCameraUsageDescription": "O BeyondTime precisa de acesso à câmera para foto de perfil, envio de fotos no chat e verificação facial segura.",
         "NSPhotoLibraryUsageDescription": "O BeyondTime precisa de acesso às suas fotos para escolher sua foto de perfil e enviar imagens nas conversas.",
         "NSMicrophoneUsageDescription": "O BeyondTime precisa de acesso ao microfone para gravar mensagens de voz nas suas conversas."
       }
@@ -48,7 +48,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "O BeyondTime precisa de acesso à câmera para foto de perfil, envio de fotos no chat e verificação segura."
+          "cameraPermission": "O BeyondTime precisa de acesso à câmera para foto de perfil, envio de fotos no chat e verificação facial segura.",
+          "microphonePermission": "O BeyondTime precisa de acesso ao microfone durante a verificação facial e gravação de áudio no chat."
         }
       ],
       [

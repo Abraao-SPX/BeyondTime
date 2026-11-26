@@ -257,6 +257,32 @@ export async function fetchMyProfile(session: AuthSession): Promise<ServerProfil
   return requestJson<ServerProfile>('/api/v1/profiles/me', {}, session.accessToken);
 }
 
+export interface VerifyBiometricsResponse {
+  success: boolean;
+  message: string;
+  profileId: string;
+  userId: string;
+  verifiedBadge50plus: boolean;
+  verificationStatus: string;
+  verifiedAt?: string | null;
+  similarityDistance?: number | null;
+  livenessPassed: boolean;
+}
+
+export async function verifyMyBiometrics(
+  session: AuthSession,
+  biometricToken: string
+): Promise<VerifyBiometricsResponse> {
+  return requestJson<VerifyBiometricsResponse>(
+    '/api/v1/profiles/me/verify-biometrics',
+    {
+      method: 'POST',
+      body: JSON.stringify({ biometricToken }),
+    },
+    session.accessToken
+  );
+}
+
 export async function upsertMyProfile(
   session: AuthSession,
   payload: UpsertProfilePayload
