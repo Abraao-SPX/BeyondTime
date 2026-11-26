@@ -128,7 +128,7 @@
 }
 
 .discover-toolbar__select {
-  min-height: 46px;
+  min-height: 48px;
   padding: 8px 14px;
   font-size: 0.96rem;
 }
@@ -182,7 +182,8 @@
 .deck-card__photo-wrap {
   position: relative;
   width: 100%;
-  height: 430px;
+  min-height: 360px;
+  height: clamp(340px, 52vh, 460px);
   background-color: #1F171A;
   overflow: hidden;
 }
@@ -386,8 +387,8 @@
   width: 100%;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
-  min-height: 600px;
-  height: min(72vh, 700px);
+  min-height: min(72vh, 700px);
+  height: auto;
   background-color: var(--bg-page);
   border: 1.5px solid var(--border-card);
   border-radius: 18px;
@@ -782,7 +783,7 @@
 
 .wa-recording-btn {
   width: auto;
-  min-height: 46px;
+  min-height: 48px;
   padding: 0 18px;
 }
 
@@ -819,7 +820,7 @@
 
 .wa-attachment-bar__cancel {
   width: auto;
-  min-height: 42px;
+  min-height: 48px;
   padding: 6px 14px;
 }
 
@@ -859,7 +860,7 @@
 
 .chat-bubble__audio {
   max-width: 100%;
-  height: 40px;
+  min-height: 48px;
 }
 
 /* ==========================================================================
@@ -921,7 +922,7 @@
   background: transparent;
   border: none;
   padding: 8px 4px;
-  min-height: 44px;
+  min-height: 48px;
   color: var(--danger-text);
   font-size: 0.96rem;
   font-weight: 700;

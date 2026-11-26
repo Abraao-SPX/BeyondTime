@@ -270,10 +270,10 @@ export function PaginasLegais({
               <div className="legal-step-card">
                 <div className="legal-step-card__header">
                   <span className="legal-step-card__number">4</span>
-                  <h3 className="legal-step-card__title">Confirmação Dupla Defensiva de 3 Segundos (RF06)</h3>
+                  <h3 className="legal-step-card__title">Confirmação Dupla Defensiva de 5 Segundos</h3>
                 </div>
                 <p>
-                  Para proteger o público 50+ contra toques acidentais, o sistema exibirá uma janela de <strong>Confirmação Dupla Defensiva</strong> com temporizador de segurança de <strong>3 segundos</strong>. O botão de confirmação permanecerá temporariamente bloqueado até que a contagem regressiva termine.
+                  Para proteger o público 50+ contra toques acidentais, o sistema exibirá uma janela de <strong>Confirmação Dupla Defensiva</strong> com temporizador de segurança de <strong>5 segundos</strong>. O botão de confirmação permanecerá temporariamente bloqueado até que a contagem regressiva termine.
                 </p>
               </div>
 

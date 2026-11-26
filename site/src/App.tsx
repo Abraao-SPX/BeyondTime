@@ -17,6 +17,7 @@ import {
   fetchMyProfile,
   loadAuthSession,
   logoutAccount,
+  registerSessionLifecycleCallbacks,
   resolveApiAssetUrl,
   type ServerProfile,
 } from './services/apiClient';
@@ -91,6 +92,8 @@ export function App() {
   const [showLanding, setShowLanding] = useState<boolean>(() =>
     IS_DEV_ONDA2_PREVIEW ? false : loadAuthSession() === null
   );
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [profileRetryTick, setProfileRetryTick] = useState(0);
   const { highContrast, toggleHighContrast } = useHighContrast();
   const [serverProfile, setServerProfile] = useState<ServerProfile | null>(() =>
     IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_PROFILE : null
@@ -124,6 +127,25 @@ export function App() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    return registerSessionLifecycleCallbacks({
+      onSessionUpdated: (updated) => {
+        setAuthSession(updated);
+      },
+      onSessionExpired: () => {
+        setAuthSession(null);
+        setServerProfile(null);
+        setIsLoadingProfile(false);
+        setIsProfileMissing(false);
+        setIsEditingProfile(false);
+        setOrphanNotice(null);
+        setAccountDeletedNotice('Sua sessão expirou por segurança. Entre novamente para continuar.');
+        setActiveView('login');
+        setShowLanding(false);
+      },
+    });
+  }, []);
 
   useEffect(() => {
     function handlePopState() {
@@ -241,6 +263,7 @@ export function App() {
   useEffect(() => {
     if (!authSession) {
       setIsLoadingProfile(false);
+      setProfileLoadError(null);
       setServerProfile(null);
       setIsProfileMissing(false);
       setIsEditingProfile(false);
@@ -249,15 +272,18 @@ export function App() {
     }
     if (import.meta.env.DEV && authSession.userId === 'dev-preview-50plus') {
       setIsLoadingProfile(false);
+      setProfileLoadError(null);
       return;
     }
     let active = true;
     setIsLoadingProfile(true);
+    setProfileLoadError(null);
     fetchMyProfile(authSession)
       .then((profile) => {
         if (active) {
           setServerProfile(profile);
           setIsProfileMissing(false);
+          setProfileLoadError(null);
           setOrphanNotice(null);
         }
       })
@@ -270,6 +296,7 @@ export function App() {
           setServerProfile(null);
           setIsProfileMissing(false);
           setIsEditingProfile(false);
+          setProfileLoadError(null);
           setOrphanNotice(null);
           setSocialDraft(null);
         } else if (err instanceof ApiError && err.status === 404) {
@@ -278,8 +305,15 @@ export function App() {
           // redireciona suavemente para conclusão do perfil 50+ (dados, foto, hobbies RF03 e objetivo).
           setServerProfile(null);
           setIsProfileMissing(true);
+          setProfileLoadError(null);
           setOrphanNotice(
             'Bem-vindo(a)! Agora vamos completar seu perfil 50+ com sua cidade, foto, hobbies e objetivo para começar a se conectar com segurança!'
+          );
+        } else {
+          setProfileLoadError(
+            err instanceof ApiError
+              ? err.message
+              : 'Não foi possível carregar seu perfil agora. Verifique sua conexão e tente novamente.'
           );
         }
       })
@@ -291,23 +325,30 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [authSession]);
+  }, [authSession, profileRetryTick]);
 
   async function handleLogout() {
-    await logoutAccount(authSession);
-    setAuthSession(null);
-    setServerProfile(null);
-    setIsLoadingProfile(false);
-    setIsProfileMissing(false);
-    setIsEditingProfile(false);
-    setOrphanNotice(null);
-    setSocialDraft(null);
-    setIsDeleteModalOpen(false);
-    setDeletePassword('');
-    setDeleteError(null);
-    setContacts({ login: '', register: '', recover: '' });
-    setActiveView('login');
-    setShowLanding(true);
+    try {
+      await logoutAccount(authSession);
+    } catch {
+      // Mesmo se o backend estiver indisponível, limpa a sessão local com segurança
+      clearAuthSession();
+      clearUserProfile();
+    } finally {
+      setAuthSession(null);
+      setServerProfile(null);
+      setIsLoadingProfile(false);
+      setIsProfileMissing(false);
+      setIsEditingProfile(false);
+      setOrphanNotice(null);
+      setSocialDraft(null);
+      setIsDeleteModalOpen(false);
+      setDeletePassword('');
+      setDeleteError(null);
+      setContacts({ login: '', register: '', recover: '' });
+      setActiveView('login');
+      setShowLanding(true);
+    }
   }
 
   useEffect(() => {
@@ -494,6 +535,27 @@ export function App() {
                   <div className="skeleton-loader__bar skeleton-loader__bar--short" />
                 </div>
               </section>
+            ) : profileLoadError !== null && serverProfile === null ? (
+              <section className="auth-card" aria-live="polite" role="alert">
+                <h1 className="auth-card__title">Não foi possível carregar seu perfil</h1>
+                <p className="auth-card__subtitle">{profileLoadError}</p>
+                <div className="defensive-modal__actions" style={{ marginTop: '20px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => setProfileRetryTick((prev) => prev + 1)}
+                  >
+                    Tentar novamente
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleLogout}
+                  >
+                    Sair da conta
+                  </button>
+                </div>
+              </section>
             ) : isProfileMissing || isEditingProfile ? (
               // SEC-ALTA-08: Onboarding obrigatório para perfil ausente (404) ou edição de perfil/hobbies (RF-02/RF-03)
               <CriarMinhaConta
@@ -561,8 +623,8 @@ export function App() {
                     {isSocialAccount ? (
                       <div className="callout-amber" role="note" style={{ marginTop: '16px', marginBottom: '8px' }}>
                         <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.5 }}>
-                          <strong>Conta autenticada via {authSession.authProvider === 'google' ? 'Google' : authSession.authProvider === 'facebook' ? 'Facebook' : 'provedor social'}:</strong>{' '}
-                          Conforme a LGPD (RF-14), você não precisa redigitar senha para excluir sua conta. Aguarde o temporizador defensivo abaixo para confirmar a exclusão com total segurança.
+                          <strong>Conta conectada via {authSession.authProvider === 'google' ? 'Google' : authSession.authProvider === 'facebook' ? 'Facebook' : 'conta social'}:</strong>{' '}
+                          Você não precisa digitar senha para excluir sua conta. Aguarde o temporizador abaixo para confirmar a exclusão com segurança.
                         </p>
                       </div>
                     ) : (
@@ -582,12 +644,13 @@ export function App() {
                             if (deleteError) setDeleteError(null);
                           }}
                         />
-                        {deleteError !== null && (
-                          <p className="form-error" role="alert">
-                            {deleteError}
-                          </p>
-                        )}
                       </div>
+                    )}
+
+                    {deleteError !== null && (
+                      <p className="form-error" role="alert" style={{ marginTop: '10px' }}>
+                        {deleteError}
+                      </p>
                     )}
 
                     <div className="defensive-modal__actions">
