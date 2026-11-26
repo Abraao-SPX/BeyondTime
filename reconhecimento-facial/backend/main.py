@@ -11,6 +11,7 @@ import hmac
 import hashlib
 import base64
 import sqlite3
+import ipaddress
 import cv2
 import numpy as np
 from typing import Optional
@@ -18,6 +19,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Que
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 APP_VERSION = "1.3.0"
 
@@ -60,22 +62,108 @@ PENDING_CHALLENGES: dict[str, tuple[list[str], float]] = {}  # token -> (colors,
 CHALLENGE_TTL_SECONDS = 120  # Desafios expiram em 2 minutos
 
 TRUST_FORWARDED_HEADERS = os.getenv("TRUST_FORWARDED_HEADERS", "true").lower() == "true"
+DEFAULT_TRUSTED_PROXIES = "127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
 REQUIRE_CHALLENGE_TOKEN = os.getenv("REQUIRE_CHALLENGE_TOKEN", "true").lower() == "true"
 
+MAX_VIDEO_BYTES = 15 * 1024 * 1024  # 15 MB
+MAX_IMAGE_BYTES = 5 * 1024 * 1024   # 5 MB
+
+
+def _carregar_redes_confiaveis(raw: str) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    redes = []
+    for item in raw.split(","):
+        entry = item.strip()
+        if not entry:
+            continue
+        try:
+            redes.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            continue
+    return redes
+
+
+TRUSTED_PROXY_NETWORKS = _carregar_redes_confiaveis(
+    os.getenv("TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES)
+)
+
+
+def _is_trusted_proxy(ip_str: str) -> bool:
+    if not ip_str:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip_str.strip())
+    except ValueError:
+        return False
+    return any(addr in net for net in TRUSTED_PROXY_NETWORKS)
+
 
 def extrair_client_ip(request: Request) -> str:
-    """Obtém o IP real do cliente respeitando proxy reverso (Nginx/Cloudflare) quando habilitado."""
-    if TRUST_FORWARDED_HEADERS:
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            first_ip = xff.split(",")[0].strip()
-            if first_ip:
-                return first_ip
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip and real_ip.strip():
-            return real_ip.strip()
-    return request.client.host if request.client else "unknown"
+    """
+    Obtém o IP real do cliente validando se o peer direto pertence a uma rede de proxy confiável
+    e extraindo do X-Forwarded-For o IP mais à direita fora das redes confiáveis (anti-spoofing).
+    """
+    remote_ip = request.client.host if request.client else "unknown"
+    if not TRUST_FORWARDED_HEADERS or not _is_trusted_proxy(remote_ip):
+        return remote_ip
+
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        hops = [ip.strip() for ip in xff.split(",") if ip.strip()]
+        for hop in reversed(hops):
+            try:
+                ipaddress.ip_address(hop)
+            except ValueError:
+                continue
+            if not _is_trusted_proxy(hop):
+                return hop
+        if hops:
+            return hops[0]
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip and real_ip.strip():
+        return real_ip.strip()
+    return remote_ip
+
+
+def _possui_chave_interna_valida(request: Request) -> bool:
+    """Verifica sem lançar exceção se a requisição contém X-Internal-Api-Key válida."""
+    if not INTERNAL_API_KEY:
+        return False
+    provided = request.headers.get("x-internal-api-key", "").strip()
+    return bool(provided) and hmac.compare_digest(provided, INTERNAL_API_KEY)
+
+
+async def _salvar_upload_com_limite(
+    upload: UploadFile,
+    dest_path: str,
+    max_bytes: int,
+    label: str
+) -> int:
+    """Lê UploadFile em chunks aplicando limite rígido de tamanho (retorna HTTP 413 se excedido)."""
+    total = 0
+    chunk_size = 64 * 1024
+    try:
+        with open(dest_path, "wb") as f:
+            while True:
+                chunk = await upload.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"{label} excede o tamanho máximo permitido ({max_bytes // (1024 * 1024)} MB)."
+                    )
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(dest_path):
+            try:
+                os.remove(dest_path)
+            except Exception:
+                pass
+        raise
+    return total
 
 
 def exigir_chave_interna(request: Request):
@@ -85,8 +173,7 @@ def exigir_chave_interna(request: Request):
             status_code=503,
             detail="Endpoint administrativo protegido: defina INTERNAL_API_KEY no servidor biométrico."
         )
-    provided = request.headers.get("x-internal-api-key", "").strip()
-    if not provided or not hmac.compare_digest(provided, INTERNAL_API_KEY):
+    if not _possui_chave_interna_valida(request):
         raise HTTPException(status_code=403, detail="Acesso administrativo não autorizado.")
 
 
@@ -362,11 +449,18 @@ def normalizar_embedding(emb: np.ndarray) -> np.ndarray:
         return emb_f / norm
     return emb_f
 
-def db_salvar_usuario_inicial(user_id: str, name: str, embedding: np.ndarray, photo_filename: str):
+def db_salvar_usuario_inicial(
+    user_id: str,
+    name: str,
+    embedding: np.ndarray,
+    photo_filename: str,
+    allow_overwrite: bool = False
+):
     """
     Cadastra o usuário inicial sem comparação com outros rostos.
     Guarda o vetor biométrico como a Âncora Primária e Centroide inicial (samples_count = 1).
     Registra também a primeira amostra no histórico biometric_samples.
+    Quando allow_overwrite=False, bloqueia sobrescrita de user_id existente (HTTP 409).
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -376,28 +470,34 @@ def db_salvar_usuario_inicial(user_id: str, name: str, embedding: np.ndarray, ph
     cursor.execute("PRAGMA table_info(users)")
     cols = [c[1] for c in cursor.fetchall()]
 
-    if "embedding" in cols:
-        cursor.execute("""
-            INSERT OR REPLACE INTO users (
-                id, name, primary_embedding, centroid_embedding, samples_count,
-                photo_filename, latest_photo_filename, created_at, updated_at, embedding
-            ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-        """, (user_id, name, emb_json, emb_json, photo_filename, photo_filename, emb_json))
-    else:
-        cursor.execute("""
-            INSERT OR REPLACE INTO users (
-                id, name, primary_embedding, centroid_embedding, samples_count,
-                photo_filename, latest_photo_filename, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """, (user_id, name, emb_json, emb_json, photo_filename, photo_filename))
+    insert_verb = "INSERT OR REPLACE INTO" if allow_overwrite else "INSERT INTO"
+    try:
+        if "embedding" in cols:
+            cursor.execute(f"""
+                {insert_verb} users (
+                    id, name, primary_embedding, centroid_embedding, samples_count,
+                    photo_filename, latest_photo_filename, created_at, updated_at, embedding
+                ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+            """, (user_id, name, emb_json, emb_json, photo_filename, photo_filename, emb_json))
+        else:
+            cursor.execute(f"""
+                {insert_verb} users (
+                    id, name, primary_embedding, centroid_embedding, samples_count,
+                    photo_filename, latest_photo_filename, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (user_id, name, emb_json, emb_json, photo_filename, photo_filename))
 
-    cursor.execute("""
-        INSERT INTO biometric_samples (user_id, embedding, sample_type, distance_to_anchor, created_at)
-        VALUES (?, ?, 'registration', 0.0, CURRENT_TIMESTAMP)
-    """, (user_id, emb_json))
+        cursor.execute("""
+            INSERT INTO biometric_samples (user_id, embedding, sample_type, distance_to_anchor, created_at)
+            VALUES (?, ?, 'registration', 0.0, CURRENT_TIMESTAMP)
+        """, (user_id, emb_json))
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="Usuário já possui biometria cadastrada.")
+    finally:
+        conn.close()
 
 def db_adicionar_amostra_login(user_id: str, new_embedding: np.ndarray, latest_photo_filename: str, distance_to_anchor: float) -> int:
     """
@@ -632,7 +732,12 @@ async def detect_face_presence(
     img = None
     try:
         if photo is not None:
-            contents = await photo.read()
+            contents = await photo.read(MAX_IMAGE_BYTES + 1)
+            if len(contents) > MAX_IMAGE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Imagem excede o tamanho máximo permitido ({MAX_IMAGE_BYTES // (1024 * 1024)} MB)."
+                )
             nparr = np.frombuffer(contents, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         elif payload and (payload.image_base64 or payload.image):
@@ -640,6 +745,11 @@ async def detect_face_presence(
             if "," in b64:
                 b64 = b64.split(",", 1)[1]
             img_bytes = base64.b64decode(b64)
+            if len(img_bytes) > MAX_IMAGE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Imagem excede o tamanho máximo permitido ({MAX_IMAGE_BYTES // (1024 * 1024)} MB)."
+                )
             nparr = np.frombuffer(img_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         else:
@@ -650,8 +760,15 @@ async def detect_face_presence(
                     if "," in b64:
                         b64 = b64.split(",", 1)[1]
                     img_bytes = base64.b64decode(b64)
+                    if len(img_bytes) > MAX_IMAGE_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Imagem excede o tamanho máximo permitido ({MAX_IMAGE_BYTES // (1024 * 1024)} MB)."
+                        )
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except HTTPException:
+                raise
             except Exception:
                 pass
 
@@ -708,8 +825,11 @@ async def detect_face_presence(
             "message": "Rosto enquadrado perfeitamente!",
             "confidence": round(float(face_data[-1]), 3)
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"detected": False, "centered": False, "error": str(e), "message": "Erro ao analisar imagem"}
+        print(f"ERROR: Falha ao analisar imagem em /detect_face: {type(e).__name__}: {e}")
+        return {"detected": False, "centered": False, "message": "Erro ao analisar imagem"}
 
 class MiniFASNetCropper:
     """Implementação oficial do gerador de patches para MiniFASNet (Minivision AI)."""
@@ -1147,12 +1267,16 @@ async def register_biometrics(
     if not name_clean:
         raise HTTPException(status_code=400, detail="O nome do usuário é obrigatório.")
 
+    has_internal_key = _possui_chave_interna_valida(request)
     if user_id and user_id.strip():
         # Sanitização contra Path Traversal: permite apenas caracteres alfanuméricos, traço e underline
         uid_input = user_id.strip()
         uid = os.path.basename(uid_input)
         if not re.match(r'^[a-zA-Z0-9_\-]+$', uid):
             raise HTTPException(status_code=400, detail="Identificador de usuário com formato inválido.")
+        # Proteção contra sobrescrita biométrica (account takeover): exige chave interna para recadastro
+        if not has_internal_key and await run_in_threadpool(db_buscar_usuario, uid) is not None:
+            raise HTTPException(status_code=409, detail="Usuário já possui biometria cadastrada.")
     else:
         uid = f"user_{int(time.time())}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
 
@@ -1189,10 +1313,7 @@ async def register_biometrics(
     temp_dir = tempfile.mkdtemp()
     video_path = os.path.join(temp_dir, "register_video.mp4")
 
-    try:
-        with open(video_path, "wb") as f:
-            shutil.copyfileobj(video.file, f)
-
+    def _processar_registro():
         face_roi = None
         rot_code = None
         if cores:
@@ -1240,10 +1361,10 @@ async def register_biometrics(
 
         photo_filename = f"{uid}_anchor.jpg"
         photo_full_path = os.path.join(STORAGE_FACES_DIR, photo_filename)
-        cv2.imwrite(photo_full_path, aligned_crop)
 
-        # Salva o usuário com a primeira amostra no SQLite (sem comparação prévia)
-        db_salvar_usuario_inicial(uid, name_clean, feat, photo_filename)
+        # Salva o usuário com a primeira amostra no SQLite antes de gravar a foto (bloqueia sobrescrita sem chave interna)
+        db_salvar_usuario_inicial(uid, name_clean, feat, photo_filename, allow_overwrite=has_internal_key)
+        cv2.imwrite(photo_full_path, aligned_crop)
 
         registrar_auditoria({
             "client_ip": client_ip,
@@ -1268,6 +1389,10 @@ async def register_biometrics(
             "jwt_token": jwt_token,
             "message": f"Biometria facial de {name_clean} cadastrada com sucesso! Primeira amostra âncora armazenada."
         }
+
+    try:
+        await _salvar_upload_com_limite(video, video_path, MAX_VIDEO_BYTES, "Vídeo")
+        return await run_in_threadpool(_processar_registro)
 
     except HTTPException:
         raise
@@ -1350,10 +1475,12 @@ def delete_registered_user(user_id: str, request: Request):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM biometric_samples WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM audit_logs WHERE user_id = ?", (user_id,))
     cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
-    return {"success": True, "message": f"Usuário {user_id} e histórico biométrico excluídos com sucesso."}
+    AUDIT_LOGS[:] = [entry for entry in AUDIT_LOGS if entry.get("user_id") != user_id]
+    return {"success": True, "message": f"Usuário {user_id}, histórico biométrico e logs de auditoria excluídos com sucesso."}
 
 @app.post("/verify")
 async def verify_identity(
@@ -1370,6 +1497,10 @@ async def verify_identity(
     """
     client_ip = extrair_client_ip(request)
     aplicar_rate_limit(client_ip)
+
+    # Hardening SEC-CRIT-01: modo legado com profile_photo ou busca 1:N aberta exigem chave interna
+    if profile_photo is not None or not (user_id and user_id.strip()):
+        exigir_chave_interna(request)
 
     cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
     # Validação do session_token
@@ -1402,15 +1533,7 @@ async def verify_identity(
     video_path = os.path.join(temp_dir, "challenge_video.mp4")
     profile_path = os.path.join(temp_dir, "profile_photo.jpg") if profile_photo else None
 
-    try:
-        # 1. Salva vídeo temporário
-        with open(video_path, "wb") as f:
-            shutil.copyfileobj(video.file, f)
-
-        if profile_photo and profile_path:
-            with open(profile_path, "wb") as f:
-                shutil.copyfileobj(profile_photo.file, f)
-
+    def _processar_verificacao():
         # 2. ETAPA 1: Prova de Vida Ativa com reflexo espectral
         is_live, liveness_msg, face_roi, rot_code = validar_reflexo_delta_rgb(video_path, cores)
         if not is_live:
@@ -1588,15 +1711,31 @@ async def verify_identity(
             "status": msg_status
         }
 
+    try:
+        # 1. Salva vídeo temporário e foto de perfil com limite de tamanho (HTTP 413)
+        await _salvar_upload_com_limite(video, video_path, MAX_VIDEO_BYTES, "Vídeo")
+
+        if profile_photo and profile_path:
+            await _salvar_upload_com_limite(profile_photo, profile_path, MAX_IMAGE_BYTES, "Foto de perfil")
+
+        return await run_in_threadpool(_processar_verificacao)
+
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"ERROR: Falha interna na verificação biométrica: {type(e).__name__}: {e}")
         registrar_auditoria({
             "client_ip": client_ip,
             "user_id": user_id or "anonymous",
             "verified": False,
             "is_live": False,
-            "error": str(e)
+            "reason": "Erro interno na verificação biométrica"
         })
-        return {"verified": False, "is_live": False, "error": str(e)}
+        return {
+            "verified": False,
+            "is_live": False,
+            "error": "Não foi possível processar a verificação biométrica agora. Tente novamente."
+        }
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

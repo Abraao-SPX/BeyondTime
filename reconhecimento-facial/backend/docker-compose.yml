@@ -5,7 +5,9 @@ services:
     build: .
     container_name: liveness_verification_api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    environment:
+      ENABLE_API_DOCS: "false"
     volumes:
       - ./storage:/app/storage
     restart: unless-stopped
