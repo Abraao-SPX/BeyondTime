@@ -1,5 +1,15 @@
-import React from 'react';
-import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  Linking,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { AccessibleButton } from '../components/AccessibleButton';
 import { BeyondTimeLogo } from '../components/BeyondTimeLogo';
 import {
@@ -17,36 +27,88 @@ import type { BlockedContactMobile } from '../types/social';
 
 interface HomePlaceholderScreenProps {
   userData: OnboardingData;
+  isSocialAccount?: boolean;
   blockedContacts?: BlockedContactMobile[];
   onUnblockContact?: (id: string) => void;
   onRepeatFacialVerification: () => void;
   onSignOut: () => void;
+  onDeleteAccount?: (password?: string) => Promise<void>;
 }
 
-/**
- * Tela inicial autenticada após Login / Cadastro + Reconhecimento Facial:
- * Exibe o status de verificação, afinidades escolhidas, controles de acessibilidade (RF-09)
- * e canal oficial de suporte (suporte.beyondtime@gmail.com).
- */
+const DELETE_COUNTDOWN_SECONDS = 5;
+
 export function HomePlaceholderScreen({
   userData,
+  isSocialAccount = false,
   blockedContacts,
   onUnblockContact,
   onRepeatFacialVerification,
   onSignOut,
+  onDeleteAccount,
 }: HomePlaceholderScreenProps) {
   const { palette, isDark, toggleTheme, fontScale, cycleFontScale, fs } = useTheme();
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteCountdown, setDeleteCountdown] = useState(DELETE_COUNTDOWN_SECONDS);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!showDeleteModal) return;
+    setDeleteCountdown(DELETE_COUNTDOWN_SECONDS);
+    const timer = setInterval(() => {
+      setDeleteCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    const displayName = userData.fullName.trim() || 'Visitante BeyondTime';
+  const hobbyLabels = userData.selectedHobbies
+    .map((id) => HOBBIES_CATALOG.find((item) => item.id === id)?.label)
+    .filter((label): label is string => Boolean(label));
+
+  return () => clearInterval(timer);
+  }, [showDeleteModal]);
+
+  const handleOpenSupport = () => {
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Suporte%20BeyondTime%20App`).catch(() => {
+      Alert.alert(
+        'Suporte BeyondTime',
+        `Não encontramos um aplicativo de e-mail configurado neste aparelho. Envie sua mensagem para: ${SUPPORT_EMAIL}`
+      );
+    });
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (!onDeleteAccount || isDeleting || deleteCountdown > 0) return;
+    if (!isSocialAccount && !deletePassword.trim()) {
+      setDeleteError('Por segurança, digite sua senha atual para confirmar a exclusão.');
+      return;
+    }
+    setDeleteError(null);
+    setIsDeleting(true);
+    try {
+      await onDeleteAccount(isSocialAccount ? undefined : deletePassword);
+      setShowDeleteModal(false);
+      setDeletePassword('');
+    } catch (err: unknown) {
+      setDeleteError(
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível excluir sua conta agora. Tente novamente.'
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const displayName = userData.fullName.trim() || 'Visitante BeyondTime';
   const hobbyLabels = userData.selectedHobbies
     .map((id) => HOBBIES_CATALOG.find((item) => item.id === id)?.label)
     .filter((label): label is string => Boolean(label));
-
-  const handleOpenSupport = () => {
-    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Suporte%20BeyondTime%20App`).catch(
-      () => undefined
-    );
-  };
 
   return (
     <View style={[styles.container, { backgroundColor: palette.background }]}>
@@ -247,12 +309,129 @@ export function HomePlaceholderScreen({
             variant="outline"
             onPress={onSignOut}
           />
+
+          {onDeleteAccount ? (
+            <AccessibleButton
+              label="Excluir minha conta definitivamente"
+              variant="outline"
+              onPress={() => {
+                setDeletePassword('');
+                setDeleteError(null);
+                setShowDeleteModal(true);
+              }}
+            />
+          ) : null}
         </View>
 
         <Text style={[styles.footerNote, { color: palette.textMuted, fontSize: fs(14) }]}>
           Suporte oficial: {SUPPORT_EMAIL}
         </Text>
       </ScrollView>
+
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!isDeleting) setShowDeleteModal(false);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: palette.surface,
+              borderRadius: 18,
+              padding: 20,
+              borderWidth: 1,
+              borderColor: palette.border,
+              gap: 14,
+            }}
+          >
+            <Text style={{ color: palette.textPrimary, fontSize: fs(20), fontWeight: '700' }}>
+              Excluir conta definitivamente?
+            </Text>
+            <Text style={{ color: palette.textSecondary, fontSize: fs(15), lineHeight: fs(22) }}>
+              Esta ação apaga seu perfil, conversas, fotos e dados pessoais de forma permanente e não pode ser desfeita.
+            </Text>
+
+            {isSocialAccount ? (
+              <View
+                style={{
+                  backgroundColor: palette.primarySoft,
+                  borderColor: palette.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 12,
+                }}
+              >
+                <Text
+                  style={{
+                    color: palette.textPrimary,
+                    fontSize: fs(15),
+                    lineHeight: fs(22),
+                  }}
+                >
+                  Contas conectadas via Google ou Facebook não exigem senha. Aguarde a contagem de
+                  segurança e toque no botão abaixo para confirmar.
+                </Text>
+              </View>
+            ) : (
+              <TextInput
+                value={deletePassword}
+                onChangeText={(t) => {
+                  setDeletePassword(t);
+                  setDeleteError(null);
+                }}
+                secureTextEntry
+                maxLength={72}
+                placeholder="Digite sua senha atual para confirmar"
+                placeholderTextColor={palette.textMuted}
+                accessibilityLabel="Senha atual para confirmar exclusão da conta"
+                style={{
+                  minHeight: TOUCH_TARGET_MIN,
+                  borderWidth: 1.5,
+                  borderColor: palette.borderStrong,
+                  borderRadius: 12,
+                  paddingHorizontal: 14,
+                  color: palette.textPrimary,
+                  backgroundColor: palette.background,
+                  fontSize: fs(16),
+                }}
+              />
+            )}
+
+            {deleteError ? (
+              <Text style={{ color: palette.errorText, fontSize: fs(14) }}>{deleteError}</Text>
+            ) : null}
+
+            <AccessibleButton
+              label="Cancelar e manter minha conta"
+              variant="primary"
+              disabled={isDeleting}
+              onPress={() => setShowDeleteModal(false)}
+            />
+
+            <AccessibleButton
+              label={
+                deleteCountdown > 0
+                  ? `Aguarde ${deleteCountdown}s para confirmar exclusão`
+                  : 'Confirmar exclusão definitiva'
+              }
+              variant="outline"
+              loading={isDeleting}
+              disabled={deleteCountdown > 0 || isDeleting}
+              onPress={() => void handleConfirmDeleteAccount()}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
