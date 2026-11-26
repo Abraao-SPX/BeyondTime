@@ -21,20 +21,31 @@ from pydantic import BaseModel
 
 APP_VERSION = "1.3.0"
 
+ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
+
 app = FastAPI(
     title="Reconhecimento Fácil - Microsserviço de Biometria & Prova de Vida",
     description="Microsserviço independente anti-spoofing com flash espectral de cores, YuNet, SFace, JWT e Rate Limiting",
-    version=APP_VERSION
+    version=APP_VERSION,
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
 )
 
-# Habilita CORS para permitir chamadas diretas do React Native no celular
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+# Hardening CORS: usa origens explícitas por padrão e nunca habilita allow_credentials com wildcard '*'
+DEFAULT_CORS_ORIGINS = "https://bytime.me,https://www.bytime.me,http://localhost:8085,http://localhost:5173"
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ALLOWED_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
+    if o.strip()
+]
+ALLOW_CREDENTIALS = "*" not in ALLOWED_ORIGINS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=ALLOW_CREDENTIALS,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Internal-Api-Key"],
 )
 
 CORES_DISPONIVEIS = ["VERMELHO", "AZUL", "VERDE"]
@@ -1258,8 +1269,14 @@ async def register_biometrics(
             "message": f"Biometria facial de {name_clean} cadastrada com sucesso! Primeira amostra âncora armazenada."
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"ERROR: Falha interna ao cadastrar biometria: {type(e).__name__}: {e}")
+        return {
+            "success": False,
+            "error": "Não foi possível processar a verificação facial agora. Tente novamente em um ambiente iluminado.",
+        }
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

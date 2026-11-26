@@ -13,8 +13,14 @@ import joblib
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ml-antifraude")
 
-# 1. Cria a aplicação web
-app = FastAPI(title="API Anjo da Guarda - BeyondTime")
+# 1. Cria a aplicação web (docs/OpenAPI desabilitados por padrão em produção)
+ENABLE_API_DOCS = os.environ.get("ENABLE_API_DOCS", "false").lower() == "true"
+app = FastAPI(
+    title="API Anjo da Guarda - BeyondTime",
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELO_PATH = os.environ.get("MODELO_PATH", os.path.join(BASE_DIR, "modelo_anjo.joblib"))
