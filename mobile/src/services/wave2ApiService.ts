@@ -688,8 +688,11 @@ export async function fetchMyChatKeyVault(
       { method: 'GET' }
     );
     return result ?? null;
-  } catch {
-    return null;
+  } catch (err: unknown) {
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
   }
 }
 
