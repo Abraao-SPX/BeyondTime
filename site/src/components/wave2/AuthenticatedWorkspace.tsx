@@ -12,6 +12,7 @@ import {
 import {
   checkChatMessageAntifraud,
   createBlockContact,
+  createModerationReport,
   deleteBlockContact,
   downloadEncryptedChatMedia,
   fetchBlockedContacts,
@@ -49,6 +50,7 @@ import type {
   BlockedContact,
   ChatMessage,
   ChatThread,
+  ModerationReasonCode,
   OutgoingMessagePayload,
   ScoredCandidate,
   Wave2State,
@@ -58,6 +60,7 @@ import { BlockContactModalRF08 } from './BlockContactModalRF08';
 import { BlockedContactsPanelRF08 } from './BlockedContactsPanelRF08';
 import { FacialVerificationQrModal } from './FacialVerificationQrModal';
 import { MatchAffinityFeedRF05 } from './MatchAffinityFeedRF05';
+import { ReportContactModalRF12 } from './ReportContactModalRF12';
 import { SimplifiedChatRF07 } from './SimplifiedChatRF07';
 
 interface AuthenticatedWorkspaceProps {
@@ -103,6 +106,23 @@ function parseDurationLabelToSeconds(label?: string): number {
 
 type PendingBlockTarget = Pick<BlockedContact, 'id' | 'fullName' | 'age' | 'city' | 'avatarUrl'>;
 
+interface PendingReportTarget extends PendingBlockTarget {
+  conversationId?: string;
+  defaultReasonCode: ModerationReasonCode;
+}
+
+function mapRiskLabelToDefaultReason(riskLabel?: string): ModerationReasonCode {
+  switch ((riskLabel || '').toUpperCase()) {
+    case 'AMEACA_EXTORSAO':
+      return 'HARASSMENT';
+    case 'LINK_MALICIOSO':
+    case 'MENSAGEM_SUSPEITA':
+      return 'SPAM';
+    default:
+      return 'MONEY_OR_PIX_REQUEST';
+  }
+}
+
 export function AuthenticatedWorkspace({
   authSession,
   serverProfile,
@@ -132,6 +152,7 @@ export function AuthenticatedWorkspace({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [recentMatch, setRecentMatch] = useState<ScoredCandidate | null>(null);
   const [pendingBlock, setPendingBlock] = useState<PendingBlockTarget | null>(null);
+  const [pendingReport, setPendingReport] = useState<PendingReportTarget | null>(null);
   const [safetyFeedback, setSafetyFeedback] = useState<string | null>(null);
   const [chatKeyUnavailable, setChatKeyUnavailable] = useState(false);
   const [isRetryingChatKey, setIsRetryingChatKey] = useState(false);
@@ -228,7 +249,10 @@ export function AuthenticatedWorkspace({
       if (checkedAntifraudIdsRef.current.has(message.id)) return;
       checkedAntifraudIdsRef.current.add(message.id);
 
-      void checkChatMessageAntifraud(authSession, trimmed).then((result) => {
+      void checkChatMessageAntifraud(authSession, trimmed, {
+        conversationId,
+        messageId: message.id,
+      }).then((result) => {
         if (!result?.alert) return;
         const educationalTitle =
           result.educationalTitle || 'Dica de Segurança do Anjo da Guarda';
@@ -250,6 +274,10 @@ export function AuthenticatedWorkspace({
                         confidencePercent: result.confidencePercent,
                         educationalTitle,
                         educationalMessage,
+                        strikeCountInConversation: result.strikeCountInConversation,
+                        escalatedWarning: result.escalatedWarning,
+                        senderPreventivelySuspended: result.senderPreventivelySuspended,
+                        auditTicketCode: result.auditTicketCode,
                       },
                     }
                   : item
@@ -969,6 +997,62 @@ export function AuthenticatedWorkspace({
     })();
   }
 
+  function handleConfirmReport(reasonCode: ModerationReasonCode, description?: string) {
+    if (!pendingReport) return;
+    const target = pendingReport;
+    setPendingReport(null);
+
+    if (isPreviewMode) {
+      const blockedEntry = createBlockedEntry(target, description || 'Denúncia registrada');
+      setWave2State((prev) => ({
+        ...prev,
+        blockedContacts: prev.blockedContacts.some((b) => b.id === blockedEntry.id)
+          ? prev.blockedContacts
+          : [blockedEntry, ...prev.blockedContacts],
+        threads: prev.threads.filter((t) => t.contactId !== blockedEntry.id),
+      }));
+      if (activeThreadId === target.id) setActiveThreadId(null);
+      if (recentMatch?.id === target.id) setRecentMatch(null);
+      setSafetyFeedback(
+        `Denúncia contra ${target.fullName} registrada com congelamento cautelar e bloqueio imediato.`
+      );
+      return;
+    }
+
+    void (async () => {
+      try {
+        const report = await createModerationReport(authSession, {
+          reportedUserId: target.id,
+          conversationId: target.conversationId ?? null,
+          reasonCode,
+          description: description ?? null,
+          confirmedViaModal: true,
+          alsoBlock: true,
+        });
+        const blockedEntry = createBlockedEntry(
+          target,
+          `Denúncia registrada (${report.auditTicketCode})`
+        );
+        setServerBlocked((prev) =>
+          prev.some((b) => b.id === blockedEntry.id) ? prev : [blockedEntry, ...prev]
+        );
+        setServerThreads((prev) => prev.filter((t) => t.contactId !== target.id));
+        setServerCandidates((prev) => prev.filter((c) => c.id !== target.id));
+        if (activeThreadId === target.id) setActiveThreadId(null);
+        if (recentMatch?.id === target.id) setRecentMatch(null);
+        setSafetyFeedback(
+          `Denúncia registrada (protocolo ${report.auditTicketCode}). A conta de ${target.fullName} entrou em congelamento cautelar para auditoria e foi ocultada das suas conversas.`
+        );
+      } catch (err) {
+        setSafetyFeedback(
+          err instanceof ApiError
+            ? err.message
+            : 'Não foi possível registrar sua denúncia agora. Tente novamente em instantes.'
+        );
+      }
+    })();
+  }
+
   function handleUnblockContact(contactId: string) {
     if (isPreviewMode) {
       const target = wave2State.blockedContacts.find((b) => b.id === contactId);
@@ -1162,6 +1246,17 @@ export function AuthenticatedWorkspace({
               age: thread.contactAge,
               city: thread.contactCity,
               avatarUrl: thread.contactAvatarUrl,
+            })
+          }
+          onRequestReport={(thread: ChatThread, suggestedRiskLabel?: string) =>
+            setPendingReport({
+              id: thread.contactId,
+              fullName: thread.contactName,
+              age: thread.contactAge,
+              city: thread.contactCity,
+              avatarUrl: thread.contactAvatarUrl,
+              conversationId: thread.conversationId,
+              defaultReasonCode: mapRiskLabelToDefaultReason(suggestedRiskLabel),
             })
           }
           onGoToDiscover={() => setActiveTab('discover')}
@@ -1398,6 +1493,15 @@ export function AuthenticatedWorkspace({
           contactName={pendingBlock.fullName}
           onConfirm={handleConfirmBlock}
           onCancel={() => setPendingBlock(null)}
+        />
+      )}
+
+      {pendingReport && (
+        <ReportContactModalRF12
+          contactName={pendingReport.fullName}
+          defaultReasonCode={pendingReport.defaultReasonCode}
+          onConfirm={handleConfirmReport}
+          onCancel={() => setPendingReport(null)}
         />
       )}
 

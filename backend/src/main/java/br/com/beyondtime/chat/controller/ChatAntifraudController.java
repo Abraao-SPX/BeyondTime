@@ -3,6 +3,7 @@ package br.com.beyondtime.chat.controller;
 import br.com.beyondtime.chat.dto.AntifraudCheckRequest;
 import br.com.beyondtime.chat.dto.AntifraudCheckResponse;
 import br.com.beyondtime.chat.service.AntifraudProxyService;
+import br.com.beyondtime.moderation.service.ModerationService;
 import br.com.beyondtime.shared.exception.BusinessException;
 import br.com.beyondtime.shared.security.AuthenticatedUser;
 import jakarta.validation.Valid;
@@ -34,6 +35,7 @@ public class ChatAntifraudController {
     private static final int CLEANUP_MASK = 255;
 
     private final AntifraudProxyService antifraudProxyService;
+    private final ModerationService moderationService;
     private final int maxRequestsPerMinute;
     private final Map<UUID, Deque<Long>> requestTimestampsByUser = new ConcurrentHashMap<>();
     private final AtomicInteger requestCounter = new AtomicInteger(0);
@@ -41,8 +43,10 @@ public class ChatAntifraudController {
     @Autowired
     public ChatAntifraudController(
             AntifraudProxyService antifraudProxyService,
+            ModerationService moderationService,
             @Value("${beyondtime.antifraud.rate-limit-per-minute:60}") int maxRequestsPerMinute) {
         this.antifraudProxyService = antifraudProxyService;
+        this.moderationService = moderationService;
         this.maxRequestsPerMinute = Math.max(1, maxRequestsPerMinute);
     }
 
@@ -54,9 +58,18 @@ public class ChatAntifraudController {
             throw new BusinessException("UNAUTHORIZED", "Autenticação necessária.", HttpStatus.UNAUTHORIZED);
         }
         enforceRateLimit(currentUser.userId());
+        AntifraudCheckResponse baseResult = antifraudProxyService.checkStateless(request.text());
+        AntifraudCheckResponse finalResult = baseResult.alert()
+                ? moderationService.recordVerifiedRiskStrikeAndEscalate(
+                        currentUser.userId(),
+                        request.conversationId(),
+                        request.messageId(),
+                        baseResult
+                )
+                : baseResult;
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(antifraudProxyService.checkStateless(request.text()));
+                .body(finalResult);
     }
 
     private void enforceRateLimit(UUID userId) {

@@ -14,6 +14,7 @@ interface SimplifiedChatRF07Props {
     payload: string | OutgoingMessagePayload
   ) => Promise<boolean> | boolean | void;
   onRequestBlock: (thread: ChatThread) => void;
+  onRequestReport: (thread: ChatThread, suggestedRiskLabel?: string) => void;
   onGoToDiscover: () => void;
 }
 
@@ -107,6 +108,7 @@ export function SimplifiedChatRF07({
   onSelectThread,
   onSendMessage,
   onRequestBlock,
+  onRequestReport,
   onGoToDiscover,
 }: SimplifiedChatRF07Props) {
   const [draftByContact, setDraftByContact] = useState<Record<string, string>>({});
@@ -576,13 +578,22 @@ export function SimplifiedChatRF07({
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="btn btn--secondary chat-block-btn"
-                onClick={() => onRequestBlock(activeThread)}
-              >
-                Bloquear contato
-              </button>
+              <div className="wa-main__header-actions">
+                <button
+                  type="button"
+                  className="btn btn--secondary chat-block-btn"
+                  onClick={() => onRequestReport(activeThread)}
+                >
+                  Denunciar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary chat-block-btn"
+                  onClick={() => onRequestBlock(activeThread)}
+                >
+                  Bloquear contato
+                </button>
+              </div>
             </header>
 
             <div className="wa-safety-bar" role="note">
@@ -674,7 +685,12 @@ export function SimplifiedChatRF07({
 
                         {showAntifraudCard && msg.antifraudAlert && (
                           <aside
-                            className="chat-antifraud-card"
+                            className={`chat-antifraud-card${
+                              msg.antifraudAlert.escalatedWarning ||
+                              msg.antifraudAlert.senderPreventivelySuspended
+                                ? ' chat-antifraud-card--escalated'
+                                : ''
+                            }`}
                             role="note"
                             aria-label="Dica de Segurança do Anjo da Guarda"
                           >
@@ -701,6 +717,11 @@ export function SimplifiedChatRF07({
                             <p className="chat-antifraud-card__body">
                               {msg.antifraudAlert.educationalMessage}
                             </p>
+                            {msg.antifraudAlert.auditTicketCode && (
+                              <p className="chat-antifraud-card__meta">
+                                Protocolo de auditoria: <strong>{msg.antifraudAlert.auditTicketCode}</strong>
+                              </p>
+                            )}
                             <div className="chat-antifraud-card__actions">
                               <button
                                 type="button"
@@ -713,10 +734,19 @@ export function SimplifiedChatRF07({
                               </button>
                               <button
                                 type="button"
-                                className="btn btn--primary chat-antifraud-card__btn"
+                                className="btn btn--danger chat-antifraud-card__btn"
+                                onClick={() =>
+                                  onRequestReport(activeThread, msg.antifraudAlert?.riskLabel)
+                                }
+                              >
+                                Denunciar e bloquear
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--secondary chat-antifraud-card__btn"
                                 onClick={() => onRequestBlock(activeThread)}
                               >
-                                Bloquear contato
+                                Apenas bloquear
                               </button>
                             </div>
                           </aside>
