@@ -1,12 +1,12 @@
 import hashlib
 import hmac
-import html
 import logging
 import os
 import re
+import unicodedata
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 import joblib
 
@@ -19,6 +19,7 @@ app = FastAPI(title="API Anjo da Guarda - BeyondTime")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELO_PATH = os.environ.get("MODELO_PATH", os.path.join(BASE_DIR, "modelo_anjo.joblib"))
 HASH_PATH = os.environ.get("MODELO_HASH_PATH", os.path.join(BASE_DIR, "modelo_anjo.joblib.sha256"))
+INTERNAL_TOKEN = os.environ.get("ANTIFRAUD_INTERNAL_TOKEN", "").strip()
 
 modelo: Optional[Any] = None
 modo_ativo: str = "inicializando"
@@ -28,11 +29,6 @@ modelo_info: Dict[str, Any] = {
     "sha256_verificado": False,
     "status": "pendente",
 }
-
-XSS_OUTPUT_PATTERN = re.compile(
-    r"<\s*/?\s*[a-z!]|javascript\s*:|vbscript\s*:|data\s*:\s*text/html|\bon[a-z]{2,30}\s*=",
-    re.IGNORECASE,
-)
 
 
 def calcular_sha256(arquivo_path: str) -> str:
@@ -134,15 +130,15 @@ def limpar_texto(texto: str) -> str:
     return t
 
 
-def sanitizar_saida(texto: str, max_len: int = 280) -> str:
-    if XSS_OUTPUT_PATTERN.search(texto):
-        return "[CONTEUDO_SANITIZADO]"
-    return html.escape(texto, quote=True)[:max_len]
+def remover_acentos(texto: str) -> str:
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(ch)
+    )
 
 
 def analisar_heuristico(texto_limpo: str) -> Tuple[str, float]:
     """Fallback heurístico defensivo para detecção de fraudes contra 50+ (SEC-CRIT-03)."""
-    t = texto_limpo.lower()
+    t = remover_acentos(texto_limpo.lower())
 
     # 1. Credenciais, senhas, códigos SMS, gov.br, falsa central e motoboy
     if re.search(
@@ -266,7 +262,18 @@ def health():
 
 
 @app.post("/analisar")
-def analisar_mensagem(mensagem: MensagemChat):
+def analisar_mensagem(
+    mensagem: MensagemChat,
+    response: Response,
+    x_antifraud_token: Optional[str] = Header(default=None, alias="X-Antifraud-Token"),
+):
+    if INTERNAL_TOKEN:
+        if not x_antifraud_token or not hmac.compare_digest(x_antifraud_token.strip(), INTERNAL_TOKEN):
+            raise HTTPException(status_code=401, detail="Acesso interno não autorizado.")
+
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+
     texto_limpo = limpar_texto(mensagem.texto)
     if not texto_limpo:
         raise HTTPException(
@@ -285,9 +292,8 @@ def analisar_mensagem(mensagem: MensagemChat):
     else:
         previsao, certeza = analisar_heuristico(texto_limpo)
 
+    # Privacidade: não ecoa o texto original nem o texto higienizado na resposta
     return {
-        "texto_original": sanitizar_saida(mensagem.texto),
-        "texto_limpo_ia": sanitizar_saida(texto_limpo),
-        "intencao": previsao,
+        "intencao": str(previsao),
         "certeza_percentual": round(certeza, 2),
     }

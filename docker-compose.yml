@@ -46,6 +46,8 @@ services:
     container_name: beyondtime-ia
     ports:
       - "127.0.0.1:8001:8000"
+    environment:
+      ANTIFRAUD_INTERNAL_TOKEN: ${ANTIFRAUD_INTERNAL_TOKEN:-}
     restart: unless-stopped
 
   # ==========================================
@@ -75,6 +77,7 @@ services:
       AVATARS_UPLOAD_DIR: /app/uploads/avatars
       CHAT_MEDIA_UPLOAD_DIR: /app/uploads/chat-media
       ANTIFRAUD_API_URL: http://anjo-da-guarda:8000
+      ANTIFRAUD_INTERNAL_TOKEN: ${ANTIFRAUD_INTERNAL_TOKEN:-}
       CHAT_VAULT_KEK: ${CHAT_VAULT_KEK:-}
       BIOMETRIA_JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-}
     volumes:

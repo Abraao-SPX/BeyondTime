@@ -163,6 +163,14 @@ export interface ChatMediaUploadResponseDto {
   sizeBytes: number;
 }
 
+export interface AntifraudCheckResponseDto {
+  alert: boolean;
+  riskLabel: string;
+  confidencePercent: number;
+  educationalTitle: string | null;
+  educationalMessage: string | null;
+}
+
 // ==========================================================================
 // Helper HTTP autenticado (unificado com apiClient.ts — AUD-019 / AUD-020)
 // ==========================================================================
@@ -518,4 +526,28 @@ export async function downloadEncryptedChatMedia(
   }
 
   return new Uint8Array(await response.arrayBuffer());
+}
+
+// ==========================================================================
+// Endpoint RF-12 / RF-07 (Proxy Stateless ML Anti-Fraude — Anjo da Guarda)
+// ==========================================================================
+
+export async function checkChatMessageAntifraud(
+  session: AuthSession,
+  text: string
+): Promise<AntifraudCheckResponseDto | null> {
+  const normalized = text.trim();
+  if (normalized.length < 6) {
+    return null;
+  }
+
+  try {
+    return await authedRequest<AntifraudCheckResponseDto>(session, '/api/v1/chat/antifraud/check', {
+      method: 'POST',
+      body: JSON.stringify({ text: normalized.slice(0, 4000) }),
+    });
+  } catch {
+    // Análise anti-fraude é assíncrona e resiliente: nunca trava nem interrompe o chat
+    return null;
+  }
 }

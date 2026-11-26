@@ -10,6 +10,7 @@ import {
   SERGIPE_DISCOVERY_CATALOG,
 } from '../../services/wave2Service';
 import {
+  checkChatMessageAntifraud,
   createBlockContact,
   deleteBlockContact,
   downloadEncryptedChatMedia,
@@ -139,6 +140,7 @@ export function AuthenticatedWorkspace({
   const myKeyPairRef = useRef<LocalChatKeyPair | null>(null);
   const stompRef = useRef<ChatStompConnection | null>(null);
   const loadedHistoryIdsRef = useRef<Set<string>>(new Set());
+  const checkedAntifraudIdsRef = useRef<Set<string>>(new Set());
   const createdObjectUrlsRef = useRef<Set<string>>(new Set());
   const prevFiltersRef = useRef<{ city: string; goal: ConnectionGoal | 'Todos' }>({
     city: filterCity,
@@ -216,6 +218,48 @@ export function AuthenticatedWorkspace({
       };
     },
     [authSession]
+  );
+
+  const analyzeIncomingMessageAsync = useCallback(
+    (conversationId: string, message: ChatMessage) => {
+      if (isPreviewMode || message.sender !== 'them') return;
+      const trimmed = message.text?.trim() ?? '';
+      if (trimmed.length < 6 || trimmed.startsWith('[Mensagem protegida')) return;
+      if (checkedAntifraudIdsRef.current.has(message.id)) return;
+      checkedAntifraudIdsRef.current.add(message.id);
+
+      void checkChatMessageAntifraud(authSession, trimmed).then((result) => {
+        if (!result?.alert) return;
+        const educationalTitle =
+          result.educationalTitle || 'Dica de Segurança do Anjo da Guarda';
+        const educationalMessage =
+          result.educationalMessage ||
+          'Atenção: esta mensagem contém sinais que merecem cautela. Proteja seus dados pessoais e financeiros.';
+
+        setServerThreads((prev) =>
+          prev.map((thread) => {
+            if (thread.conversationId !== conversationId) return thread;
+            return {
+              ...thread,
+              messages: thread.messages.map((item) =>
+                item.id === message.id
+                  ? {
+                      ...item,
+                      antifraudAlert: {
+                        riskLabel: result.riskLabel,
+                        confidencePercent: result.confidencePercent,
+                        educationalTitle,
+                        educationalMessage,
+                      },
+                    }
+                  : item
+              ),
+            };
+          })
+        );
+      });
+    },
+    [authSession, isPreviewMode]
   );
 
   // O selo só é exibido quando o backend confirma a verificação (RF-11).
@@ -400,6 +444,10 @@ export function AuthenticatedWorkspace({
                 };
               })
             );
+
+            if (!isFromMe) {
+              analyzeIncomingMessageAsync(incoming.conversationId, uiMsg);
+            }
           })();
         },
         onReadReceipt: (receipt) => {
@@ -433,7 +481,14 @@ export function AuthenticatedWorkspace({
       stompRef.current?.disconnect();
       stompRef.current = null;
     };
-  }, [authSession, hydrateRemoteMessage, isPreviewMode, mapConversationDtoToThread, reloadRemoteConversations]);
+  }, [
+    analyzeIncomingMessageAsync,
+    authSession,
+    hydrateRemoteMessage,
+    isPreviewMode,
+    mapConversationDtoToThread,
+    reloadRemoteConversations,
+  ]);
 
   const handleRetryChatKey = useCallback(async () => {
     if (isPreviewMode || isRetryingChatKey) return;
@@ -541,9 +596,15 @@ export function AuthenticatedWorkspace({
         setServerThreads((prev) =>
           prev.map((t) => {
             if (t.conversationId !== convId) return t;
+            const existingAlertById = new Map(
+              t.messages
+                .filter((msg) => msg.antifraudAlert)
+                .map((msg) => [msg.id, msg.antifraudAlert])
+            );
             const byId = new Map<string, ChatMessage>();
             for (const msg of decrypted) {
-              byId.set(msg.id, msg);
+              const preservedAlert = existingAlertById.get(msg.id);
+              byId.set(msg.id, preservedAlert ? { ...msg, antifraudAlert: preservedAlert } : msg);
             }
             for (const msg of t.messages) {
               if (!byId.has(msg.id)) {
@@ -553,6 +614,12 @@ export function AuthenticatedWorkspace({
             return { ...t, messages: Array.from(byId.values()) };
           })
         );
+
+        // Analisa de forma assíncrona as mensagens recebidas mais recentes ao abrir a conversa
+        const recentIncoming = decrypted.filter((m) => m.sender === 'them').slice(-15);
+        for (const incomingMsg of recentIncoming) {
+          analyzeIncomingMessageAsync(convId, incomingMsg);
+        }
       } catch {
         loadedHistoryIdsRef.current.delete(convId);
       }
@@ -561,7 +628,15 @@ export function AuthenticatedWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, activeThreadId, authSession, hydrateRemoteMessage, isPreviewMode, visibleThreads]);
+  }, [
+    activeTab,
+    activeThreadId,
+    analyzeIncomingMessageAsync,
+    authSession,
+    hydrateRemoteMessage,
+    isPreviewMode,
+    visibleThreads,
+  ]);
 
   // Zera automaticamente o contador de não lidas da conversa aberta no painel direito
   // (inclusive quando outra conversa assume o foco após um bloqueio em RF-08).
