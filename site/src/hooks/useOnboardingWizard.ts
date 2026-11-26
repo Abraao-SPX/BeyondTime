@@ -34,7 +34,7 @@ function getInitialFormData(): OnboardingFormData {
     ...EMPTY_FORM_DATA,
     contact: saved.contact,
     fullName: saved.fullName,
-    birthDate: saved.birthDate,
+    birthDate: saved.birthDate ?? '',
     city: saved.city,
     photoPreviewUrl: saved.photoDataUrl,
     photoFileName: saved.photoFileName,

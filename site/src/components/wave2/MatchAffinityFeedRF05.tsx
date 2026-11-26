@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { getHobbyLabel } from '../../services/wave2Service';
 import type { ConnectionGoal } from '../../types/auth';
 import type { ScoredCandidate } from '../../types/wave2';
@@ -47,6 +48,44 @@ export function MatchAffinityFeedRF05({
   onDismissMatchBanner,
 }: MatchAffinityFeedRF05Props) {
   const currentCandidate = candidates[0] ?? null;
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'like' | 'pass';
+    candidate: ScoredCandidate;
+  } | null>(null);
+  const cancelActionBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (pendingAction) {
+      cancelActionBtnRef.current?.focus();
+    }
+  }, [pendingAction]);
+
+  useEffect(() => {
+    if (!pendingAction) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPendingAction(null);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingAction]);
+
+  useEffect(() => {
+    setPendingAction(null);
+  }, [currentCandidate?.id]);
+
+  function handleConfirmPendingAction() {
+    if (!pendingAction) return;
+    const { type, candidate } = pendingAction;
+    setPendingAction(null);
+    if (type === 'like') {
+      onConnect(candidate);
+    } else {
+      onPass(candidate);
+    }
+  }
 
   return (
     <section className="discover-stage" aria-label="Descobrir pessoas">
@@ -196,7 +235,7 @@ export function MatchAffinityFeedRF05({
               <button
                 type="button"
                 className="deck-action-btn deck-action-btn--pass"
-                onClick={() => onPass(currentCandidate)}
+                onClick={() => setPendingAction({ type: 'pass', candidate: currentCandidate })}
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -218,7 +257,7 @@ export function MatchAffinityFeedRF05({
               <button
                 type="button"
                 className="deck-action-btn deck-action-btn--like"
-                onClick={() => onConnect(currentCandidate)}
+                onClick={() => setPendingAction({ type: 'like', candidate: currentCandidate })}
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -252,6 +291,62 @@ export function MatchAffinityFeedRF05({
             >
               Ver perfis novamente
             </button>
+          </div>
+        </div>
+      )}
+
+      {pendingAction && (
+        <div
+          className="defensive-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="match-confirm-modal-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setPendingAction(null);
+            }
+          }}
+        >
+          <div className="defensive-modal">
+            <p className="defensive-modal__badge">Confirmação de Segurança</p>
+            <h2 id="match-confirm-modal-title" className="defensive-modal__title">
+              {pendingAction.type === 'like'
+                ? `Curtir o perfil de ${pendingAction.candidate.fullName}?`
+                : `Passar o perfil de ${pendingAction.candidate.fullName}?`}
+            </h2>
+            <p className="defensive-modal__text">
+              {pendingAction.type === 'like' ? (
+                <>
+                  Ao confirmar, você demonstra interesse em{' '}
+                  <strong>{pendingAction.candidate.fullName}</strong>. Se a pessoa também curtir
+                  você, uma conversa aparecerá em <strong>Conversas</strong>.
+                </>
+              ) : (
+                <>
+                  Ao confirmar, o perfil de <strong>{pendingAction.candidate.fullName}</strong>{' '}
+                  será pulado por enquanto. Você poderá ver perfis novamente quando quiser.
+                </>
+              )}
+            </p>
+            <div className="defensive-modal__actions">
+              <button
+                ref={cancelActionBtnRef}
+                type="button"
+                className="btn btn--secondary"
+                style={{ minHeight: '48px', minWidth: '48px' }}
+                onClick={() => setPendingAction(null)}
+              >
+                Voltar e revisar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                style={{ minHeight: '48px', minWidth: '48px' }}
+                onClick={handleConfirmPendingAction}
+              >
+                {pendingAction.type === 'like' ? 'Sim, confirmar curtida' : 'Sim, passar perfil'}
+              </button>
+            </div>
           </div>
         </div>
       )}

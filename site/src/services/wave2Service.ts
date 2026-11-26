@@ -10,7 +10,34 @@ import type {
   Wave2State,
 } from '../types/wave2';
 
-const WAVE2_STORAGE_KEY_PREFIX = 'beyondtime_wave2_state_v1_';
+const WAVE2_STORAGE_KEY_PREFIX = 'beyondtime_wave2_state_v2_';
+const REMEMBER_ME_FLAG_KEY = 'beyondtime_remember_me_active';
+
+function isRememberMeActive(): boolean {
+  try {
+    return window.localStorage.getItem(REMEMBER_ME_FLAG_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gera identificador opaco determinístico (FNV-1a 64-bit em hex) para evitar
+ * gravar e-mail ou dados pessoais em texto claro no nome da chave de storage (SEC-MED-03 / LGPD).
+ */
+function toOpaqueStorageId(userIdentifier: string): string {
+  const normalized = userIdentifier.trim().toLowerCase();
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < normalized.length; i += 1) {
+    const code = normalized.charCodeAt(i);
+    h1 ^= code;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 ^= code + i;
+    h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
+  }
+  return `${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`;
+}
 
 /**
  * Perfis curados de Sergipe (50+) para demonstração interativa da Onda 2 (RF-05/RF-07/RF-08)
@@ -129,11 +156,11 @@ function createInitialThreads(): ChatThread[] {
   ];
 }
 
-function getStorageKey(userEmail: string): string {
-  return `${WAVE2_STORAGE_KEY_PREFIX}${userEmail.trim().toLowerCase()}`;
+function getStorageKey(userIdentifier: string): string {
+  return `${WAVE2_STORAGE_KEY_PREFIX}${toOpaqueStorageId(userIdentifier)}`;
 }
 
-export function loadWave2State(userEmail: string): Wave2State {
+export function loadWave2State(userIdentifier: string): Wave2State {
   if (typeof window === 'undefined') {
     return {
       passedIds: [],
@@ -144,7 +171,11 @@ export function loadWave2State(userEmail: string): Wave2State {
   }
 
   try {
-    const raw = window.localStorage.getItem(getStorageKey(userEmail));
+    const key = getStorageKey(userIdentifier);
+    const rememberMe = isRememberMeActive();
+    const raw =
+      window.sessionStorage.getItem(key) ??
+      (rememberMe ? window.localStorage.getItem(key) : null);
     if (!raw) {
       return {
         passedIds: [],
@@ -170,10 +201,18 @@ export function loadWave2State(userEmail: string): Wave2State {
   }
 }
 
-export function saveWave2State(userEmail: string, state: Wave2State): void {
+export function saveWave2State(userIdentifier: string, state: Wave2State): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(getStorageKey(userEmail), JSON.stringify(state));
+    const key = getStorageKey(userIdentifier);
+    const serialized = JSON.stringify(state);
+    if (isRememberMeActive()) {
+      window.localStorage.setItem(key, serialized);
+      window.sessionStorage.removeItem(key);
+    } else {
+      window.sessionStorage.setItem(key, serialized);
+      window.localStorage.removeItem(key);
+    }
   } catch {
     // Falha silenciosa em caso de quota de storage
   }

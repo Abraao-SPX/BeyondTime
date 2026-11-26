@@ -2,6 +2,7 @@ import type { ConnectionGoal } from '../types/auth';
 import { MIN_ALLOWED_AGE, sanitizeTextInput } from '../utils/validation';
 
 export const PROFILE_STORAGE_KEY = 'beyondtime_user_profile_v1';
+const REMEMBER_ME_FLAG_KEY = 'beyondtime_remember_me_active';
 export const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
 export const AVATAR_PRE_RESIZE_PX = 600;
 export const AVATAR_JPEG_QUALITY = 0.85;
@@ -15,7 +16,7 @@ export interface UserProfileData {
   userId?: string;
   contact: string;
   fullName: string;
-  birthDate: string;
+  birthDate?: string;
   age: number;
   city: string;
   photoDataUrl: string | null;
@@ -23,6 +24,14 @@ export interface UserProfileData {
   hobbies: string[];
   goal: ConnectionGoal;
   updatedAt: string;
+}
+
+function isRememberMeActive(): boolean {
+  try {
+    return window.localStorage.getItem(REMEMBER_ME_FLAG_KEY) === 'true';
+  } catch {
+    return false;
+  }
 }
 
 function isValidPhotoDataUrl(dataUrl: string): boolean {
@@ -165,24 +174,37 @@ export function saveUserProfile(profile: UserProfileData): void {
     throw new Error('Formato de foto inválido para persistência.');
   }
 
-  // SEC-MED-02: Hardening - Não persistir fotos em Base64 (até 2MB) no localStorage.
-  // Fotos de perfil devem ser mantidas em memória da sessão React ou hidratadas via API/CDN.
-  const sanitizedProfile: UserProfileData = {
-    ...profile,
+  // SEC-MED-02 / SEC-MED-03: Minimização de PII no navegador.
+  // Não persistir fotos em Base64 nem data de nascimento (birthDate) no storage local.
+  const sanitizedProfile: Omit<UserProfileData, 'birthDate'> = {
+    userId: profile.userId ? sanitizeTextInput(profile.userId) : undefined,
     contact: sanitizeTextInput(profile.contact),
     fullName: sanitizeTextInput(profile.fullName),
+    age: profile.age,
     city: sanitizeTextInput(profile.city),
     photoDataUrl: null,
     photoFileName: profile.photoFileName ? sanitizeTextInput(profile.photoFileName) : null,
     hobbies: profile.hobbies.map((h) => sanitizeTextInput(h)).filter((h) => h.length > 0),
+    goal: profile.goal,
+    updatedAt: profile.updatedAt,
   };
 
-  window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(sanitizedProfile));
+  const serialized = JSON.stringify(sanitizedProfile);
+  if (isRememberMeActive()) {
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, serialized);
+    window.sessionStorage.removeItem(PROFILE_STORAGE_KEY);
+  } else {
+    window.sessionStorage.setItem(PROFILE_STORAGE_KEY, serialized);
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  }
 }
 
 export function loadUserProfile(expectedUserId?: string): UserProfileData | null {
   try {
-    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    const rememberMe = isRememberMeActive();
+    const raw =
+      window.sessionStorage.getItem(PROFILE_STORAGE_KEY) ??
+      (rememberMe ? window.localStorage.getItem(PROFILE_STORAGE_KEY) : null);
     if (raw === null) {
       return null;
     }
@@ -199,7 +221,6 @@ export function loadUserProfile(expectedUserId?: string): UserProfileData | null
 
     if (
       typeof candidate.fullName !== 'string' ||
-      typeof candidate.birthDate !== 'string' ||
       typeof candidate.age !== 'number' ||
       candidate.age < MIN_ALLOWED_AGE ||
       typeof candidate.city !== 'string' ||
@@ -218,7 +239,6 @@ export function loadUserProfile(expectedUserId?: string): UserProfileData | null
       userId: typeof candidate.userId === 'string' ? sanitizeTextInput(candidate.userId) : undefined,
       contact: typeof candidate.contact === 'string' ? sanitizeTextInput(candidate.contact) : '',
       fullName: sanitizeTextInput(candidate.fullName),
-      birthDate: sanitizeTextInput(candidate.birthDate),
       age: candidate.age,
       city: sanitizeTextInput(candidate.city),
       photoDataUrl: validPhotoUrl,
@@ -247,7 +267,15 @@ export function loadUserProfile(expectedUserId?: string): UserProfileData | null
 }
 
 export function clearUserProfile(): void {
-  // SEC-MED-02: Limpeza rígida em ambos os storages para evitar resíduos de sessão
-  window.localStorage.removeItem(PROFILE_STORAGE_KEY);
-  window.sessionStorage.removeItem(PROFILE_STORAGE_KEY);
+  // SEC-MED-02 / SEC-MED-03: Limpeza rígida em ambos os storages para evitar resíduos de PII/sessão
+  try {
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  } catch {
+    // ignora
+  }
+  try {
+    window.sessionStorage.removeItem(PROFILE_STORAGE_KEY);
+  } catch {
+    // ignora
+  }
 }

@@ -13,17 +13,29 @@ const BLOCK_REASONS = [
   'Prefiro não informar',
 ] as const;
 
+const BLOCK_CONFIRM_DELAY_SECONDS = 3;
+
 export function BlockContactModalRF08({
   contactName,
   onConfirm,
   onCancel,
 }: BlockContactModalRF08Props) {
   const [selectedReason, setSelectedReason] = useState<string>(BLOCK_REASONS[0]);
+  const [secondsLeft, setSecondsLeft] = useState<number>(BLOCK_CONFIRM_DELAY_SECONDS);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     cancelBtnRef.current?.focus();
   }, []);
+
+  // RF-06 (SEC-ALTA-05): Temporizador defensivo de 3s antes de liberar ação destrutiva de bloqueio
+  useEffect(() => {
+    if (secondsLeft <= 0) return;
+    const timer = window.setTimeout(() => {
+      setSecondsLeft((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [secondsLeft]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -89,9 +101,16 @@ export function BlockContactModalRF08({
           <button
             type="button"
             className="btn btn--danger"
-            onClick={() => onConfirm(selectedReason)}
+            disabled={secondsLeft > 0}
+            aria-disabled={secondsLeft > 0}
+            onClick={() => {
+              if (secondsLeft > 0) return;
+              onConfirm(selectedReason);
+            }}
           >
-            Confirmar bloqueio
+            {secondsLeft > 0
+              ? `Aguarde ${secondsLeft}s para confirmar bloqueio...`
+              : 'Confirmar bloqueio'}
           </button>
         </div>
       </div>

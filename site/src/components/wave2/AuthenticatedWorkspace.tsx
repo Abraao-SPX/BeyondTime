@@ -119,7 +119,7 @@ export function AuthenticatedWorkspace({
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('discover');
   const [wave2State, setWave2State] = useState<Wave2State>(() =>
-    loadWave2State(authSession.email)
+    loadWave2State(authSession.userId)
   );
   const [serverCandidates, setServerCandidates] = useState<ScoredCandidate[]>([]);
   const [serverThreads, setServerThreads] = useState<ChatThread[]>([]);
@@ -224,9 +224,9 @@ export function AuthenticatedWorkspace({
 
   useEffect(() => {
     if (isPreviewMode) {
-      saveWave2State(authSession.email, wave2State);
+      saveWave2State(authSession.userId, wave2State);
     }
-  }, [authSession.email, isPreviewMode, wave2State]);
+  }, [authSession.userId, isPreviewMode, wave2State]);
 
   const mapConversationDtoToThread = useCallback(
     async (dto: ConversationSummaryDto): Promise<ChatThread> => {
