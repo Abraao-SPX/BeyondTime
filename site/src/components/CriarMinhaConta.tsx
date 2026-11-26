@@ -44,7 +44,7 @@ interface CriarMinhaContaProps {
   contact: string;
   onContactChange: (value: string) => void;
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
-  onAuthSuccess: (session: AuthSession) => void;
+  onAuthSuccess: (session: AuthSession, socialDraft?: SocialOnboardingDraft) => void;
   existingSession?: AuthSession | null;
   orphanNotice?: string | null;
   socialDraft?: SocialOnboardingDraft | null;
@@ -130,6 +130,7 @@ export function CriarMinhaConta({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [step1Error, setStep1Error] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitErrorCode, setSubmitErrorCode] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(orphanNotice);
   const [createdSession, setCreatedSession] = useState<AuthSession | null>(existingSession);
   const [lastSavedProfile, setLastSavedProfile] = useState<ServerProfile | null>(initialProfile);
@@ -178,24 +179,55 @@ export function CriarMinhaConta({
 
     try {
       const authResult = await authenticateWithFirebasePopup(provider);
-      setSocialIdToken(authResult.idToken);
-      setSocialProvider(provider);
 
       if (authResult.email) {
         onContactChange(authResult.email);
       }
 
-      setFormData((prev) => ({
-        ...prev,
-        contact: authResult.email || prev.contact,
-        fullName: authResult.fullName || prev.fullName,
-        photoPreviewUrl: authResult.photoUrl || prev.photoPreviewUrl,
-      }));
-
-      setFeedbackMessage(
-        `Conta ${provider} conectada com sucesso! Prossiga com seus dados e data de nascimento.`
-      );
-      setStep(2);
+      // Verifica primeiro no backend se a conta Google/Facebook já existe
+      // para evitar reabrir o cadastro de 7 etapas e sobrescrever um perfil já criado.
+      try {
+        const existingAccountSession = await loginWithSocial(
+          authResult.idToken,
+          undefined,
+          provider
+        );
+        await signOutFirebaseSilently();
+        setFeedbackMessage(`Conta ${provider} encontrada! Entrando no seu painel...`);
+        onAuthSuccess(existingAccountSession, {
+          fullName: authResult.fullName || undefined,
+          photoUrl: authResult.photoUrl || undefined,
+          provider,
+        });
+        return;
+      } catch (apiErr) {
+        if (
+          apiErr instanceof ApiError &&
+          apiErr.code === 'BIRTH_DATE_REQUIRED_FOR_NEW_OAUTH_ACCOUNT'
+        ) {
+          // Conta social realmente nova: segue para etapa 2 (nome, data de nascimento 50+ e perfil)
+          setSocialIdToken(authResult.idToken);
+          setSocialProvider(provider);
+          setFormData((prev) => ({
+            ...prev,
+            contact: authResult.email || prev.contact,
+            fullName: authResult.fullName || prev.fullName,
+            photoPreviewUrl: authResult.photoUrl || prev.photoPreviewUrl,
+          }));
+          setFeedbackMessage(
+            `Conta ${provider} conectada com sucesso! Prossiga com seus dados e data de nascimento.`
+          );
+          setStep(2);
+          return;
+        }
+        await signOutFirebaseSilently();
+        if (apiErr instanceof ApiError) {
+          setStep1Error(apiErr.message);
+        } else {
+          setStep1Error(`Não foi possível autenticar com ${provider}. Tente novamente.`);
+        }
+        setFeedbackMessage(null);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : `Erro ao conectar com ${provider}. Tente novamente.`;
       setStep1Error(msg);
@@ -238,6 +270,7 @@ export function CriarMinhaConta({
   async function handleCompleteOnboarding() {
     if (isSubmitting) return;
     setSubmitError(null);
+    setSubmitErrorCode(null);
     setIsSubmitting(true);
     try {
       const isoBirthDate = toIsoBirthDate(formData.birthDate);
@@ -310,8 +343,10 @@ export function CriarMinhaConta({
     } catch (err) {
       if (err instanceof ApiError) {
         setSubmitError(err.message);
+        setSubmitErrorCode(err.code ?? (err.status === 409 ? 'EMAIL_ALREADY_REGISTERED' : null));
       } else {
         setSubmitError('Não foi possível concluir seu cadastro no servidor. Tente novamente.');
+        setSubmitErrorCode(null);
       }
     } finally {
       setIsSubmitting(false);
@@ -368,7 +403,7 @@ export function CriarMinhaConta({
             Criar minha conta
           </h1>
           <p className="auth-card__subtitle">
-            Entre ou cadastre-se para encontrar conexões reais e seguras.
+            Crie sua conta gratuita para encontrar conexões reais e seguras.
           </p>
 
           <SocialAuthGrid onSelectProvider={handleSocialSelect} disabled={isSubmitting} />
@@ -529,9 +564,31 @@ export function CriarMinhaConta({
             </p>
           )}
           {submitError !== null && (
-            <p className="form-error" role="alert">
-              {submitError}
-            </p>
+            <div role="alert" style={{ marginTop: '12px' }}>
+              <p className="form-error">{submitError}</p>
+              {submitErrorCode === 'EMAIL_ALREADY_REGISTERED' && !existingSession && (
+                <div className="action-stack action-stack--compact" style={{ marginTop: '12px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={(event) => onNavigate('login', event.currentTarget)}
+                  >
+                    Já tenho conta — Ir para Entrar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => {
+                      setSubmitError(null);
+                      setSubmitErrorCode(null);
+                      setStep(1);
+                    }}
+                  >
+                    Alterar e-mail (Etapa 1)
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

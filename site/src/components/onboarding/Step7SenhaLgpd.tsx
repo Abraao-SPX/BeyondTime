@@ -70,7 +70,7 @@ export function Step7SenhaLgpd({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!isEditMode && (!isSocialAccount || formData.password.length > 0 || formData.confirmPassword.length > 0)) {
+    if (!isEditMode && !isSocialAccount) {
       const passwordError = validatePasswordMatch(
         formData.password,
         formData.confirmPassword
@@ -225,16 +225,22 @@ export function Step7SenhaLgpd({
         {isEditMode
           ? 'Confira o aceite de privacidade e clique abaixo para atualizar seu perfil, foto e hobbies no servidor.'
           : isSocialAccount
-            ? 'Confirme o aceite dos termos para finalizar seu cadastro seguro no BeyondTime. A criação de senha local é opcional.'
+            ? `Confirme o aceite dos termos para finalizar seu cadastro seguro via ${socialProvider || 'conta social'} no BeyondTime.`
             : 'Escolha uma senha segura para proteger sua conta.'}
       </p>
 
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
-        {!isEditMode && (
+        {!isEditMode && isSocialAccount && (
+          <div className="callout-amber" role="note" style={{ marginBottom: '16px' }}>
+            Sua conta está protegida pelo acesso via <strong>{socialProvider || 'provedor social'}</strong>. Nas próximas visitas, basta clicar em <strong>Entrar</strong> e escolher <strong>{socialProvider || 'sua conta social'}</strong> — você não precisa criar senha separada.
+          </div>
+        )}
+
+        {!isEditMode && !isSocialAccount && (
           <>
             <div className="form-group">
               <label className="form-label" htmlFor="step7-password">
-                {isSocialAccount ? 'Criar senha de acesso (opcional)' : 'Criar senha'}
+                Criar senha
               </label>
               <PasswordInput
                 ref={passwordInputRef}

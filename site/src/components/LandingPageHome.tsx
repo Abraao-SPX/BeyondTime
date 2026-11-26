@@ -335,8 +335,8 @@ export function LandingPageHome({
   const [selectedGoal, setSelectedGoal] = useState<ConnectionGoal>('Amizade');
   const [selectedCity, setSelectedCity] = useState('Aracaju (SE)');
 
-  function handleStartRegistration() {
-    onOpenAuth('register', { goal: selectedGoal, city: selectedCity });
+  function handleOpenUnifiedAuth() {
+    onOpenAuth('login', { goal: selectedGoal, city: selectedCity });
   }
 
   return (
@@ -391,18 +391,10 @@ export function LandingPageHome({
 
             <button
               type="button"
-              className="btn-home-outline"
-              onClick={() => onOpenAuth('login')}
-            >
-              Entrar
-            </button>
-
-            <button
-              type="button"
               className="btn-home-cta-primary btn-home-cta-primary--compact"
-              onClick={handleStartRegistration}
+              onClick={handleOpenUnifiedAuth}
             >
-              <span>Criar conta</span>
+              <span>Entrar</span>
               <HomeIcon name="arrow-right" className="home-icon" />
             </button>
 
@@ -447,23 +439,13 @@ export function LandingPageHome({
             <div className="home-mobile-nav__actions">
               <button
                 type="button"
-                className="btn btn--secondary btn--full"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenAuth('login');
-                }}
-              >
-                Já tenho conta (Entrar)
-              </button>
-              <button
-                type="button"
                 className="btn btn--primary btn--full"
                 onClick={() => {
                   setMobileMenuOpen(false);
-                  handleStartRegistration();
+                  handleOpenUnifiedAuth();
                 }}
               >
-                Criar minha conta 50+
+                Entrar
               </button>
             </div>
           </nav>
@@ -534,7 +516,7 @@ export function LandingPageHome({
                 <button
                   type="button"
                   className="btn-home-cta-primary btn-home-cta-primary--finder"
-                  onClick={handleStartRegistration}
+                  onClick={handleOpenUnifiedAuth}
                 >
                   <span>Ver conexões compatíveis</span>
                   <HomeIcon name="arrow-right" className="home-icon" />
@@ -641,7 +623,7 @@ export function LandingPageHome({
               <button
                 type="button"
                 className="btn-home-cta-primary"
-                onClick={handleStartRegistration}
+                onClick={handleOpenUnifiedAuth}
               >
                 <span>Fazer parte da comunidade</span>
                 <HomeIcon name="arrow-right" className="home-icon" />
@@ -735,17 +717,10 @@ export function LandingPageHome({
                 <button
                   type="button"
                   className="btn-home-cta-primary btn-home-cta-primary--large"
-                  onClick={handleStartRegistration}
+                  onClick={handleOpenUnifiedAuth}
                 >
-                  <span>Criar Minha Conta Grátis</span>
+                  <span>Entrar no BeyondTime</span>
                   <HomeIcon name="arrow-right" className="home-icon" />
-                </button>
-                <button
-                  type="button"
-                  className="btn-home-cta-secondary"
-                  onClick={() => onOpenAuth('login')}
-                >
-                  Já tenho conta (Entrar)
                 </button>
               </div>
             </div>
@@ -828,8 +803,7 @@ export function LandingPageHome({
               <li><a className="home-footer__link" href="#comunidade">Quem Está Aqui</a></li>
               <li><a className="home-footer__link" href="#seguranca">Segurança &amp; LGPD</a></li>
               <li><a className="home-footer__link" href="#projeto">O Projeto</a></li>
-              <li><button type="button" className="home-footer__link-btn" onClick={() => onOpenAuth('login')}>Entrar</button></li>
-              <li><button type="button" className="home-footer__link-btn" onClick={handleStartRegistration}>Criar conta</button></li>
+              <li><button type="button" className="home-footer__link-btn" onClick={handleOpenUnifiedAuth}>Entrar</button></li>
             </ul>
           </nav>
 
