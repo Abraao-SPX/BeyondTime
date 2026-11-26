@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { LegalDocKey, OnboardingFormData, SocialProvider } from '../../types/auth';
+import type { AuthSession, OnboardingFormData, SocialProvider } from '../../types/auth';
 import {
   calculateAgeFromBirthDate,
   MIN_PASSWORD_LENGTH,
   validatePasswordMatch,
 } from '../../utils/validation';
 import { PasswordInput } from '../PasswordInput';
+import { FacialVerificationQrModal } from '../wave2/FacialVerificationQrModal';
 
 interface Step7SenhaLgpdProps {
   formData: OnboardingFormData;
@@ -15,6 +16,9 @@ interface Step7SenhaLgpdProps {
   isSocialAccount?: boolean;
   isEditMode?: boolean;
   socialProvider?: SocialProvider | null;
+  authSession?: AuthSession | null;
+  isFaceVerified?: boolean;
+  onFaceVerified?: () => void;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
   onToggleLgpd: (accepted: boolean) => void;
@@ -23,13 +27,6 @@ interface Step7SenhaLgpdProps {
   onFinishToLogin: () => void;
 }
 
-const LEGAL_PREVIEWS: Record<LegalDocKey, string> = {
-  terms:
-    'Termos de Uso: o BeyondTime é uma plataforma 50+ para conexões respeitosas, com diretrizes claras contra fraudes, assédio e solicitações financeiras.',
-  privacy:
-    'Política de Privacidade e Segurança: seus dados pessoais e preferências são tratados conforme a LGPD, sem exibição pública de endereço ou telefone.',
-};
-
 export function Step7SenhaLgpd({
   formData,
   isCompleted,
@@ -37,6 +34,9 @@ export function Step7SenhaLgpd({
   isSocialAccount = false,
   isEditMode = false,
   socialProvider = null,
+  authSession = null,
+  isFaceVerified = false,
+  onFaceVerified,
   onPasswordChange,
   onConfirmPasswordChange,
   onToggleLgpd,
@@ -45,7 +45,8 @@ export function Step7SenhaLgpd({
   onFinishToLogin,
 }: Step7SenhaLgpdProps) {
   const [formError, setFormError] = useState<string | null>(null);
-  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKey | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const hasAutoOpenedQrRef = useRef(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +54,14 @@ export function Step7SenhaLgpd({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
+
+  // Abre automaticamente o QR Code obrigatório assim que o cadastro é salvo e o rosto ainda não foi verificado
+  useEffect(() => {
+    if (isCompleted && !isFaceVerified && !isEditMode && !hasAutoOpenedQrRef.current) {
+      hasAutoOpenedQrRef.current = true;
+      setShowQrModal(true);
+    }
+  }, [isCompleted, isFaceVerified, isEditMode]);
 
   const passwordsMatch =
     formData.password.length >= MIN_PASSWORD_LENGTH &&
@@ -84,20 +93,23 @@ export function Step7SenhaLgpd({
     onComplete();
   }
 
-  function handleToggleLegalPreview(docKey: LegalDocKey) {
-    setActiveLegalDoc((current) => (current === docKey ? null : docKey));
-  }
-
   if (isCompleted) {
     const calculatedAge = calculateAgeFromBirthDate(formData.birthDate);
+    const canEnterWorkspace = isFaceVerified || isEditMode;
+    const firstName = formData.fullName.trim().split(/\s+/)[0] || undefined;
+
     return (
       <div className="completion-summary" aria-live="polite">
-        <p className="defensive-modal__badge">Perfil salvo</p>
+        <p className="defensive-modal__badge">
+          {canEnterWorkspace ? 'Selo de Verificado 50+ Ativo' : 'Etapa final obrigatória — RF-11'}
+        </p>
         <h1 id="register-title" ref={headingRef} tabIndex={-1} className="auth-card__title">
-          Perfil criado com sucesso
+          {canEnterWorkspace ? 'Perfil verificado com sucesso' : 'Conta criada! Confirme seu rosto'}
         </h1>
         <p className="auth-card__subtitle">
-          Seus dados e preferências foram salvos. Você pode editar seu perfil a qualquer momento.
+          {canEnterWorkspace
+            ? 'Sua identidade foi confirmada e seus dados foram salvos. Você já pode acessar a página principal.'
+            : 'Para entrar na página principal do BeyondTime, conclua a verificação facial pelo celular (código QR, sem precisar baixar aplicativo).'}
         </p>
 
         {formData.photoPreviewUrl !== null && (
@@ -131,22 +143,66 @@ export function Step7SenhaLgpd({
           </p>
         </div>
 
+        <div className="photo-verification-banner" style={{ margin: '20px 0' }}>
+          <div className="photo-verification-banner__text">
+            <strong>
+              {isFaceVerified
+                ? 'Selo de Verificado 50+ confirmado!'
+                : 'Verificação facial obrigatória pelo celular (QR Code)'}
+            </strong>
+            <p>
+              {isFaceVerified
+                ? 'Reconhecimento facial e prova de vida aprovados. Seu acesso à página principal está liberado.'
+                : 'Aponte a câmera do celular para o código QR e faça a prova de vida direto no navegador, sem instalar app.'}
+            </p>
+          </div>
+          {!isFaceVerified && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              style={{ minHeight: '48px' }}
+              onClick={() => setShowQrModal(true)}
+            >
+              Verificar rosto agora (QR Code)
+            </button>
+          )}
+        </div>
+
         <div className="action-stack action-stack--compact">
           <button
             type="button"
             className="btn btn--primary"
+            style={{ minHeight: '52px' }}
+            disabled={!canEnterWorkspace}
             onClick={onFinishToLogin}
           >
-            Acessar meu painel
+            {canEnterWorkspace
+              ? 'Acessar meu painel'
+              : 'Faça a verificação facial acima para entrar'}
           </button>
           <button
             type="button"
             className="btn btn--secondary"
+            style={{ minHeight: '48px' }}
             onClick={onEditProfile}
           >
             Editar perfil
           </button>
         </div>
+
+        {showQrModal && (
+          <FacialVerificationQrModal
+            authSession={authSession}
+            firstName={firstName}
+            onClose={() => setShowQrModal(false)}
+            onVerified={(res) => {
+              if (res.verifiedBadge50plus) {
+                onFaceVerified?.();
+                setShowQrModal(false);
+              }
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -250,49 +306,29 @@ export function Step7SenhaLgpd({
               )}
             </span>
             <span className="lgpd-checkbox-text">
-              Li e aceito os <strong>Termos de Uso</strong> e a{' '}
-              <strong>Política de Privacidade e Segurança</strong> do BeyondTime.
+              Li e aceito os{' '}
+              <a
+                href="/termos"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lgpd-inline-link"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Termos de Uso
+              </a>{' '}
+              e a{' '}
+              <a
+                href="/privacidade"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lgpd-inline-link"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Política de Privacidade e Segurança
+              </a>{' '}
+              do BeyondTime.
             </span>
           </label>
-
-          <div className="lgpd-doc-buttons">
-            <button
-              type="button"
-              className="btn-legal-outline"
-              onClick={() => handleToggleLegalPreview('terms')}
-            >
-              Termos de Uso
-            </button>
-            <button
-              type="button"
-              className="btn-legal-outline"
-              onClick={() => handleToggleLegalPreview('privacy')}
-            >
-              Política de Privacidade e Segurança
-            </button>
-            <a
-              href="/privacidade"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-legal-outline"
-              style={{
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                color: 'var(--brand-primary)',
-              }}
-              title="Abre a Política de Privacidade e Proteção de Dados completa em nova aba"
-            >
-              Ler Política Completa (LGPD) ↗
-            </a>
-          </div>
-
-          {activeLegalDoc !== null && (
-            <p className="form-feedback" aria-live="polite">
-              {LEGAL_PREVIEWS[activeLegalDoc]}
-            </p>
-          )}
         </div>
 
         {formError !== null && (

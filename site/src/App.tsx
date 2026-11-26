@@ -8,6 +8,9 @@ import { LandingPageHome as LandingPage, type OnboardingPrefill } from './compon
 import { PaginasLegais } from './components/PaginasLegais';
 import { RecuperarSenha } from './components/RecuperarSenha';
 import { TelaLogin } from './components/TelaLogin';
+import { AuthenticatedWorkspace } from './components/wave2/AuthenticatedWorkspace';
+import { FacialVerificationQrModal } from './components/wave2/FacialVerificationQrModal';
+import { MobileFacialHandoffPage } from './components/wave2/MobileFacialHandoffPage';
 import { useHighContrast } from './hooks/useHighContrast';
 import {
   ApiError,
@@ -16,6 +19,7 @@ import {
   fetchMyProfile,
   loadAuthSession,
   logoutAccount,
+  registerSessionLifecycleCallbacks,
   resolveApiAssetUrl,
   type ServerProfile,
 } from './services/apiClient';
@@ -26,9 +30,14 @@ import type {
   LegalPageId,
   SocialOnboardingDraft,
 } from './types/auth';
-import { sanitizeTextInput } from './utils/validation';
+import { calculateAgeFromBirthDate, sanitizeTextInput } from './utils/validation';
 
 const DELETE_COUNTDOWN_SECONDS = 5;
+
+export function isMobileFacialHandoffPath(pathname: string): boolean {
+  const cleanPath = pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  return cleanPath === '/verificar-rosto' || cleanPath === '/verify-face';
+}
 
 export function parseLegalPageFromPath(pathname: string): LegalPageId | null {
   const cleanPath = pathname.toLowerCase().replace(/\/+$/, '') || '/';
@@ -48,14 +57,57 @@ export function parseLegalPageFromPath(pathname: string): LegalPageId | null {
   return null;
 }
 
+const IS_DEV_ONDA2_PREVIEW =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('preview') === 'onda2';
+
+const DEV_PREVIEW_SESSION: AuthSession = {
+  accessToken: 'dev-preview-token',
+  refreshToken: 'dev-preview-refresh',
+  tokenType: 'Bearer',
+  expiresInSeconds: 3600,
+  userId: 'dev-preview-50plus',
+  email: 'maria50@beyondtime.com.br',
+  role: 'USER',
+  authProvider: 'email',
+  rememberMe: false,
+};
+
+const DEV_PREVIEW_PROFILE: ServerProfile = {
+  id: 'dev-preview-profile',
+  userId: 'dev-preview-50plus',
+  firstName: 'Maria',
+  fullName: 'Maria Helena',
+  bio: 'Amo caminhar na Orla de Atalaia e conversar tomando um bom café.',
+  city: 'Aracaju',
+  age: 64,
+  goal: 'Amizade',
+  hobbies: ['caminhada', 'cafe-e-prosa', 'mpb', 'leitura', 'forro'],
+  avatarUrl: '/assets/perfil-helena.svg',
+  verificationStatus: 'VERIFIED',
+  verifiedBadge50plus: true,
+};
+
 export function App() {
+  const [isMobileFacialHandoff] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? isMobileFacialHandoffPath(window.location.pathname) : false
+  );
   const [legalPage, setLegalPage] = useState<LegalPageId | null>(() =>
     typeof window !== 'undefined' ? parseLegalPageFromPath(window.location.pathname) : null
   );
-  const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession());
-  const [showLanding, setShowLanding] = useState<boolean>(() => loadAuthSession() === null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() =>
+    IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_SESSION : loadAuthSession()
+  );
+  const [showLanding, setShowLanding] = useState<boolean>(() =>
+    IS_DEV_ONDA2_PREVIEW ? false : loadAuthSession() === null
+  );
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [profileRetryTick, setProfileRetryTick] = useState(0);
   const { highContrast, toggleHighContrast } = useHighContrast();
-  const [serverProfile, setServerProfile] = useState<ServerProfile | null>(null);
+  const [serverProfile, setServerProfile] = useState<ServerProfile | null>(() =>
+    IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_PROFILE : null
+  );
   const [activeView, setActiveView] = useState<AuthViewId>('login');
   const [contacts, setContacts] = useState<Record<AuthViewId, string>>({
     login: '',
@@ -75,6 +127,7 @@ export function App() {
   const [isLoadingProfile, setIsLoadingProfile] = useState<boolean>(() => loadAuthSession() !== null);
   const [isProfileMissing, setIsProfileMissing] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isMandatoryQrOpen, setIsMandatoryQrOpen] = useState(false);
   const [orphanNotice, setOrphanNotice] = useState<string | null>(null);
   const [socialDraft, setSocialDraft] = useState<SocialOnboardingDraft | null>(null);
 
@@ -85,6 +138,25 @@ export function App() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    return registerSessionLifecycleCallbacks({
+      onSessionUpdated: (updated) => {
+        setAuthSession(updated);
+      },
+      onSessionExpired: () => {
+        setAuthSession(null);
+        setServerProfile(null);
+        setIsLoadingProfile(false);
+        setIsProfileMissing(false);
+        setIsEditingProfile(false);
+        setOrphanNotice(null);
+        setAccountDeletedNotice('Sua sessão expirou por segurança. Entre novamente para continuar.');
+        setActiveView('login');
+        setShowLanding(false);
+      },
+    });
+  }, []);
 
   useEffect(() => {
     function handlePopState() {
@@ -202,19 +274,27 @@ export function App() {
   useEffect(() => {
     if (!authSession) {
       setIsLoadingProfile(false);
+      setProfileLoadError(null);
       setServerProfile(null);
       setIsProfileMissing(false);
       setIsEditingProfile(false);
       setOrphanNotice(null);
       return;
     }
+    if (import.meta.env.DEV && authSession.userId === 'dev-preview-50plus') {
+      setIsLoadingProfile(false);
+      setProfileLoadError(null);
+      return;
+    }
     let active = true;
     setIsLoadingProfile(true);
+    setProfileLoadError(null);
     fetchMyProfile(authSession)
       .then((profile) => {
         if (active) {
           setServerProfile(profile);
           setIsProfileMissing(false);
+          setProfileLoadError(null);
           setOrphanNotice(null);
         }
       })
@@ -227,6 +307,7 @@ export function App() {
           setServerProfile(null);
           setIsProfileMissing(false);
           setIsEditingProfile(false);
+          setProfileLoadError(null);
           setOrphanNotice(null);
           setSocialDraft(null);
         } else if (err instanceof ApiError && err.status === 404) {
@@ -235,8 +316,15 @@ export function App() {
           // redireciona suavemente para conclusão do perfil 50+ (dados, foto, hobbies RF03 e objetivo).
           setServerProfile(null);
           setIsProfileMissing(true);
+          setProfileLoadError(null);
           setOrphanNotice(
             'Bem-vindo(a)! Agora vamos completar seu perfil 50+ com sua cidade, foto, hobbies e objetivo para começar a se conectar com segurança!'
+          );
+        } else {
+          setProfileLoadError(
+            err instanceof ApiError
+              ? err.message
+              : 'Não foi possível carregar seu perfil agora. Verifique sua conexão e tente novamente.'
           );
         }
       })
@@ -248,23 +336,30 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [authSession]);
+  }, [authSession, profileRetryTick]);
 
   async function handleLogout() {
-    await logoutAccount(authSession);
-    setAuthSession(null);
-    setServerProfile(null);
-    setIsLoadingProfile(false);
-    setIsProfileMissing(false);
-    setIsEditingProfile(false);
-    setOrphanNotice(null);
-    setSocialDraft(null);
-    setIsDeleteModalOpen(false);
-    setDeletePassword('');
-    setDeleteError(null);
-    setContacts({ login: '', register: '', recover: '' });
-    setActiveView('login');
-    setShowLanding(true);
+    try {
+      await logoutAccount(authSession);
+    } catch {
+      // Mesmo se o backend estiver indisponível, limpa a sessão local com segurança
+      clearAuthSession();
+      clearUserProfile();
+    } finally {
+      setAuthSession(null);
+      setServerProfile(null);
+      setIsLoadingProfile(false);
+      setIsProfileMissing(false);
+      setIsEditingProfile(false);
+      setOrphanNotice(null);
+      setSocialDraft(null);
+      setIsDeleteModalOpen(false);
+      setDeletePassword('');
+      setDeleteError(null);
+      setContacts({ login: '', register: '', recover: '' });
+      setActiveView('login');
+      setShowLanding(true);
+    }
   }
 
   useEffect(() => {
@@ -351,6 +446,11 @@ export function App() {
   const savedProfile = authSession ? loadUserProfile(authSession.userId) : null;
   const rawFullName = serverProfile?.fullName || savedProfile?.fullName;
   const displayFullName = rawFullName ? sanitizeTextInput(rawFullName) : undefined;
+  const displayAge =
+    (typeof serverProfile?.age === 'number' && serverProfile.age >= 50 ? serverProfile.age : null) ??
+    (serverProfile?.birthDate ? calculateAgeFromBirthDate(serverProfile.birthDate) : null) ??
+    (savedProfile?.age && savedProfile.age >= 50 ? savedProfile.age : null) ??
+    (savedProfile?.birthDate ? calculateAgeFromBirthDate(savedProfile.birthDate) : null);
   const rawCity = serverProfile?.city || savedProfile?.city;
   const displayCity = rawCity ? sanitizeTextInput(rawCity) : undefined;
   const rawGoal = serverProfile?.goal || savedProfile?.goal;
@@ -360,6 +460,26 @@ export function App() {
     : savedProfile?.hobbies;
   const displayHobbies = rawHobbies?.map((h) => sanitizeTextInput(h)).filter(Boolean);
   const displayAvatarUrl = resolveApiAssetUrl(serverProfile?.avatarUrl) || savedProfile?.photoDataUrl || null;
+
+  // RF-11: Portão Biométrico Obrigatório (fail-closed) — só entra na página principal se o rosto foi verificado e aprovado
+  const needsMandatoryFacialVerification =
+    authSession !== null &&
+    !isLoadingProfile &&
+    !isProfileMissing &&
+    !isEditingProfile &&
+    serverProfile?.verifiedBadge50plus !== true;
+
+  useEffect(() => {
+    if (needsMandatoryFacialVerification) {
+      setIsMandatoryQrOpen(true);
+    } else {
+      setIsMandatoryQrOpen(false);
+    }
+  }, [needsMandatoryFacialVerification]);
+
+  if (isMobileFacialHandoff) {
+    return <MobileFacialHandoffPage />;
+  }
 
   // Roteamento nativo para páginas legais LGPD, Meta e Termos
   if (legalPage !== null) {
@@ -387,6 +507,7 @@ export function App() {
         <LandingPage
           highContrast={highContrast}
           onToggleHighContrast={toggleHighContrast}
+          onToggleAccessibility={() => setIsAccessibilityOpen(true)}
           onOpenAuth={handleOpenAuthFromLanding}
           onOpenLegalPage={handleOpenLegalPage}
         />
@@ -401,6 +522,16 @@ export function App() {
     );
   }
 
+  const isShowingWorkspace =
+    authSession !== null &&
+    !isLoadingProfile &&
+    !isProfileMissing &&
+    !isEditingProfile &&
+    !needsMandatoryFacialVerification;
+  const isShowingOnboarding =
+    (authSession !== null && !isLoadingProfile && (isProfileMissing || isEditingProfile)) ||
+    (authSession === null && activeView === 'register');
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#conteudo">
@@ -413,10 +544,19 @@ export function App() {
         onToggleAccessibility={() => setIsAccessibilityOpen(true)}
         highContrast={highContrast}
         onToggleHighContrast={toggleHighContrast}
+        showBackButton={!isShowingWorkspace}
       />
 
       <main className="auth-main" id="conteudo">
-        <div className="auth-card">
+        <div
+          className={`auth-card${
+            isShowingWorkspace
+              ? ' auth-card--workspace'
+              : isShowingOnboarding
+                ? ' auth-card--wide'
+                : ''
+          }`}
+        >
           {authSession ? (
             isLoadingProfile ? (
               <section className="completion-summary" aria-live="polite" aria-busy="true">
@@ -428,6 +568,27 @@ export function App() {
                 <div className="skeleton-loader" aria-hidden="true">
                   <div className="skeleton-loader__bar" />
                   <div className="skeleton-loader__bar skeleton-loader__bar--short" />
+                </div>
+              </section>
+            ) : profileLoadError !== null && serverProfile === null ? (
+              <section className="auth-card" aria-live="polite" role="alert">
+                <h1 className="auth-card__title">Não foi possível carregar seu perfil</h1>
+                <p className="auth-card__subtitle">{profileLoadError}</p>
+                <div className="defensive-modal__actions" style={{ marginTop: '20px' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => setProfileRetryTick((prev) => prev + 1)}
+                  >
+                    Tentar novamente
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleLogout}
+                  >
+                    Sair da conta
+                  </button>
                 </div>
               </section>
             ) : isProfileMissing || isEditingProfile ? (
@@ -454,73 +615,86 @@ export function App() {
                 isEditMode={isEditingProfile}
                 onCancelEdit={() => setIsEditingProfile(false)}
               />
-            ) : (
+            ) : needsMandatoryFacialVerification ? (
               <section className="completion-summary" aria-live="polite">
-                <p className="defensive-modal__badge">Sessão autenticada (JWT)</p>
+                <p className="defensive-modal__badge">Etapa Obrigatória de Segurança — RF-11</p>
                 <h1 className="auth-card__title">
-                  Bem-vindo(a){displayFullName ? `, ${displayFullName}` : ' ao BeyondTime'}
+                  Olá, {serverProfile?.firstName || 'bem-vindo(a)'}! Confirme seu rosto para entrar
                 </h1>
                 <p className="auth-card__subtitle">
-                  Sua conta está conectada com segurança ao servidor BeyondTime.
+                  Para proteger toda a comunidade 50+, o acesso à página principal é liberado
+                  somente após a verificação facial pelo celular (código QR, sem baixar aplicativo).
                 </p>
 
-                {displayAvatarUrl && (
-                  <div className="photo-preview">
-                    <img
-                      src={displayAvatarUrl}
-                      alt="Foto do seu perfil BeyondTime"
-                      className="photo-preview__img"
-                    />
-                  </div>
-                )}
-
-                <div className="summary-box">
-                  <p>
-                    <strong>E-mail:</strong> {authSession.email}
-                  </p>
-                  <p>
-                    <strong>ID da conta:</strong> {authSession.userId}
-                  </p>
-                  {displayCity && (
-                    <p>
-                      <strong>Cidade:</strong> {displayCity}
-                    </p>
-                  )}
-                  {displayGoal && (
-                    <p>
-                      <strong>Objetivo:</strong> {displayGoal}
-                    </p>
-                  )}
-                  {displayHobbies && displayHobbies.length > 0 && (
-                    <p>
-                      <strong>Interesses:</strong> {displayHobbies.join(', ')}
-                    </p>
-                  )}
-                </div>
-
-                <div className="action-stack action-stack--compact">
+                <div className="action-stack action-stack--compact" style={{ marginTop: '20px' }}>
                   <button
                     type="button"
                     className="btn btn--primary"
-                    onClick={() => setIsEditingProfile(true)}
+                    style={{ minHeight: '52px' }}
+                    onClick={() => setIsMandatoryQrOpen(true)}
                   >
-                    Editar meu perfil, foto e hobbies
+                    Abrir código QR de verificação facial
                   </button>
                   <button
                     type="button"
                     className="btn btn--secondary"
+                    style={{ minHeight: '48px' }}
+                    onClick={() => setIsEditingProfile(true)}
+                  >
+                    Editar dados do perfil
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    style={{ minHeight: '48px' }}
                     onClick={handleLogout}
                   >
                     Sair da conta
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn--danger-outline"
-                    onClick={handleOpenDeleteAccountModal}
-                  >
-                    Excluir minha conta e dados (LGPD)
-                  </button>
                 </div>
+
+                {isMandatoryQrOpen && (
+                  <FacialVerificationQrModal
+                    authSession={authSession}
+                    firstName={serverProfile?.firstName || undefined}
+                    onClose={() => setIsMandatoryQrOpen(false)}
+                    onVerified={(res) => {
+                      if (res.verifiedBadge50plus) {
+                        setIsMandatoryQrOpen(false);
+                        setServerProfile((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                verifiedBadge50plus: true,
+                                verificationStatus: 'VERIFIED',
+                              }
+                            : prev
+                        );
+                        if (!serverProfile && authSession) {
+                          void fetchMyProfile(authSession)
+                            .then((fresh) => setServerProfile(fresh))
+                            .catch(() => {});
+                        }
+                      }
+                    }}
+                  />
+                )}
+              </section>
+            ) : (
+              <>
+                <AuthenticatedWorkspace
+                  authSession={authSession}
+                  serverProfile={serverProfile}
+                  displayFullName={displayFullName ?? ''}
+                  displayAge={displayAge}
+                  displayCity={displayCity}
+                  displayGoal={displayGoal}
+                  displayHobbies={displayHobbies}
+                  displayAvatarUrl={displayAvatarUrl}
+                  onEditProfile={() => setIsEditingProfile(true)}
+                  onRequestDeleteAccount={handleOpenDeleteAccountModal}
+                  onLogout={handleLogout}
+                />
 
                 {isDeleteModalOpen && (
                   <div
@@ -549,8 +723,8 @@ export function App() {
                     {isSocialAccount ? (
                       <div className="callout-amber" role="note" style={{ marginTop: '16px', marginBottom: '8px' }}>
                         <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.5 }}>
-                          <strong>Conta autenticada via {authSession.authProvider === 'google' ? 'Google' : authSession.authProvider === 'facebook' ? 'Facebook' : 'provedor social'}:</strong>{' '}
-                          Conforme a LGPD (RF-14), você não precisa redigitar senha para excluir sua conta. Aguarde o temporizador defensivo abaixo para confirmar a exclusão com total segurança.
+                          <strong>Conta conectada via {authSession.authProvider === 'google' ? 'Google' : authSession.authProvider === 'facebook' ? 'Facebook' : 'conta social'}:</strong>{' '}
+                          Você não precisa digitar senha para excluir sua conta. Aguarde o temporizador abaixo para confirmar a exclusão com segurança.
                         </p>
                       </div>
                     ) : (
@@ -570,12 +744,13 @@ export function App() {
                             if (deleteError) setDeleteError(null);
                           }}
                         />
-                        {deleteError !== null && (
-                          <p className="form-error" role="alert">
-                            {deleteError}
-                          </p>
-                        )}
                       </div>
+                    )}
+
+                    {deleteError !== null && (
+                      <p className="form-error" role="alert" style={{ marginTop: '10px' }}>
+                        {deleteError}
+                      </p>
                     )}
 
                     <div className="defensive-modal__actions">
@@ -602,7 +777,7 @@ export function App() {
                     </div>
                   </div>
                 )}
-              </section>
+              </>
             )
           ) : (
             <>

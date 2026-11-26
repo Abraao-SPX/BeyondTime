@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const FONT_SCALE_STORAGE_KEY = 'beyondtime_accessibility_font_scale_v1';
 
@@ -43,7 +43,6 @@ interface AccessibilityPanelRF09Props {
 export function AccessibilityPanelRF09({
   isOpen,
   onClose,
-  onToggleOpen,
   highContrast = false,
   onToggleHighContrast,
 }: AccessibilityPanelRF09Props) {
@@ -53,10 +52,32 @@ export function AccessibilityPanelRF09({
     return initial;
   });
 
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     applyFontScale(fontScale);
     saveStoredFontScale(fontScale);
   }, [fontScale]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [isOpen, onClose]);
 
   function handleScaleChange(newScale: FontScaleStep) {
     setFontScale(newScale);
@@ -87,22 +108,7 @@ export function AccessibilityPanelRF09({
 
   return (
     <>
-      {/* Botão flutuante persistente 50+ com área mínima de toque de 48px (RF-06 / RF-09) */}
-      {onToggleOpen && (
-        <button
-          type="button"
-          className="accessibility-floating-btn"
-          onClick={onToggleOpen}
-          aria-label="Painel de Acessibilidade 50+: ajuste tamanho do texto, alto contraste e modo noturno"
-          aria-haspopup="dialog"
-          aria-expanded={isOpen}
-        >
-          <span aria-hidden="true" style={{ fontSize: '20px' }}>👁️</span>
-          <span>Acessibilidade 50+</span>
-        </button>
-      )}
-
-      {/* Modal Defensivo de Acessibilidade */}
+      {/* Modal Defensivo de Acessibilidade (acionado pelo botão de olho no cabeçalho) */}
       {isOpen && (
         <div
           className="accessibility-modal-overlay"
@@ -132,6 +138,7 @@ export function AccessibilityPanelRF09({
                 </h2>
               </div>
               <button
+                ref={closeButtonRef}
                 type="button"
                 className="accessibility-btn-close"
                 onClick={onClose}

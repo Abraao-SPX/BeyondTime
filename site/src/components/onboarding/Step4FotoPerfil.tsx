@@ -26,6 +26,7 @@ export function Step4FotoPerfil({
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
 
     setIsProcessingPhoto(true);
@@ -115,6 +116,16 @@ export function Step4FotoPerfil({
           {isProcessingPhoto ? 'Otimizando imagem...' : 'Selecionar foto do dispositivo'}
         </span>
       </button>
+
+      <div className="photo-verification-banner">
+        <div className="photo-verification-banner__text">
+          <strong>Confirmação facial obrigatória ao concluir o cadastro</strong>
+          <p>
+            Na última etapa, após criar sua conta, aparecerá um código QR para você confirmar seu
+            rosto pelo navegador do celular (sem baixar aplicativo) e liberar seu acesso seguro.
+          </p>
+        </div>
+      </div>
 
       {photoFileName !== null && photoError === null && (
         <p className="photo-selected-name" aria-live="polite">

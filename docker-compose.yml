@@ -21,20 +21,26 @@ services:
       retries: 5
 
   # ==========================================
-  # 1. Reconhecimento Facial & Liveness (IA)
+  # 1. Reconhecimento Facial & Prova de Vida (RF11)
+  #    YuNet + SFace + MiniFASNetV2 + flash espectral
   # ==========================================
-  face-api:
+  reconhecimento-facial:
     build:
-      context: ./face-api
+      context: ./reconhecimento-facial/backend
       dockerfile: Dockerfile
-    container_name: beyondtime-face-api
+    container_name: beyondtime-reconhecimento-facial
     ports:
-      - "8000:8000"
+      - "${BIOMETRIA_PORT:-8000}:8000"
     restart: unless-stopped
     environment:
-      - FACE_MATCH_THRESHOLD=0.60
-      - LIVENESS_THRESHOLD=0.80
-      - SAVE_TEST_IMAGES=false
+      # Chave HS256 do token biométrico (validado pelo backend Java para o Selo 50+).
+      # Se vazia, o serviço gera uma chave efêmera (só serve para testes locais).
+      JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-}
+      INTERNAL_API_KEY: ${BIOMETRIA_INTERNAL_API_KEY:-}
+      CORS_ALLOWED_ORIGINS: ${BIOMETRIA_CORS_ALLOWED_ORIGINS:-*}
+    volumes:
+      # Embeddings (SQLite) e recortes faciais persistidos fora do container
+      - biometria_data:/app/storage
 
   # ==========================================
   # 2. Inteligência Artificial Anti-Fraude (NLP)
@@ -64,6 +70,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-beyondtime_user}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env}
+      BIOMETRIA_JWT_SECRET_KEY: ${BIOMETRIA_JWT_SECRET_KEY:-}
       LOGIN_TRUST_FORWARDED_HEADERS: "${LOGIN_TRUST_FORWARDED_HEADERS:-true}"
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
@@ -73,11 +80,20 @@ services:
       BEYONDTIME_MAIL_FROM: ${BEYONDTIME_MAIL_FROM:-nao-responda@beyondtime.com.br}
       PASSWORD_RESET_EXPOSE_DEBUG_CODE: ${PASSWORD_RESET_EXPOSE_DEBUG_CODE:-false}
       AVATARS_UPLOAD_DIR: /app/uploads/avatars
+      CHAT_MEDIA_UPLOAD_DIR: /app/uploads/chat-media
+      ANTIFRAUD_API_URL: http://anjo-da-guarda:8000
+      CHAT_VAULT_KEK: ${CHAT_VAULT_KEK:-}
+      BIOMETRIA_API_URL: http://reconhecimento-facial:8000
+      BIOMETRIA_INTERNAL_API_KEY: ${BIOMETRIA_INTERNAL_API_KEY:-}
     volumes:
       - avatars_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
+      anjo-da-guarda:
+        condition: service_started
+      reconhecimento-facial:
+        condition: service_started
 
   # ==========================================
   # 4. Site Web & Aplicação React 18 (Nginx)
@@ -106,3 +122,4 @@ services:
 volumes:
   postgres_data:
   avatars_data:
+  biometria_data:

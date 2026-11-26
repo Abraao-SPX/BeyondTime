@@ -65,8 +65,10 @@ export function TelaLogin({
     headingRef.current?.focus();
   }, []);
 
+  const isLockCountdownActive = lockCountdownSeconds > 0;
+
   useEffect(() => {
-    if (lockCountdownSeconds <= 0) return;
+    if (!isLockCountdownActive) return;
     const timer = window.setInterval(() => {
       setLockCountdownSeconds((prev) => {
         if (prev <= 1) {
@@ -77,7 +79,7 @@ export function TelaLogin({
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [lockCountdownSeconds]);
+  }, [isLockCountdownActive]);
 
   async function handleSocialSelect(provider: SocialProvider) {
     setErrorMessage(null);

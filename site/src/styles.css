@@ -18,8 +18,10 @@
   /* Tipografia institucional de alto contraste e conforto visual (sem tons roxos) */
   --text-primary: #1C1617;
   --text-secondary: #584F4C;
-  --text-muted: #7A706B;
+  --text-muted: #635954;
   --text-on-brand: #FFFFFF;
+  --space-md: 16px;
+  --border-soft: #E5DED5;
 
   /* Identidade cromática oficial (carmesim / vinho nobre / ouro quente) */
   --brand-primary: #6E0B14;
@@ -114,8 +116,9 @@ html.high-contrast {
 
   --text-primary: #F7F4F1;
   --text-secondary: #C8C2BC;
-  --text-muted: #9C948E;
+  --text-muted: #B8B0AA;
   --text-on-brand: #FFFFFF;
+  --border-soft: #3D383A;
 
   --brand-primary: #E02847;
   --brand-primary-hover: #F04562;
@@ -451,16 +454,16 @@ html.high-contrast .btn-home-outline:hover {
 
 html.high-contrast .btn-home-gradient,
 html.high-contrast .btn-home-cta-primary {
-  background: var(--brand-wine);
-  color: #130514;
-  border-color: var(--brand-wine);
+  background: #8F112B;
+  color: #FFFFFF;
+  border-color: #FFD54F;
 }
 
 html.high-contrast .btn-home-gradient:hover,
 html.high-contrast .btn-home-cta-primary:hover {
-  background: var(--brand-gold);
+  background: #FFD54F;
   color: #130514;
-  border-color: var(--brand-gold);
+  border-color: #FFD54F;
   filter: none;
   transform: none;
 }
@@ -1472,6 +1475,12 @@ html.high-contrast .site-header__home-btn:hover {
   box-shadow: 0 12px 32px rgba(42, 11, 44, 0.06);
 }
 
+.auth-card--wide,
+.auth-card:has(.onboarding-split-container) {
+  max-width: 1000px;
+  padding: 40px 44px;
+}
+
 .auth-view {
   width: 100%;
 }
@@ -2362,6 +2371,27 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   color: var(--text-primary);
 }
 
+.lgpd-inline-link {
+  color: var(--brand-primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+  cursor: pointer;
+}
+
+.lgpd-inline-link:hover {
+  color: var(--brand-primary-hover);
+}
+
+html.high-contrast .lgpd-inline-link {
+  color: #FF6B8A;
+}
+
+html.high-contrast .lgpd-inline-link:hover {
+  color: #FFFFFF;
+}
+
 .lgpd-doc-buttons {
   width: 100%;
   display: flex;
@@ -2666,22 +2696,32 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   width: 100%;
   display: flex;
   align-items: flex-start;
-  justify-content: center;
-  gap: 56px;
+  justify-content: space-between;
+  gap: 44px;
 }
 
 /* 3. Coluna Esquerda: Stepper Lateral Integrado e Arejado */
 .onboarding-split__sidebar {
-  width: 310px;
+  width: 280px;
   flex-shrink: 0;
   position: sticky;
   top: 96px;
+  padding-right: 32px;
+  border-right: 1px solid var(--border-header);
 }
 
 .onboarding-split__main {
   flex: 1;
+  min-width: 0;
   max-width: 580px;
   width: 100%;
+}
+
+/* No desktop, o stepper lateral já exibe o progresso de forma completa; oculta apenas a barra duplicada mantendo o botão Voltar */
+@media (min-width: 881px) {
+  .onboarding-split-container .onboarding-split__main .register-progress__status {
+    display: none;
+  }
 }
 
 .onboarding-split__main--full {
@@ -2959,6 +2999,17 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   color: var(--brand-burgundy);
 }
 
+html.high-contrast .input-with-action .btn-eye {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-input-strong);
+  color: var(--text-primary);
+}
+
+html.high-contrast .input-with-action .btn-eye:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #FFFFFF;
+}
+
 .input-with-action .btn-eye-icon {
   position: absolute;
   right: 6px;
@@ -3182,6 +3233,12 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
 
 /* 8. Responsividade para Mobile */
 @media (max-width: 880px) {
+  .auth-card--wide,
+  .auth-card:has(.onboarding-split-container) {
+    max-width: 560px;
+    padding: 28px 20px;
+  }
+
   .onboarding-split-container,
   .auth-split-container {
     flex-direction: column;
@@ -3192,6 +3249,10 @@ html.high-contrast .btn--danger-outline:hover:not(:disabled) {
   .onboarding-split__sidebar {
     width: 100%;
     position: static;
+    padding-right: 0;
+    border-right: none;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-header);
   }
 
   .auth-split__media {

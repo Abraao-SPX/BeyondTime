@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -23,6 +25,7 @@ import {
 import { OnboardingHeader } from '../components/OnboardingHeader';
 import { PasswordInput } from '../components/PasswordInput';
 import {
+  ApiError,
   confirmPasswordReset,
   fetchMyProfile,
   loginWithEmail,
@@ -67,6 +70,20 @@ export function LoginScreen({
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [recoverySent, setRecoverySent] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (mode === 'recover') {
+        setMode('login');
+        setErrorMessage(null);
+        setRecoverySent(false);
+        setRecoveryMessage(null);
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [mode]);
 
   const handleSubmitLogin = async () => {
     setErrorMessage(null);
