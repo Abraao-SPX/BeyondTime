@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface LgpdDataRequestRepository extends JpaRepository<LgpdDataRequest, UUID> {
     List<LgpdDataRequest> findByUserIdOrderByCreatedAtDesc(UUID userId);
+    List<LgpdDataRequest> findByRequestTypeAndStatus(String requestType, String status);
 }

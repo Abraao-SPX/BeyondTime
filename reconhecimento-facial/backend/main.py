@@ -20,6 +20,10 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ImportError:
+    AESGCM = None
 
 APP_VERSION = "1.3.0"
 
@@ -344,8 +348,10 @@ def get_challenge():
     }
 
 @app.get("/enrollment-status/{user_id}")
-def get_enrollment_status(user_id: str):
-    """Retorna apenas se o UUID já possui biometria facial cadastrada (sem expor PII)."""
+def get_enrollment_status(user_id: str, request: Request):
+    """Retorna apenas se o UUID já possui biometria facial cadastrada (chamado via backend Java)."""
+    if INTERNAL_API_KEY:
+        exigir_chave_interna(request)
     uid = (user_id or "").strip()
     if not uid or len(uid) > 96:
         raise HTTPException(status_code=400, detail="Identificador inválido.")
@@ -450,6 +456,35 @@ def init_db():
 
 init_db()
 
+# Conformidade LGPD (SEC-ALTA-03): minimização de dados — não persiste fotos faciais JPEG em disco por padrão
+STORE_FACE_IMAGES = os.getenv("STORE_FACE_IMAGES", "false").lower() == "true"
+BIOMETRIA_STORAGE_KEY_RAW = os.getenv("BIOMETRIA_STORAGE_KEY", "").strip() or JWT_SECRET_KEY
+_STORAGE_AES_KEY = hashlib.sha256(f"beyondtime-bio-storage-v1:{BIOMETRIA_STORAGE_KEY_RAW}".encode("utf-8")).digest()
+_ENC_PREFIX = "enc:v1:"
+
+
+def criptografar_embedding_para_storage(emb: np.ndarray) -> str:
+    """Cifra o vetor biométrico 128D com AES-256-GCM antes de persistir no SQLite (SEC-ALTA-03 / LGPD)."""
+    plaintext = json.dumps(emb.tolist(), separators=(",", ":")).encode("utf-8")
+    if AESGCM is None:
+        return plaintext.decode("utf-8")
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(_STORAGE_AES_KEY).encrypt(nonce, plaintext, None)
+    return _ENC_PREFIX + base64.b64encode(nonce + ciphertext).decode("ascii")
+
+
+def descriptografar_embedding_do_storage(raw_value: str) -> np.ndarray:
+    """Decifra vetor biométrico AES-256-GCM (com fallback transparente para registros JSON legados)."""
+    if raw_value and raw_value.startswith(_ENC_PREFIX):
+        if AESGCM is None:
+            raise RuntimeError("Biblioteca cryptography ausente para decifrar embedding biométrico.")
+        blob = base64.b64decode(raw_value[len(_ENC_PREFIX):])
+        nonce, ciphertext = blob[:12], blob[12:]
+        plaintext = AESGCM(_STORAGE_AES_KEY).decrypt(nonce, ciphertext, None)
+        return np.array(json.loads(plaintext.decode("utf-8")), dtype=np.float32)
+    return np.array(json.loads(raw_value), dtype=np.float32)
+
+
 def normalizar_embedding(emb: np.ndarray) -> np.ndarray:
     """Normaliza o vetor embedding para norma unitária (L2 = 1.0)."""
     emb_f = emb.astype(np.float32)
@@ -474,7 +509,7 @@ def db_salvar_usuario_inicial(
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     emb_norm = normalizar_embedding(embedding)
-    emb_json = json.dumps(emb_norm.tolist())
+    emb_json = criptografar_embedding_para_storage(emb_norm)
 
     cursor.execute("PRAGMA table_info(users)")
     cols = [c[1] for c in cursor.fetchall()]
@@ -522,7 +557,7 @@ def db_adicionar_amostra_login(user_id: str, new_embedding: np.ndarray, latest_p
         conn.close()
         return 1
 
-    old_centroid = np.array(json.loads(row[0]), dtype=np.float32)
+    old_centroid = descriptografar_embedding_do_storage(row[0])
     old_count = int(row[1]) if row[1] else 1
 
     new_emb_norm = normalizar_embedding(new_embedding)
@@ -532,8 +567,8 @@ def db_adicionar_amostra_login(user_id: str, new_embedding: np.ndarray, latest_p
     updated_centroid = (old_centroid * float(old_count) + new_emb_norm) / float(new_count)
     updated_centroid = normalizar_embedding(updated_centroid)
 
-    emb_json = json.dumps(new_emb_norm.tolist())
-    centroid_json = json.dumps(updated_centroid.tolist())
+    emb_json = criptografar_embedding_para_storage(new_emb_norm)
+    centroid_json = criptografar_embedding_para_storage(updated_centroid)
 
     cursor.execute("""
         INSERT INTO biometric_samples (user_id, embedding, sample_type, distance_to_anchor, created_at)
@@ -582,8 +617,8 @@ def db_listar_usuarios():
         users.append({
             "id": r[0],
             "name": r[1],
-            "primary_embedding": np.array(json.loads(r[2]), dtype=np.float32),
-            "centroid_embedding": np.array(json.loads(r[3]), dtype=np.float32),
+            "primary_embedding": descriptografar_embedding_do_storage(r[2]),
+            "centroid_embedding": descriptografar_embedding_do_storage(r[3]),
             "samples_count": r[4] or 1,
             "photo_filename": r[5],
             "latest_photo_filename": r[6] or r[5],
@@ -607,8 +642,8 @@ def db_buscar_usuario(user_id: str):
     return {
         "id": r[0],
         "name": r[1],
-        "primary_embedding": np.array(json.loads(r[2]), dtype=np.float32),
-        "centroid_embedding": np.array(json.loads(r[3]), dtype=np.float32),
+        "primary_embedding": descriptografar_embedding_do_storage(r[2]),
+        "centroid_embedding": descriptografar_embedding_do_storage(r[3]),
         "samples_count": r[4] or 1,
         "photo_filename": r[5],
         "latest_photo_filename": r[6] or r[5],
@@ -1278,6 +1313,10 @@ async def register_biometrics(
     client_ip = extrair_client_ip(request)
     aplicar_rate_limit(client_ip)
 
+    # Hardening SEC-CRIT-01: em produção (INTERNAL_API_KEY definida), apenas o backend Java autenticado pode chamar /register
+    if INTERNAL_API_KEY:
+        exigir_chave_interna(request)
+
     name_clean = name.strip()
     if not name_clean:
         raise HTTPException(status_code=400, detail="O nome do usuário é obrigatório.")
@@ -1374,12 +1413,13 @@ async def register_biometrics(
                 "anti_spoofing": fas_detalhes
             }
 
-        photo_filename = f"{uid}_anchor.jpg"
+        photo_filename = f"{uid}_anchor.jpg" if STORE_FACE_IMAGES else "encrypted_vector_only"
         photo_full_path = os.path.join(STORAGE_FACES_DIR, photo_filename)
 
-        # Salva o usuário com a primeira amostra no SQLite antes de gravar a foto (bloqueia sobrescrita sem chave interna)
-        db_salvar_usuario_inicial(uid, name_clean, feat, photo_filename, allow_overwrite=has_internal_key)
-        cv2.imwrite(photo_full_path, aligned_crop)
+        # Salva o usuário com a primeira amostra cifrada no SQLite (bloqueia sobrescrita sem chave interna)
+        db_salvar_usuario_inicial(uid, name_clean, feat, photo_filename, allow_overwrite=False)
+        if STORE_FACE_IMAGES:
+            cv2.imwrite(photo_full_path, aligned_crop)
 
         registrar_auditoria({
             "client_ip": client_ip,
@@ -1513,8 +1553,8 @@ async def verify_identity(
     client_ip = extrair_client_ip(request)
     aplicar_rate_limit(client_ip)
 
-    # Hardening SEC-CRIT-01: modo legado com profile_photo ou busca 1:N aberta exigem chave interna
-    if profile_photo is not None or not (user_id and user_id.strip()):
+    # Hardening SEC-CRIT-01: em produção (INTERNAL_API_KEY definida), apenas o backend Java autenticado pode chamar /verify
+    if INTERNAL_API_KEY or profile_photo is not None or not (user_id and user_id.strip()):
         exigir_chave_interna(request)
 
     cores = [c.strip() for c in expected_colors.split(",") if c.strip()]
@@ -1667,11 +1707,11 @@ async def verify_identity(
         current_samples_count = matched_user["samples_count"] if matched_user else 1
 
         if verified and matched_user is not None:
-            # Salva o novo recorte facial alinhado deste login bem-sucedido
             uid = matched_user["id"]
-            login_photo_filename = f"{uid}_latest.jpg"
-            login_photo_path = os.path.join(STORAGE_FACES_DIR, login_photo_filename)
-            cv2.imwrite(login_photo_path, aligned_probe)
+            login_photo_filename = f"{uid}_latest.jpg" if STORE_FACE_IMAGES else "encrypted_vector_only"
+            if STORE_FACE_IMAGES:
+                login_photo_path = os.path.join(STORAGE_FACES_DIR, login_photo_filename)
+                cv2.imwrite(login_photo_path, aligned_probe)
 
             # Adiciona amostra ao histórico e recalcula o centroide biométrico ponderado
             current_samples_count = db_adicionar_amostra_login(

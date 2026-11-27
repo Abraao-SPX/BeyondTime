@@ -529,9 +529,12 @@ public class AuthService {
         executeDelete("DELETE FROM verification_attempts WHERE user_id = ?", user.getId());
         executeDelete("DELETE FROM biometric_handoff_sessions WHERE user_id = ?", user.getId());
 
-        lgpdDataRequestRepository.save(
-                LgpdDataRequest.createCompletedAccountDeletion(user.getId(), true, now)
+        LgpdDataRequest deletionRequest = lgpdDataRequestRepository.save(
+                biometricServiceClient != null
+                        ? LgpdDataRequest.createProcessingAccountDeletion(user.getId(), true, now)
+                        : LgpdDataRequest.createCompletedAccountDeletion(user.getId(), true, now)
         );
+        UUID deletionRequestId = deletionRequest.getId();
 
         user.anonymizeAndMarkDeleted(now);
         userRepository.saveAndFlush(user);
@@ -542,7 +545,13 @@ public class AuthService {
                 chatMediaService.deleteEncryptedMediaFilesQuietly(encryptedMediaFilesToDelete);
             }
             if (biometricServiceClient != null) {
-                biometricServiceClient.deleteUserBiometricsQuietly(user.getId());
+                boolean biometricDeleted = biometricServiceClient.deleteUserBiometrics(user.getId());
+                if (biometricDeleted && deletionRequestId != null) {
+                    lgpdDataRequestRepository.findById(deletionRequestId).ifPresent(req -> {
+                        req.markCompleted(OffsetDateTime.now());
+                        lgpdDataRequestRepository.save(req);
+                    });
+                }
             }
         };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {

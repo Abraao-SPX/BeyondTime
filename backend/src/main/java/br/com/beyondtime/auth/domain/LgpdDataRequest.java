@@ -55,6 +55,22 @@ public class LgpdDataRequest {
         return req;
     }
 
+    public static LgpdDataRequest createProcessingAccountDeletion(UUID userId, boolean confirmedViaDefensiveModal, OffsetDateTime now) {
+        LgpdDataRequest req = new LgpdDataRequest();
+        req.userId = userId;
+        req.requestType = "DEFINITIVE_ACCOUNT_DELETION";
+        req.status = "PROCESSING";
+        req.confirmedViaDefensiveModal = confirmedViaDefensiveModal;
+        req.slaDeadlineAt = now.plusHours(48);
+        req.createdAt = now;
+        return req;
+    }
+
+    public void markCompleted(OffsetDateTime now) {
+        this.status = "COMPLETED";
+        this.completedAt = now != null ? now : OffsetDateTime.now();
+    }
+
     @PrePersist
     void onCreate() {
         OffsetDateTime now = OffsetDateTime.now();

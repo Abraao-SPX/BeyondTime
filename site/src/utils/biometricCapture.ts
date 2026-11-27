@@ -1,9 +1,14 @@
 /**
  * Utilitários compartilhados de captura biométrica facial no navegador (RF-11).
- * - 1ª vez (não cadastrado): executa /register (cadastra âncora facial 128D + anti-spoofing MiniFASNet V2 + reflexo espectral).
- * - Próximas vezes (já cadastrado): executa /verify 1:1 (compara com o rosto cadastrado + anti-spoofing contra fotos/telas).
- * Compatível com Android Chrome/Brave (video/webm) e iPhone Safari (video/mp4).
+ * SEC-CRIT-01: O navegador NUNCA envia vídeo diretamente para /biometrics/register ou /verify.
+ * Toda submissão biométrica passa pelo backend Spring Boot autenticado (via token QR ou Bearer JWT),
+ * que extrai o userId confiável no servidor e se comunica com o Python usando X-Internal-Api-Key.
  */
+
+import { fetchWithSessionRefresh, type VerifyBiometricsResponse } from '../services/apiClient';
+import type { AuthSession } from '../types/auth';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 export interface ChallengePayload {
   session_token: string;
@@ -11,15 +16,11 @@ export interface ChallengePayload {
   flash_duration_ms: number;
 }
 
-export interface BiometricsServiceResponse {
-  success?: boolean;
-  verified?: boolean;
-  is_live?: boolean;
-  jwt_token?: string | null;
-  reason?: string;
-  status?: string;
-  error?: string;
-  detail?: string;
+export interface RecordedLivenessPayload {
+  videoBlob: Blob;
+  filename: string;
+  expectedColors: string;
+  sessionToken: string;
 }
 
 export interface FaceAlignmentResult {
@@ -76,15 +77,12 @@ export function pickSupportedVideoFormat(): { mimeType: string; filename: string
 export const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Consulta rapidamente se o usuário já possui rosto cadastrado no microsserviço biométrico.
+ * Consulta via backend Java se o titular da sessão QR já possui biometria facial cadastrada.
  */
-export async function checkBiometricEnrollmentStatus(
-  userId: string,
-  biometricsBaseUrl: string
-): Promise<boolean> {
+export async function checkHandoffEnrollmentStatus(handoffToken: string): Promise<boolean> {
   try {
     const res = await fetch(
-      `${biometricsBaseUrl}/enrollment-status/${encodeURIComponent(userId.trim())}`
+      `${API_BASE_URL}/api/v1/biometrics/handoff/${encodeURIComponent(handoffToken)}/enrollment-status`
     );
     if (!res.ok) return false;
     const data = (await res.json()) as { enrolled?: boolean };
@@ -136,24 +134,22 @@ export async function checkFaceAlignment(
   }
 }
 
-export async function recordAndSubmitLiveness(params: {
+/**
+ * Solicita o desafio de cores (/biometrics/challenge) e grava o vídeo de prova de vida.
+ */
+export async function recordLivenessVideo(params: {
   stream: MediaStream;
   biometricsBaseUrl: string;
-  userId: string;
-  firstName: string;
   onStatus: (message: string) => void;
   onFlashColor: (hex: string | null) => void;
-}): Promise<string> {
-  const { stream, biometricsBaseUrl, userId, firstName, onStatus, onFlashColor } = params;
+}): Promise<RecordedLivenessPayload> {
+  const { stream, biometricsBaseUrl, onStatus, onFlashColor } = params;
 
   if (typeof MediaRecorder === 'undefined') {
     throw new Error(
       'Este navegador não suporta gravação de vídeo para prova de vida. Tente abrir no Chrome ou Safari atualizado.'
     );
   }
-
-  // 1. Verifica se é 1º cadastro facial (/register) ou reconhecimento 1:1 (/verify)
-  const alreadyEnrolled = await checkBiometricEnrollmentStatus(userId, biometricsBaseUrl);
 
   onStatus('Preparando desafio de prova de vida...');
   const chRes = await fetch(`${biometricsBaseUrl}/challenge`);
@@ -185,7 +181,7 @@ export async function recordAndSubmitLiveness(params: {
   recorder.start();
   await sleepMs(400);
 
-  // Flashes mais suaves e lentos (~1050ms por cor) para captar o reflexo real na pele
+  // Flashes suaves e lentos (~1050ms por cor) para captar o reflexo real na pele
   const flashDuration = Math.max(950, challenge.flash_duration_ms || 1050);
   for (const color of challenge.colors) {
     onFlashColor(BIOMETRIC_COLOR_HEX[color] || '#FFFFFF');
@@ -202,43 +198,80 @@ export async function recordAndSubmitLiveness(params: {
     throw new Error('Não foi possível capturar o vídeo da câmera. Tente novamente.');
   }
 
-  onStatus(
-    alreadyEnrolled
-      ? 'Reconhecendo seu rosto e validando anti-golpe...'
-      : 'Cadastrando seu rosto e validando prova de vida...'
-  );
+  return {
+    videoBlob,
+    filename,
+    expectedColors: challenge.colors.join(','),
+    sessionToken: challenge.session_token,
+  };
+}
 
-  const form = new FormData();
-  form.append('expected_colors', challenge.colors.join(','));
-  form.append('session_token', challenge.session_token);
-  form.append('user_id', userId.trim());
-  if (!alreadyEnrolled) {
-    form.append('name', firstName.trim() || 'Usuário');
-  }
-  form.append('video', videoBlob, filename);
+async function parseSubmitResponse(response: Response): Promise<VerifyBiometricsResponse> {
+  const data = (await response.json().catch(() => ({}))) as Partial<VerifyBiometricsResponse> & {
+    detail?: string;
+    reason?: string;
+    error?: string;
+    title?: string;
+  };
 
-  const endpoint = alreadyEnrolled ? '/verify' : '/register';
-  const bioRes = await fetch(`${biometricsBaseUrl}${endpoint}`, {
-    method: 'POST',
-    body: form,
-  });
-  const bioData = (await bioRes.json().catch(() => ({}))) as BiometricsServiceResponse;
-
-  if (bioRes.status === 429) {
+  if (response.status === 429) {
     throw new Error('Muitas tentativas seguidas. Aguarde 1 minuto e tente novamente.');
   }
-
-  const isApproved = Boolean(bioData.success || bioData.verified) && Boolean(bioData.jwt_token);
-  if (!bioRes.ok || !isApproved || !bioData.jwt_token) {
+  if (!response.ok || !data.verifiedBadge50plus) {
     throw new Error(
-      bioData.reason ||
-        bioData.detail ||
-        bioData.error ||
-        (alreadyEnrolled
-          ? 'Rosto não reconhecido ou prova de vida reprovada. Apenas o titular da conta pode entrar.'
-          : 'Prova de vida não aprovada. Fique de frente para a tela e tente novamente.')
+      data.detail ||
+        data.reason ||
+        data.error ||
+        data.title ||
+        'Não foi possível validar sua prova de vida. Fique de frente para a tela e tente novamente.'
     );
   }
 
-  return bioData.jwt_token;
+  return data as VerifyBiometricsResponse;
+}
+
+/**
+ * SEC-CRIT-01 — Submete o vídeo do fluxo QR diretamente ao backend Spring Boot autenticado pelo handoffToken.
+ */
+export async function submitHandoffLivenessVideo(
+  handoffToken: string,
+  recorded: RecordedLivenessPayload
+): Promise<VerifyBiometricsResponse> {
+  const form = new FormData();
+  form.append('expected_colors', recorded.expectedColors);
+  form.append('session_token', recorded.sessionToken);
+  form.append('video', recorded.videoBlob, recorded.filename);
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/biometrics/handoff/${encodeURIComponent(handoffToken)}/submit-video`,
+    {
+      method: 'POST',
+      body: form,
+    }
+  );
+  return parseSubmitResponse(response);
+}
+
+/**
+ * SEC-CRIT-01 — Submete o vídeo do fluxo direto no celular ao backend Spring Boot autenticado via Bearer JWT.
+ */
+export async function submitAuthedLivenessVideo(
+  session: AuthSession,
+  recorded: RecordedLivenessPayload
+): Promise<VerifyBiometricsResponse> {
+  const form = new FormData();
+  form.append('expected_colors', recorded.expectedColors);
+  form.append('session_token', recorded.sessionToken);
+  form.append('video', recorded.videoBlob, recorded.filename);
+
+  const response = await fetchWithSessionRefresh(
+    session,
+    '/api/v1/profiles/me/biometrics/submit-video',
+    (token) => ({
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    })
+  );
+  return parseSubmitResponse(response);
 }

@@ -37,15 +37,18 @@ public class BiometricHandoffService {
     private final BiometricHandoffSessionRepository handoffRepository;
     private final ProfileRepository profileRepository;
     private final BiometricsVerificationService biometricsVerificationService;
+    private final BiometricServiceClient biometricServiceClient;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public BiometricHandoffService(
             BiometricHandoffSessionRepository handoffRepository,
             ProfileRepository profileRepository,
-            BiometricsVerificationService biometricsVerificationService) {
+            BiometricsVerificationService biometricsVerificationService,
+            BiometricServiceClient biometricServiceClient) {
         this.handoffRepository = handoffRepository;
         this.profileRepository = profileRepository;
         this.biometricsVerificationService = biometricsVerificationService;
+        this.biometricServiceClient = biometricServiceClient;
     }
 
     @Transactional
@@ -173,6 +176,77 @@ public class BiometricHandoffService {
         handoffRepository.save(session);
 
         return response;
+    }
+
+    /**
+     * SEC-CRIT-01 — Consulta status de cadastro facial usando exclusivamente o userId da sessão de handoff.
+     */
+    @Transactional(noRollbackFor = BusinessException.class)
+    public boolean isHandoffUserEnrolled(String token) {
+        BiometricHandoffSession session = validateActivePendingSession(token);
+        return biometricServiceClient.isUserEnrolled(session.getUserId());
+    }
+
+    /**
+     * SEC-CRIT-01 — Proxy autenticado no backend Java: valida a sessão QR, encaminha o vídeo ao Python
+     * com userId confiável + X-Internal-Api-Key e conclui o handoff atomicamente.
+     */
+    @Transactional(noRollbackFor = BusinessException.class)
+    public VerifyBiometricsResponse submitHandoffVideo(
+            String token,
+            byte[] videoBytes,
+            String filename,
+            String contentType,
+            String expectedColors,
+            String sessionToken) {
+        BiometricHandoffSession session = validateActivePendingSession(token);
+        boolean alreadyEnrolled = biometricServiceClient.isUserEnrolled(session.getUserId());
+
+        String biometricJwt = biometricServiceClient.submitLivenessVideo(
+                session.getUserId(),
+                session.getFirstName(),
+                videoBytes,
+                filename,
+                contentType,
+                expectedColors,
+                sessionToken,
+                alreadyEnrolled
+        );
+
+        VerifyBiometricsResponse response = biometricsVerificationService.verifyAndGrantBadge(
+                session.getUserId(),
+                new VerifyBiometricsRequest(biometricJwt)
+        );
+
+        session.markCompleted(OffsetDateTime.now());
+        handoffRepository.save(session);
+
+        return response;
+    }
+
+    private BiometricHandoffSession validateActivePendingSession(String token) {
+        BiometricHandoffSession session = findSessionOrThrow(token);
+        OffsetDateTime now = OffsetDateTime.now();
+
+        if (session.getStatus() == BiometricHandoffStatus.COMPLETED) {
+            throw new BusinessException(
+                    "HANDOFF_ALREADY_COMPLETED",
+                    "Este código QR já foi utilizado. Volte ao computador para continuar.",
+                    HttpStatus.GONE
+            );
+        }
+
+        if (session.isExpiredAt(now)) {
+            session.markExpired();
+            handoffRepository.save(session);
+            throw new BusinessException(
+                    "HANDOFF_EXPIRED",
+                    "Este código QR expirou. Gere um novo código no computador.",
+                    HttpStatus.GONE
+            );
+        }
+
+        return session;
     }
 
     private BiometricHandoffSession findSessionOrThrow(String token) {

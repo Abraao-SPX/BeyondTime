@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
-  completeBiometricHandoff,
   fetchPublicBiometricHandoff,
   type BiometricHandoffSessionInfoResponse,
 } from '../../services/apiClient';
 import {
-  checkBiometricEnrollmentStatus,
   checkFaceAlignment,
-  recordAndSubmitLiveness,
+  checkHandoffEnrollmentStatus,
+  recordLivenessVideo,
   resolveBiometricsBaseUrl,
+  submitHandoffLivenessVideo,
 } from '../../utils/biometricCapture';
 
 type HandoffPageStage =
@@ -133,7 +133,7 @@ export function MobileFacialHandoffPage() {
       .then(async (info) => {
         if (cancelled) return;
         setSessionInfo(info);
-        const enrolled = await checkBiometricEnrollmentStatus(info.userId, biometricsBaseUrl);
+        const enrolled = await checkHandoffEnrollmentStatus(handoffToken);
         if (cancelled) return;
         setIsAlreadyEnrolled(enrolled);
         setStage('ready');
@@ -167,27 +167,20 @@ export function MobileFacialHandoffPage() {
       setStage('recording');
       setCountdown(null);
       try {
-        const biometricJwt = await recordAndSubmitLiveness({
+        const recorded = await recordLivenessVideo({
           stream,
           biometricsBaseUrl,
-          userId: sessionInfo.userId,
-          firstName: sessionInfo.firstName,
-          onStatus: (statusMsg) => {
-            setMessage(statusMsg);
-            if (
-              statusMsg.includes('Reconhecendo') ||
-              statusMsg.includes('Cadastrando') ||
-              statusMsg.includes('Validando')
-            ) {
-              setStage('processing');
-            }
-          },
+          onStatus: (statusMsg) => setMessage(statusMsg),
           onFlashColor: setFlashColor,
         });
 
         setStage('processing');
-        setMessage('Liberando seu acesso seguro...');
-        await completeBiometricHandoff(handoffToken, biometricJwt);
+        setMessage(
+          isAlreadyEnrolled
+            ? 'Reconhecendo seu rosto e validando anti-golpe...'
+            : 'Cadastrando seu rosto e validando prova de vida...'
+        );
+        await submitHandoffLivenessVideo(handoffToken, recorded);
 
         stopCamera();
         setStage('approved');

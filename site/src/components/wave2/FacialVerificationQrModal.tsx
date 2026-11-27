@@ -4,15 +4,15 @@ import {
   createBiometricHandoff,
   fetchBiometricHandoffStatus,
   loadAuthSession,
-  verifyMyBiometrics,
   type VerifyBiometricsResponse,
 } from '../../services/apiClient';
 import type { AuthSession } from '../../types/auth';
 import {
   checkFaceAlignment,
   isMobileDevice,
-  recordAndSubmitLiveness,
+  recordLivenessVideo,
   resolveBiometricsBaseUrl,
+  submitAuthedLivenessVideo,
 } from '../../utils/biometricCapture';
 
 interface FacialVerificationQrModalProps {
@@ -290,27 +290,16 @@ export function FacialVerificationQrModal({
       setCameraPhase('recording');
       setCountdown(null);
       try {
-        const biometricJwt = await recordAndSubmitLiveness({
+        const recorded = await recordLivenessVideo({
           stream,
           biometricsBaseUrl,
-          userId: session.userId,
-          firstName: (firstName || session.email.split('@')[0] || 'Usuário').trim(),
-          onStatus: (msg) => {
-            setCameraMessage(msg);
-            if (
-              msg.includes('Reconhecendo') ||
-              msg.includes('Cadastrando') ||
-              msg.includes('Validando')
-            ) {
-              setCameraPhase('processing');
-            }
-          },
+          onStatus: (msg) => setCameraMessage(msg),
           onFlashColor: setFlashColor,
         });
 
         setCameraPhase('processing');
-        setCameraMessage('Liberando seu acesso seguro...');
-        const verifiedResponse = await verifyMyBiometrics(session, biometricJwt);
+        setCameraMessage('Validando biometria com segurança no servidor...');
+        const verifiedResponse = await submitAuthedLivenessVideo(session, recorded);
 
         stopCamera();
         setCameraPhase('approved');
