@@ -24,6 +24,11 @@ import {
   resolveApiAssetUrl,
   type ServerProfile,
 } from './services/apiClient';
+import {
+  consumeFirebaseRedirectResult,
+  peekPendingSocialRedirectContext,
+  type FirebaseRedirectOutcome,
+} from './services/firebaseClient';
 import { clearUserProfile, loadUserProfile } from './services/profileStorage';
 import type {
   AuthSession,
@@ -100,16 +105,29 @@ export function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() =>
     IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_SESSION : loadAuthSession()
   );
-  const [showLanding, setShowLanding] = useState<boolean>(() =>
-    IS_DEV_ONDA2_PREVIEW ? false : loadAuthSession() === null
-  );
+  const [showLanding, setShowLanding] = useState<boolean>(() => {
+    if (IS_DEV_ONDA2_PREVIEW) return false;
+    if (loadAuthSession() !== null) return false;
+    if (typeof window !== 'undefined' && peekPendingSocialRedirectContext() !== null) return false;
+    return true;
+  });
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [profileRetryTick, setProfileRetryTick] = useState(0);
   const { highContrast, toggleHighContrast } = useHighContrast();
   const [serverProfile, setServerProfile] = useState<ServerProfile | null>(() =>
     IS_DEV_ONDA2_PREVIEW ? DEV_PREVIEW_PROFILE : null
   );
-  const [activeView, setActiveView] = useState<AuthViewId>('login');
+  const [activeView, setActiveView] = useState<AuthViewId>(() => {
+    if (typeof window !== 'undefined') {
+      const pendingRedirect = peekPendingSocialRedirectContext();
+      if (pendingRedirect) {
+        return pendingRedirect.sourceView;
+      }
+    }
+    return 'login';
+  });
+  const [pendingSocialRedirect, setPendingSocialRedirect] =
+    useState<FirebaseRedirectOutcome | null>(null);
   const [contacts, setContacts] = useState<Record<AuthViewId, string>>({
     login: '',
     register: '',
@@ -158,6 +176,20 @@ export function App() {
       },
     });
   }, []);
+
+  useEffect(() => {
+    if (authSession !== null) return;
+    let active = true;
+    void consumeFirebaseRedirectResult().then((outcome) => {
+      if (!active || !outcome) return;
+      setShowLanding(false);
+      setActiveView(outcome.sourceView);
+      setPendingSocialRedirect(outcome);
+    });
+    return () => {
+      active = false;
+    };
+  }, [authSession]);
 
   useEffect(() => {
     function handlePopState() {
@@ -811,6 +843,8 @@ export function App() {
                   onContactChange={(value) => updateContact('login', value)}
                   onNavigate={handleNavigate}
                   onAuthSuccess={handleAuthSuccess}
+                  pendingSocialRedirect={pendingSocialRedirect}
+                  onConsumeSocialRedirect={() => setPendingSocialRedirect(null)}
                 />
               )}
 
@@ -822,6 +856,8 @@ export function App() {
                   onAuthSuccess={handleAuthSuccess}
                   prefill={onboardingPrefill}
                   onDirtyChange={setIsRegisterDirty}
+                  pendingSocialRedirect={pendingSocialRedirect}
+                  onConsumeSocialRedirect={() => setPendingSocialRedirect(null)}
                 />
               )}
 

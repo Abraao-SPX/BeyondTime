@@ -11,9 +11,11 @@ import {
   type ServerProfile,
 } from '../services/apiClient';
 import {
-  authenticateWithFirebasePopup,
+  authenticateWithFirebaseSocial,
   getFreshFirebaseIdToken,
   signOutFirebaseSilently,
+  type FirebaseRedirectOutcome,
+  type FirebaseSocialAuthResult,
 } from '../services/firebaseClient';
 import { saveUserProfile } from '../services/profileStorage';
 import type {
@@ -55,6 +57,8 @@ interface CriarMinhaContaProps {
   onCancelEdit?: () => void;
   prefill?: { goal?: ConnectionGoal; city?: string } | null;
   onDirtyChange?: (isDirty: boolean) => void;
+  pendingSocialRedirect?: FirebaseRedirectOutcome | null;
+  onConsumeSocialRedirect?: () => void;
 }
 
 function toIsoBirthDate(brDate: string): string {
@@ -123,6 +127,8 @@ export function CriarMinhaConta({
   onCancelEdit,
   prefill = null,
   onDirtyChange,
+  pendingSocialRedirect = null,
+  onConsumeSocialRedirect,
 }: CriarMinhaContaProps) {
   // SEC-ALTA-08: Se o usuário já estiver autenticado (recuperação de perfil órfão 404 ou edição),
   // inicia diretamente na etapa 2 (Dados Pessoais) sem forçar re-registro
@@ -173,14 +179,13 @@ export function CriarMinhaConta({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function handleSocialSelect(provider: SocialProvider) {
+  async function completeSocialAuth(authResult: FirebaseSocialAuthResult) {
+    const provider = authResult.provider;
     setStep1Error(null);
-    setFeedbackMessage(`Conectando com ${provider}...`);
+    setFeedbackMessage(`Concluindo conexão com ${provider}...`);
     setIsSubmitting(true);
 
     try {
-      const authResult = await authenticateWithFirebasePopup(provider);
-
       if (authResult.email) {
         onContactChange(authResult.email);
       }
@@ -229,11 +234,42 @@ export function CriarMinhaConta({
         }
         setFeedbackMessage(null);
       }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingSocialRedirect || pendingSocialRedirect.sourceView !== 'register') {
+      return;
+    }
+    onConsumeSocialRedirect?.();
+    if (pendingSocialRedirect.status === 'error') {
+      setStep1Error(pendingSocialRedirect.message);
+      setFeedbackMessage(null);
+      return;
+    }
+    void completeSocialAuth(pendingSocialRedirect.result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSocialRedirect]);
+
+  async function handleSocialSelect(provider: SocialProvider) {
+    setStep1Error(null);
+    setFeedbackMessage(`Conectando com ${provider}...`);
+    setIsSubmitting(true);
+
+    try {
+      const authResult = await authenticateWithFirebaseSocial(provider, 'register');
+      if (!authResult) {
+        // Navegador mobile iniciou signInWithRedirect e vai redirecionar a página
+        setFeedbackMessage(`Redirecionando para o ${provider}...`);
+        return;
+      }
+      await completeSocialAuth(authResult);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : `Erro ao conectar com ${provider}. Tente novamente.`;
       setStep1Error(msg);
       setFeedbackMessage(null);
-    } finally {
       setIsSubmitting(false);
     }
   }

@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError, loginWithEmail, loginWithSocial } from '../services/apiClient';
 import {
-  authenticateWithFirebasePopup,
+  authenticateWithFirebaseSocial,
   getFreshFirebaseIdToken,
   signOutFirebaseSilently,
+  type FirebaseRedirectOutcome,
+  type FirebaseSocialAuthResult,
 } from '../services/firebaseClient';
 import type {
   AuthSession,
@@ -33,6 +35,8 @@ interface TelaLoginProps {
   onContactChange: (value: string) => void;
   onNavigate: (targetView: AuthViewId, triggerEl: HTMLElement) => void;
   onAuthSuccess: (session: AuthSession, socialDraft?: SocialOnboardingDraft) => void;
+  pendingSocialRedirect?: FirebaseRedirectOutcome | null;
+  onConsumeSocialRedirect?: () => void;
 }
 
 export function TelaLogin({
@@ -40,6 +44,8 @@ export function TelaLogin({
   onContactChange,
   onNavigate,
   onAuthSuccess,
+  pendingSocialRedirect = null,
+  onConsumeSocialRedirect,
 }: TelaLoginProps) {
   const [password, setPassword] = useState('');
   const rememberMe = false;
@@ -82,14 +88,16 @@ export function TelaLogin({
     return () => window.clearInterval(timer);
   }, [isLockCountdownActive]);
 
-  async function handleSocialSelect(provider: SocialProvider) {
+  async function completeSocialAuth(authResult: FirebaseSocialAuthResult) {
+    const provider = authResult.provider;
     setErrorMessage(null);
-    setFeedbackMessage(`Autenticando com ${provider}...`);
+    setFeedbackMessage(`Concluindo acesso com ${provider}...`);
     setIsSocialSubmitting(true);
 
     try {
-      const authResult = await authenticateWithFirebasePopup(provider);
-      onContactChange(authResult.email);
+      if (authResult.email) {
+        onContactChange(authResult.email);
+      }
 
       try {
         const session = await loginWithSocial(authResult.idToken, undefined, provider, rememberMe);
@@ -118,11 +126,42 @@ export function TelaLogin({
           setFeedbackMessage(null);
         }
       }
+    } finally {
+      setIsSocialSubmitting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingSocialRedirect || pendingSocialRedirect.sourceView !== 'login') {
+      return;
+    }
+    onConsumeSocialRedirect?.();
+    if (pendingSocialRedirect.status === 'error') {
+      setErrorMessage(pendingSocialRedirect.message);
+      setFeedbackMessage(null);
+      return;
+    }
+    void completeSocialAuth(pendingSocialRedirect.result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSocialRedirect]);
+
+  async function handleSocialSelect(provider: SocialProvider) {
+    setErrorMessage(null);
+    setFeedbackMessage(`Autenticando com ${provider}...`);
+    setIsSocialSubmitting(true);
+
+    try {
+      const authResult = await authenticateWithFirebaseSocial(provider, 'login');
+      if (!authResult) {
+        // Navegador mobile iniciou signInWithRedirect e vai redirecionar a página
+        setFeedbackMessage(`Redirecionando para o ${provider}...`);
+        return;
+      }
+      await completeSocialAuth(authResult);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : `Erro ao autenticar com ${provider}.`;
       setErrorMessage(msg);
       setFeedbackMessage(null);
-    } finally {
       setIsSocialSubmitting(false);
     }
   }
